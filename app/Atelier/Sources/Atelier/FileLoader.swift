@@ -1,0 +1,45 @@
+import Foundation
+
+enum FileContent: Equatable {
+    case text(String)
+    case binary
+    case tooLarge(Int)
+    case error(String)
+
+    var displayText: String {
+        switch self {
+        case .text(let text):
+            return text
+        case .binary:
+            return "Binary file. Preview is unavailable."
+        case .tooLarge(let bytes):
+            return "File is too large to preview (\(bytes) bytes)."
+        case .error(let message):
+            return "Could not read file: \(message)"
+        }
+    }
+}
+
+enum FileLoader {
+    static let defaultLimit = 2_000_000
+
+    static func load(url: URL, limit: Int = defaultLimit) -> FileContent {
+        do {
+            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            guard let size = values.fileSize else {
+                return .error("size is unavailable")
+            }
+            guard size <= limit else {
+                return .tooLarge(size)
+            }
+
+            let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+            guard !data.prefix(8_192).contains(0) else {
+                return .binary
+            }
+            return .text(String(decoding: data, as: UTF8.self))
+        } catch {
+            return .error(error.localizedDescription)
+        }
+    }
+}
