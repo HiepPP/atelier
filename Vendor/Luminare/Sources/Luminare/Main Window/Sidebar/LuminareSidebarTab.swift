@@ -63,7 +63,7 @@ public struct LuminareSidebarTab<Tab>: View where Tab: LuminareTabItem {
         .onAppear {
             processActiveTab()
         }
-        .onChange(of: activeTab) { _ in
+        .onChange(of: activeTab) { _, _ in
             processActiveTab()
         }
     }
@@ -149,7 +149,6 @@ private enum Tab: LuminareTabItem, CaseIterable, Identifiable {
     }
 }
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareSidebarTab",
     traits: .sizeThatFitsLayout

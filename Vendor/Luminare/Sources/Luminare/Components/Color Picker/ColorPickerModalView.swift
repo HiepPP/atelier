@@ -87,10 +87,10 @@ struct ColorPickerModalView: View {
             updateComponents(selectedColor)
             initialColor = selectedColor
         }
-        .onChange(of: selectedColor) { color in
+        .onChange(of: selectedColor) { _, color in
             updateComponents(color)
         }
-        .onChange(of: internalHSBColor) { newValue in
+        .onChange(of: internalHSBColor) { _, newValue in
             selectedColor = newValue.rgb
         }
         .animation(animationFast, value: internalHSBColor)
@@ -200,7 +200,9 @@ struct ColorPickerModalView: View {
         Button {
             colorSampler.show { nsColor in
                 if let nsColor {
-                    updateComponents(Color(nsColor: nsColor))
+                    Task { @MainActor in
+                        updateComponents(Color(nsColor: nsColor))
+                    }
                 }
             }
         } label: {
@@ -227,7 +229,6 @@ struct ColorPickerModalView: View {
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "ColorPickerModalView",
     traits: .sizeThatFitsLayout

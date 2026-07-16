@@ -141,7 +141,7 @@ public struct LuminareColorPicker<F>: View
                 }
             }
         }
-        .onChange(of: color) { _ in
+        .onChange(of: color) { _, _ in
             text = color.toHex()
         }
     }
@@ -150,7 +150,6 @@ public struct LuminareColorPicker<F>: View
 // MARK: - Previews
 
 // Preview as app
-@available(macOS 15.0, *)
 #Preview(
     "LuminareColorPicker",
     traits: .sizeThatFitsLayout

@@ -356,7 +356,6 @@ public extension View {
 
     // MARK: Form
 
-    @available(macOS 15.0, *)
     @ViewBuilder func luminareFormSpacing(_ spacing: CGFloat) -> some View {
         environment(\.luminareFormSpacing, spacing)
     }
@@ -418,12 +417,10 @@ public extension View {
 
     // MARK: Stepper
 
-    @available(macOS 15.0, *)
     @ViewBuilder func luminareStepperAlignment(_ alignment: LuminareStepperAlignment) -> some View {
         environment(\.luminareStepperAlignment, alignment)
     }
 
-    @available(macOS 15.0, *)
     @ViewBuilder func luminareStepperDirection(_ direction: LuminareStepperDirection) -> some View {
         environment(\.luminareStepperDirection, direction)
     }

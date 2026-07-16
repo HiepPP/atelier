@@ -1,11 +1,11 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 
 import PackageDescription
 
 let package = Package(
     name: "LuminareSpike",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v26)
     ],
     dependencies: [
         .package(path: "../../Vendor/Luminare"),
@@ -19,5 +19,6 @@ let package = Package(
                 .product(name: "SwiftUIIntrospect", package: "swiftui-introspect")
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

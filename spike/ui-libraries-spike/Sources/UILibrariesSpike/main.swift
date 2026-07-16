@@ -14,7 +14,7 @@ struct CompatibilityView: View {
         LuminareSection {
             TextView("SwiftUIX")
                 .editable(false)
-                .introspect(.scrollView, on: .macOS(.v13)) { _ in }
+                .introspect(.scrollView, on: .macOS(.v26)) { _ in }
                 .changeEffect(.shake, value: 0)
 
             KeyboardShortcuts.Recorder(

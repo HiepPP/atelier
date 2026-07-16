@@ -1,9 +1,9 @@
-// swift-tools-version:5.9
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "AtelierLibraryCompatibility",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v26)],
     dependencies: [
         .package(url: "https://github.com/SwiftUIX/SwiftUIX", exact: "0.3.1"),
         .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", exact: "3.0.1"),
@@ -22,5 +22,6 @@ let package = Package(
                 "Luminare"
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

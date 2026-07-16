@@ -143,32 +143,17 @@ public struct LuminareList<ContentA, ContentB, V, ID>: View
                         let roundedBottom = bottomCorner.isRounded(
                             hasFixedHeight: hasFixedHeight)
 
-                        Group {
-                            if #available(macOS 14.0, *) {
-                                LuminareListItem(
-                                    items: $items,
-                                    selection: $selection,
-                                    item: item,
-                                    firstItem: $firstItem,
-                                    lastItem: $lastItem,
-                                    roundedTop: roundedTop,
-                                    roundedBottom: roundedBottom,
-                                    content: content
-                                )
-                                .selectionDisabled(isDisabled)
-                            } else {
-                                LuminareListItem(
-                                    items: $items,
-                                    selection: $selection,
-                                    item: item,
-                                    firstItem: $firstItem,
-                                    lastItem: $lastItem,
-                                    roundedTop: roundedTop,
-                                    roundedBottom: roundedBottom,
-                                    content: content
-                                )
-                            }
-                        }
+                        LuminareListItem(
+                            items: $items,
+                            selection: $selection,
+                            item: item,
+                            firstItem: $firstItem,
+                            lastItem: $lastItem,
+                            roundedTop: roundedTop,
+                            roundedBottom: roundedBottom,
+                            content: content
+                        )
+                        .selectionDisabled(isDisabled)
                         .disabled(isDisabled)
                         .animation(animation, value: isDisabled)
                     }
@@ -196,7 +181,7 @@ public struct LuminareList<ContentA, ContentB, V, ID>: View
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .scrollDisabled(hasFixedHeight)
-                .introspect(.list, on: .macOS(.v13...)) { tableView in
+                .introspect(.list, on: .macOS(.v26)) { tableView in
                     tableView.selectionHighlightStyle = .none
                 }
                 .preference(key: DisableDividedStackInnerPaddingKey.self, value: true)
@@ -206,12 +191,12 @@ public struct LuminareList<ContentA, ContentB, V, ID>: View
         .frame(maxHeight: hasFixedHeight ? nil : fixedHeight)
         .animation(animation, value: items)
         .animation(animation, value: selection)
-        .onChange(of: luminareClickedOutside) { _ in
+        .onChange(of: luminareClickedOutside) { _, _ in
             withAnimation(animation) {
                 selection = []
             }
         }
-        .onChange(of: items) { _ in
+        .onChange(of: items) { _, _ in
             guard !items.isEmpty else {
                 selection = []
                 return
@@ -220,7 +205,7 @@ public struct LuminareList<ContentA, ContentB, V, ID>: View
             selection = selection.intersection(items)
             processSelection() // update first and last item
         }
-        .onChange(of: selection) { _ in
+        .onChange(of: selection) { _, _ in
             processSelection()
 
             if selection.isEmpty {
@@ -359,7 +344,7 @@ public struct LuminareListItem<Content, V>: View
                     .padding(.leading, 1) // it's nuanced
                 }
             }
-            .onChange(of: selection) { _ in
+            .onChange(of: selection) { _, _ in
                 guard isEnabled else { return }
                 withAnimation(animation) {
                     updateSelection()
@@ -621,7 +606,7 @@ private struct ListPreview<V>: View where V: Hashable & Comparable {
 
                 Button("Sort") {
                     withAnimation {
-                        items.sort(by: <)
+                        items.sort { $0 < $1 }
                     }
                 }
                 .disabled(items.isEmpty)
@@ -640,7 +625,7 @@ private struct ListPreview<V>: View where V: Hashable & Comparable {
                 selection: $selection,
                 id: \.self
             ) { value in
-                Text("\(value.wrappedValue)")
+                Text(String(describing: value.wrappedValue))
                     .contextMenu {
                         Button("Remove") {
                             if selection.isEmpty {
@@ -661,7 +646,6 @@ private struct ListPreview<V>: View where V: Hashable & Comparable {
     }
 }
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareList",
     traits: .sizeThatFitsLayout

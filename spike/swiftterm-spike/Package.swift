@@ -1,9 +1,9 @@
-// swift-tools-version:5.9
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "SwiftTermSpike",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v26)],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.14.0")
     ],
@@ -14,5 +14,6 @@ let package = Package(
                 .product(name: "SwiftTerm", package: "SwiftTerm")
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

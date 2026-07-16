@@ -87,7 +87,6 @@ public struct AutoScrollView<Content>: View where Content: View {
     }
 }
 
-@available(macOS 15.0, *)
 #Preview(
     "AutoScrollView",
     traits: .sizeThatFitsLayout

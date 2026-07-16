@@ -133,10 +133,10 @@ public struct LuminarePicker<Content, V>: View where Content: View, V: Equatable
             }
         }
         // this improves animation performance
-        .onChange(of: internalSelection) { _ in
+        .onChange(of: internalSelection) { _, _ in
             selectedItem = internalSelection
         }
-        .onChange(of: selectedItem) { _ in
+        .onChange(of: selectedItem) { _, _ in
             withAnimation(animation) {
                 internalSelection = selectedItem
             }
@@ -265,7 +265,6 @@ public struct LuminarePicker<Content, V>: View where Content: View, V: Equatable
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminarePicker",
     traits: .sizeThatFitsLayout

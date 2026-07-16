@@ -225,13 +225,12 @@ private struct PickerPreview<V>: View where V: Hashable & Equatable {
     var body: some View {
         LuminareCompactPicker(selection: $selection) {
             ForEach(elements, id: \.self) { element in
-                Text("\(element)")
+                Text(String(describing: element))
             }
         }
     }
 }
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareCompactPicker",
     traits: .sizeThatFitsLayout

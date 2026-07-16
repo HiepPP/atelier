@@ -8,7 +8,6 @@
 import SwiftUI
 
 /// The direction of a ``LuminareStepper``.
-@available(macOS 15.0, *)
 public enum LuminareStepperDirection: String, Equatable, Hashable, Identifiable, CaseIterable, Codable, Sendable {
     /// In left-to-right layouts, the larger values are right-sided.
     case horizontal

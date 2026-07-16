@@ -144,7 +144,6 @@ public struct LuminareTextField<Label, F>: View where Label: View, F: ParseableF
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareTextField",
     traits: .sizeThatFitsLayout

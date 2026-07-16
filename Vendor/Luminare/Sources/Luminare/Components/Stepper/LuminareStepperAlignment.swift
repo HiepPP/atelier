@@ -8,7 +8,6 @@
 import SwiftUI
 
 /// The indicator alignment of a ``LuminareStepper``.
-@available(macOS 15.0, *)
 public enum LuminareStepperAlignment: String, Equatable, Hashable, Identifiable, CaseIterable, Codable, Sendable {
     /// The indicators are of the equal lengths and expand to both edges.
     case none

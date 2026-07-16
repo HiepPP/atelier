@@ -2,9 +2,10 @@
 
 ## Project Structure & Module Organization
 
-Atelier is a macOS 13+ SwiftUI application built with Swift Package Manager.
+Atelier is a macOS 26+ SwiftUI application built with Swift 6.2 and Swift Package Manager.
 
 - `app/Atelier/Sources/Atelier/`: production Swift sources. Keep views, models, services, and AppKit bridges in focused files.
+- `app/Atelier/Tests/AtelierTests/`: focused tests for models, parsers, persistence, and services.
 - `app/Atelier/Packaging/`: application bundle metadata, including `Info.plist`.
 - `app/Atelier/script/` and `app/Atelier/scripts/`: build, install, signing, logging, and verification scripts.
 - `spike/swiftterm-spike/`: isolated SwiftTerm experiments. Do not add production behavior here.
@@ -19,13 +20,14 @@ Run commands from the repository root:
 
 ```bash
 swift build --package-path app/Atelier
+swift test --package-path app/Atelier
 app/Atelier/.build/debug/Atelier --selftest
 app/Atelier/script/build_and_run.sh run
 app/Atelier/script/build_and_run.sh --verify
 app/Atelier/scripts/build-app.sh release
 ```
 
-`swift build` compiles the package. `--selftest` checks persistence, file loading, Git parsing, and Git operations. The main script builds, signs, installs, and optionally verifies the app process. The release script creates `app/Atelier/dist/Atelier.app`.
+`swift build` compiles the package. `swift test` runs focused core tests. `--selftest` checks persistence, file loading, Git parsing, and Git operations. The main script builds, signs, installs, and optionally verifies the app process. The release script creates `app/Atelier/dist/Atelier.app`.
 
 ## Coding Style & Naming Conventions
 
@@ -35,7 +37,7 @@ Use `rg` for repository search. Do not add or use GitNexus metadata in this repo
 
 ## Testing Guidelines
 
-There is no separate XCTest target yet. Extend `SelfTest` in `AtelierApp.swift` for deterministic non-UI behavior. Every change must pass the build and self-test commands. UI changes also require a native app check at narrow and wide window sizes. Record exact failures and screenshots when relevant.
+Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swift` for packaged binary checks. Every change must pass build, tests, and self-test. UI changes also require native checks at narrow and wide window sizes. Record exact failures and screenshots when relevant.
 
 ## Commit & Pull Request Guidelines
 

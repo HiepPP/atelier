@@ -297,7 +297,7 @@ public struct LuminareSlider<Label, Content, V, F>: View
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { newValue in
             composeWidth = newValue
         }
-        .onChange(of: value) { _ in // If value changes externally, reflect that internally
+        .onChange(of: value) { _, _ in // If value changes externally, reflect that internally
             internalValue = value
         }
     }
@@ -358,7 +358,9 @@ public struct LuminareSlider<Label, Content, V, F>: View
                     .padding(.leading, -4)
                     .fontDesign(.monospaced)
                     .onSubmit(commit)
-                    .onChange(of: focusedField == .textbox) { if !$0 { commit() } }
+                    .onChange(of: focusedField == .textbox) {
+                        if focusedField != .textbox { commit() }
+                    }
                 } else {
                     Button {
                         withAnimation(animationFast) {
@@ -394,7 +396,7 @@ public struct LuminareSlider<Label, Content, V, F>: View
             }
         }
         .clipShape(.capsule)
-        .onChange(of: isTextBoxVisible) { _ in
+        .onChange(of: isTextBoxVisible) { _, _ in
             if isTextBoxVisible {
                 addEventMonitor()
             } else {
@@ -405,7 +407,7 @@ public struct LuminareSlider<Label, Content, V, F>: View
             removeEventMonitor()
         }
         .opacity(isEnabled ? 1 : 0.5)
-        .onChange(of: value) { value in
+        .onChange(of: value) { _, value in
             DispatchQueue.main.async {
                 lastValue = value
             }
@@ -485,7 +487,6 @@ public struct LuminareSlider<Label, Content, V, F>: View
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareSlider",
     traits: .sizeThatFitsLayout

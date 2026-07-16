@@ -142,7 +142,6 @@ public struct LuminareButton<Label, Content>: View where Label: View, Content: V
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareButton",
     traits: .sizeThatFitsLayout

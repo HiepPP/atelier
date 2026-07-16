@@ -1,9 +1,9 @@
-// swift-tools-version:5.9
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "Atelier",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v26)],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.14.0"),
         .package(url: "https://github.com/siteline/swiftui-introspect", exact: "26.0.1"),
@@ -24,7 +24,20 @@ let package = Package(
                 "Pow",
                 "STTextView",
                 "Luminare"
+            ],
+            swiftSettings: [
+                .defaultIsolation(MainActor.self),
+                .enableUpcomingFeature("NonisolatedNonsendingByDefault")
+            ]
+        ),
+        .testTarget(
+            name: "AtelierTests",
+            dependencies: ["Atelier"],
+            swiftSettings: [
+                .defaultIsolation(MainActor.self),
+                .enableUpcomingFeature("NonisolatedNonsendingByDefault")
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v6]
 )

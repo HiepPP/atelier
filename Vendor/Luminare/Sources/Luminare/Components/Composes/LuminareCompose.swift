@@ -9,7 +9,6 @@ import SwiftUI
 
 public enum LuminareComposeControlSize: String, Equatable, Hashable, Identifiable, CaseIterable, Codable, Sendable {
     case automatic
-    @available(macOS 14.0, *)
     case extraLarge
     case large
     case regular
@@ -17,33 +16,19 @@ public enum LuminareComposeControlSize: String, Equatable, Hashable, Identifiabl
     case mini
 
     public static var allCases: [LuminareComposeControlSize] {
-        if #available(macOS 14.0, *) {
-            [.automatic, .extraLarge, .large, .regular, .small, .mini]
-        } else {
-            [.automatic, .large, .regular, .small, .mini]
-        }
+        [.automatic, .extraLarge, .large, .regular, .small, .mini]
     }
 
     public var id: Self { self }
 
     public var proposal: ControlSize? {
-        if #available(macOS 14.0, *) {
-            switch self {
-            case .extraLarge: .extraLarge
-            case .large: .large
-            case .regular: .regular
-            case .small: .small
-            case .mini: .mini
-            default: nil
-            }
-        } else {
-            switch self {
-            case .large: .large
-            case .regular: .regular
-            case .small: .small
-            case .mini: .mini
-            default: nil
-            }
+        switch self {
+        case .extraLarge: .extraLarge
+        case .large: .large
+        case .regular: .regular
+        case .small: .small
+        case .mini: .mini
+        default: nil
         }
     }
 }
@@ -196,7 +181,6 @@ struct LuminareComposeIgnoreSafeAreaEdgesKey: PreferenceKey {
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareCompose",
     traits: .sizeThatFitsLayout
@@ -220,7 +204,6 @@ struct LuminareComposeIgnoreSafeAreaEdgesKey: PreferenceKey {
     .luminareComposeStyle(.inline)
 }
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareCompose (Constrained)",
     traits: .sizeThatFitsLayout

@@ -66,7 +66,6 @@ public struct LuminareToggle<Label>: View where Label: View {
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareToggle",
     traits: .sizeThatFitsLayout

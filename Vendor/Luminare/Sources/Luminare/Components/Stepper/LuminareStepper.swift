@@ -8,7 +8,6 @@
 import SwiftUI
 
 /// A custom delegate to customize any indicators of a ``LuminareStepper``.
-@available(macOS 15.0, *)
 public struct LuminareStepperProminentIndicators<V>
     where V: Strideable & BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
     @ViewBuilder let color: (V) -> Color?
@@ -43,7 +42,6 @@ public struct LuminareStepperProminentIndicators<V>
 // MARK: - Stepper
 
 /// A stylized, abstract stepper that provides vague yet elegant control to numeric values.
-@available(macOS 15.0, *)
 public struct LuminareStepper<V>: View where V: Strideable & BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
     public typealias Source = LuminareStepperSource<V>
     public typealias ProminentIndicators = LuminareStepperProminentIndicators<V>
@@ -500,7 +498,6 @@ public struct LuminareStepper<V>: View where V: Strideable & BinaryFloatingPoint
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 private struct StepperPreview<Label, V>: View
     where Label: View, V: Strideable & BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
     @State var value: V
@@ -535,7 +532,6 @@ private struct StepperPreview<Label, V>: View
     }
 }
 
-@available(macOS 15.0, *)
 private struct StepperPopoverPreview: View {
     @State private var isPresented: Bool = false
     @State private var value: CGFloat = 42
@@ -565,7 +561,6 @@ private struct StepperPopoverPreview: View {
     }
 }
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareStepper",
     traits: .sizeThatFitsLayout

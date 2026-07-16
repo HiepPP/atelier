@@ -56,7 +56,7 @@ struct ColorHueSliderView: View {
                 .offset(x: selectionOffset, y: 0)
                 .foregroundColor(.white)
                 .shadow(radius: 3)
-                .onChange(of: selectionPosition) { position in
+                .onChange(of: selectionPosition) { _, position in
                     withAnimation(animation) {
                         selectionOffset = calculateOffset(
                             handleWidth: handleWidth(at: position, geo.size.width),
@@ -82,7 +82,7 @@ struct ColorHueSliderView: View {
                 selectionWidth = handleWidth(at: selectionPosition, geo.size.width)
                 selectionCornerRadius = handleCornerRadius(at: selectionPosition, geo.size.width)
             }
-            .onChange(of: selectedColor) { color in
+            .onChange(of: selectedColor) { _, color in
                 selectionPosition = color.hue * geo.size.width
             }
         }
@@ -128,7 +128,6 @@ struct ColorHueSliderView: View {
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview("ColorHueSliderView") {
     @Previewable @State var color: HSBColor = Color.accentColor.hsb
 

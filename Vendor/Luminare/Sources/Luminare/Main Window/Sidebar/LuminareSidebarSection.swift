@@ -161,7 +161,6 @@ private enum Tab: LuminareTabItem, CaseIterable, Identifiable {
     }
 }
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareSidebarSection",
     traits: .sizeThatFitsLayout

@@ -10,7 +10,6 @@ import SwiftUI
 // MARK: - All
 
 #if DEBUG
-    @available(macOS 15.0, *)
     #Preview(
         "LuminareButtonStyles",
         traits: .sizeThatFitsLayout
@@ -106,7 +105,6 @@ import SwiftUI
 // MARK: - LuminareButtonStyle
 
 #if DEBUG
-    @available(macOS 15.0, *)
     #Preview(
         "LuminareButtonStyle",
         traits: .sizeThatFitsLayout
@@ -120,7 +118,6 @@ import SwiftUI
 // MARK: - LuminareProminentButtonStyle
 
 #if DEBUG
-    @available(macOS 15.0, *)
     #Preview(
         "LuminareProminentButtonStyle",
         traits: .sizeThatFitsLayout
@@ -138,7 +135,6 @@ import SwiftUI
 // MARK: - LuminareCosmeticButtonStyle
 
 #if DEBUG
-    @available(macOS 15.0, *)
     #Preview(
         "LuminareCosmeticButtonStyle",
         traits: .sizeThatFitsLayout
@@ -196,7 +192,6 @@ import SwiftUI
 // MARK: - LuminareCompactButtonStyle
 
 #if DEBUG
-    @available(macOS 15.0, *)
     #Preview(
         "LuminareCompactButtonStyle",
         traits: .sizeThatFitsLayout
@@ -211,7 +206,6 @@ import SwiftUI
 // MARK: - LuminareBordered
 
 #if DEBUG
-    @available(macOS 15.0, *)
     #Preview(
         "LuminareBordered",
         traits: .sizeThatFitsLayout
@@ -227,7 +221,6 @@ import SwiftUI
 // MARK: - LuminareHoverable
 
 #if DEBUG
-    @available(macOS 15.0, *)
     #Preview(
         "LuminareHoverable",
         traits: .sizeThatFitsLayout

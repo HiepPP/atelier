@@ -8,7 +8,6 @@
 import SwiftUI
 
 /// Specifies how a ``LuminareStepper`` ranges and snaps its value.
-@available(macOS 15.0, *)
 public enum LuminareStepperSource<V> where V: Strideable & BinaryFloatingPoint, V.Stride: BinaryFloatingPoint {
     /// The value is finely ranged and strideable.
     ///

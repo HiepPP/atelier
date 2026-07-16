@@ -66,7 +66,6 @@ public struct LuminareSidebar<Content>: View where Content: View {
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareSidebar",
     traits: .sizeThatFitsLayout

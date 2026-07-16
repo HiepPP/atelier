@@ -439,7 +439,6 @@ private struct PopupContent: View {
 }
 
 // Preview as app
-@available(macOS 15.0, *)
 #Preview {
     @Previewable @State var isPresented = false
 

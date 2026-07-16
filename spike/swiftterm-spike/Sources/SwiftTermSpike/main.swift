@@ -5,6 +5,7 @@ import SwiftTerm
 // Muc tieu: verify build, launch, spawn shell, resize, copy/paste, mau co ban.
 // Chua tich hop vao main app.
 
+@MainActor
 final class TerminalWindowController {
     let window: NSWindow
     let terminal: LocalProcessTerminalView
@@ -46,6 +47,7 @@ final class TerminalWindowController {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var controller: TerminalWindowController?
 
@@ -62,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 // --- Self-test: verify resize + color + copy qua SwiftTerm API, khong can GUI ---
 // Feed truc tiep vao Terminal model (dong bo), doc lai buffer -> bang chung that.
+@MainActor
 func runSelfTest() -> Never {
     _ = NSApplication.shared            // load AppKit, khong goi run()
     let view = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 900, height: 560))

@@ -45,11 +45,11 @@ public struct BooleanThrottleDebouncedModifier: ViewModifier {
                     action(debouncedValue)
                 }
             }
-            .onChange(of: value) { newValue in
+            .onChange(of: value) { _, newValue in
                 updatedValue = newValue
                 flip(to: newValue)
             }
-            .onChange(of: debouncedValue) { newValue in
+            .onChange(of: debouncedValue) { _, newValue in
                 action(newValue)
             }
     }
@@ -90,7 +90,6 @@ public struct BooleanThrottleDebouncedModifier: ViewModifier {
     }
 }
 
-@available(macOS 15.0, *)
 #Preview {
     @Previewable @State var isHovering = false
     @Previewable @State var debouncedIsHovering = false

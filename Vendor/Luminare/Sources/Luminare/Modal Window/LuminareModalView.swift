@@ -192,7 +192,7 @@ struct LuminareModalModifier<ModalContent>: ViewModifier
         switch style {
         case .sheet:
             content
-                .onChange(of: isPresented) { newValue in
+                .onChange(of: isPresented) { _, newValue in
                     if newValue {
                         presentSheet()
                     } else {
@@ -276,7 +276,6 @@ private struct ModalContent: View {
 }
 
 // preview as app
-@available(macOS 15.0, *)
 #Preview {
     @Previewable @State var isPresented1 = false
     @Previewable @State var isPresented2 = false

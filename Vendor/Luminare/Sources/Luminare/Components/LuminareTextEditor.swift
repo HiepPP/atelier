@@ -35,7 +35,6 @@ public struct LuminareTextEditor: View {
         self._selection = .constant(nil)
     }
 
-    @available(macOS 15.0, *)
     public init(
         text: Binding<String>,
         selection: Binding<TextSelection?>
@@ -56,17 +55,8 @@ public struct LuminareTextEditor: View {
 
     public var body: some View {
         ScrollView {
-            Group {
-                if #available(macOS 15.0, *) {
-                    TextEditor(text: $text, selection: strongTypedSelection)
-                        .textEditorStyle(.plain)
-                } else if #available(macOS 14.0, *) {
-                    TextEditor(text: $text)
-                        .textEditorStyle(.plain)
-                } else {
-                    TextEditor(text: $text)
-                }
-            }
+            TextEditor(text: $text, selection: strongTypedSelection)
+                .textEditorStyle(.plain)
             .scrollDisabled(true)
             .padding(.horizontal, horizontalPadding)
             .padding(.vertical, 14)
@@ -84,7 +74,6 @@ public struct LuminareTextEditor: View {
         }
     }
 
-    @available(macOS 15.0, *)
     private var strongTypedSelection: Binding<TextSelection?> {
         Binding {
             if let value = selection as? TextSelection? {
@@ -100,7 +89,6 @@ public struct LuminareTextEditor: View {
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareTextEditor",
     traits: .sizeThatFitsLayout

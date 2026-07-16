@@ -35,10 +35,7 @@ public class LuminareTrafficLightedWindow<Content>: NSWindow, ObservableObject w
         titleVisibility = .hidden
 
         let toolbar = NSToolbar()
-        toolbar.showsBaselineSeparator = false
-        if #available(macOS 15.0, *) {
-            toolbar.allowsDisplayModeCustomization = false
-        }
+        toolbar.allowsDisplayModeCustomization = false
         self.toolbar = toolbar
 
         displayIfNeeded()

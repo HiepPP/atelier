@@ -50,7 +50,7 @@ struct LuminareTrafficLightedWindowView<Content>: View where Content: View {
             .background {
                 GeometryReader { proxy in
                     Color.clear
-                        .onChange(of: proxy.size) { _ in
+                        .onChange(of: proxy.size) { _, _ in
                             floatingPanel.updateShadow(for: 0.5)
                         }
                 }

@@ -9,7 +9,6 @@ import SwiftUI
 
 public enum LuminarePaneLayout: Equatable, Hashable, Codable, Sendable {
     case none
-    @available(macOS 15.0, *)
     case form
     case stacked(spacing: CGFloat = 15)
 
@@ -100,13 +99,11 @@ public struct LuminarePane<Header, Content>: View where Header: View, Content: V
                 case .none:
                     content()
                 case .form:
-                    if #available(macOS 15.0, *) {
-                        Form {
-                            content()
-                        }
-                        .formStyle(.luminare)
-                        .clipped()
+                    Form {
+                        content()
                     }
+                    .formStyle(.luminare)
+                    .clipped()
                 case let .stacked(spacing):
                     AutoScrollView(showsIndicators: false) {
                         LazyVStack(alignment: .leading, spacing: spacing) {
@@ -151,7 +148,6 @@ struct TabHeaderButtonStyle: ButtonStyle {
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminarePane",
     traits: .sizeThatFitsLayout

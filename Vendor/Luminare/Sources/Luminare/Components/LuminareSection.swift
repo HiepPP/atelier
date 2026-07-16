@@ -134,7 +134,6 @@ public struct LuminareSection<Header, Content, Footer>: View where Header: View,
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareSection",
     traits: .sizeThatFitsLayout

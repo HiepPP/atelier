@@ -280,7 +280,7 @@ private struct ForceTouchPreview<Content>: View where Content: View {
     var body: some View {
         content()
             .modifier(ForceTouchModifier(threshold: threshold, gesture: $gesture))
-            .onChange(of: gesture) { gesture in
+            .onChange(of: gesture) { _, gesture in
                 print(gesture)
             }
             .background {

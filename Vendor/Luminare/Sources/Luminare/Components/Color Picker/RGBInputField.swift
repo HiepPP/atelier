@@ -23,42 +23,31 @@ struct RGBInputField<Label>: View where Label: View {
             label()
                 .foregroundStyle(.secondary)
 
-            if #available(macOS 15.0, *) {
-                LuminareTextField(
-                    "", value: .init($value),
-                    format: .number.precision(.integerAndFractionLength(
-                        integerLimits: 1...3,
-                        fractionLimits: 0...2
-                    ))
+            LuminareTextField(
+                "", value: .init($value),
+                format: .number.precision(.integerAndFractionLength(
+                    integerLimits: 1...3,
+                    fractionLimits: 0...2
+                ))
+            )
+            .luminarePopover(arrowEdge: .top) {
+                LuminareStepper(
+                    value: $value,
+                    source: .finiteContinuous(in: 0...255, step: 5),
+                    indicatorSpacing: 20,
+                    prominentIndicators: .init(color: color)
                 )
-                .luminarePopover(arrowEdge: .top) {
-                    LuminareStepper(
-                        value: $value,
-                        source: .finiteContinuous(in: 0...255, step: 5),
-                        indicatorSpacing: 20,
-                        prominentIndicators: .init(color: color)
-                    )
-                    .frame(width: 135, height: 32)
-                    .padding(.vertical, 2)
-                    .luminareTint(overridingWith: .primary)
-                }
-                .luminarePopoverTrigger(.forceTouch())
-            } else {
-                LuminareTextField(
-                    "", value: .init($value),
-                    format: .number.precision(.integerAndFractionLength(
-                        integerLimits: 1...3,
-                        fractionLimits: 0...2
-                    ))
-                )
+                .frame(width: 135, height: 32)
+                .padding(.vertical, 2)
+                .luminareTint(overridingWith: .primary)
             }
+            .luminarePopoverTrigger(.forceTouch())
         }
     }
 }
 
 // MARK: - Previews
 
-@available(macOS 15.0, *)
 #Preview("RGBInputField") {
     @Previewable @State var value: Double = 42
 

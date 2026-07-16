@@ -6,7 +6,3 @@
 //
 
 import SwiftUI
-
-extension GeometryProxy: @retroactive @unchecked Sendable {
-    // Make it sendable
-}

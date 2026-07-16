@@ -8,7 +8,6 @@
 import SwiftUI
 import VariadicViews
 
-@available(macOS 15.0, *)
 public struct LuminareFormStyle: FormStyle {
     @Environment(\.luminareFormSpacing) private var spacing
 
@@ -40,7 +39,6 @@ public struct LuminareFormStyle: FormStyle {
     }
 }
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareFormStyle",
     traits: .sizeThatFitsLayout

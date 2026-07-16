@@ -71,7 +71,7 @@ struct ColorSaturationBrightnessView: View {
             .onAppear {
                 updateCirclePositionFromColor(geo.size)
             }
-            .onChange(of: selectedColor) { _ in
+            .onChange(of: selectedColor) { _, _ in
                 if !isDragging {
                     updateCirclePositionFromColor(geo.size)
                 }
@@ -153,7 +153,6 @@ struct ColorPickerCircle: View {
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview("ColorSaturationBrightnessView") {
     @Previewable @State var color: HSBColor = Color.accentColor.hsb
 

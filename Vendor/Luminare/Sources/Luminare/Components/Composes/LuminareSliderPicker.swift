@@ -362,7 +362,7 @@ public struct LuminareSliderPicker<Label, Content, V>: View where Label: View, C
                 }
             }
             .clipShape(.capsule)
-            .onChange(of: selection) { value in
+            .onChange(of: selection) { _, value in
                 DispatchQueue.main.async {
                     lastSelection = value
                 }
@@ -372,7 +372,6 @@ public struct LuminareSliderPicker<Label, Content, V>: View where Label: View, C
 
 // MARK: - Preview
 
-@available(macOS 15.0, *)
 #Preview(
     "LuminareSliderPicker",
     traits: .sizeThatFitsLayout

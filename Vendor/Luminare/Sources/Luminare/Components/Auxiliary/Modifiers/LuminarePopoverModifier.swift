@@ -112,7 +112,7 @@ public struct LuminarePopoverModifier<PopoverContent>: ViewModifier where Popove
                 content
                     .modifier(ForceTouchModifier(threshold: threshold, gesture: $forceTouchGesture))
                     .padding(padding)
-                    .onChange(of: forceTouchGesture) { gesture in
+                    .onChange(of: forceTouchGesture) { _, gesture in
                         handleForceTouchTrigger(gesture: gesture)
                         onGesture?(gesture, forceTouchRecognized)
                     }

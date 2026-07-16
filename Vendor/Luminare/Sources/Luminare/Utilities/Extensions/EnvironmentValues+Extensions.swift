@@ -83,7 +83,6 @@ public extension EnvironmentValues {
 
     // MARK: Form
 
-    @available(macOS 15.0, *)
     @Entry var luminareFormSpacing: CGFloat = 15
 
     // MARK: Pane
@@ -111,9 +110,7 @@ public extension EnvironmentValues {
 
     // MARK: Stepper
 
-    @available(macOS 15.0, *)
     @Entry var luminareStepperAlignment: LuminareStepperAlignment = .trailing
-    @available(macOS 15.0, *)
     @Entry var luminareStepperDirection: LuminareStepperDirection = .horizontal
 
     // MARK: Compact Picker
