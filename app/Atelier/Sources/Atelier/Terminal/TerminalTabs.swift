@@ -88,6 +88,12 @@ final class TerminalTabsModel {
         tabs.first { $0.id == selectedID }
     }
 
+    fileprivate var selectedEditor: EditorSession? {
+        guard let selectedTab,
+              case .file(let editor) = selectedTab.content else { return nil }
+        return editor
+    }
+
     var terminalCount: Int {
         tabs.reduce(into: 0) { count, tab in
             if case .terminal = tab.content {
@@ -180,15 +186,25 @@ private struct RenameActiveTabKey: FocusedValueKey {
     typealias Value = () -> Void
 }
 
+private struct ToggleWordWrapKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
 extension FocusedValues {
     var renameActiveTab: (() -> Void)? {
         get { self[RenameActiveTabKey.self] }
         set { self[RenameActiveTabKey.self] = newValue }
     }
+
+    var toggleWordWrap: (() -> Void)? {
+        get { self[ToggleWordWrapKey.self] }
+        set { self[ToggleWordWrapKey.self] = newValue }
+    }
 }
 
 struct AtelierTabCommands: Commands {
     @FocusedValue(\.renameActiveTab) private var renameActiveTab
+    @FocusedValue(\.toggleWordWrap) private var toggleWordWrap
 
     var body: some Commands {
         CommandGroup(after: .toolbar) {
@@ -197,6 +213,12 @@ struct AtelierTabCommands: Commands {
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
             .disabled(renameActiveTab == nil)
+
+            Button("Toggle Word Wrap") {
+                toggleWordWrap?()
+            }
+            .keyboardShortcut("z", modifiers: .option)
+            .disabled(toggleWordWrap == nil)
         }
     }
 }
@@ -330,6 +352,23 @@ struct TerminalTabs: View {
                 .atelierNewTerminalEffect(sessionCount: model.terminalCount)
                 .help("New terminal")
 
+                if let editor = model.selectedEditor {
+                    Button {
+                        editor.toggleWordWrap()
+                    } label: {
+                        Image(
+                            systemName: editor.isWordWrapEnabled
+                                ? "text.word.spacing"
+                                : "arrow.left.and.right"
+                        )
+                    }
+                    .buttonStyle(AtelierLuminareIconButtonStyle())
+                    .help(editor.isWordWrapEnabled ? "Disable Word Wrap" : "Enable Word Wrap")
+                    .accessibilityLabel(
+                        editor.isWordWrapEnabled ? "Disable Word Wrap" : "Enable Word Wrap"
+                    )
+                }
+
                 Image(systemName: "ellipsis")
                     .atelierFont(size: 11, weight: .medium)
                     .foregroundStyle(.secondary)
@@ -378,6 +417,7 @@ struct TerminalTabs: View {
             guard let selectedID = model.selectedID else { return }
             beginRename(selectedID)
         }
+        .focusedSceneValue(\.toggleWordWrap, toggleWordWrapAction)
         .sheet(isPresented: renameSheetPresented) {
             TabRenameSheet(currentTitle: renameTargetTitle) { title in
                 guard let renameTargetID else { return }
@@ -396,6 +436,11 @@ struct TerminalTabs: View {
                 if !isPresented { renameTargetID = nil }
             }
         )
+    }
+
+    private var toggleWordWrapAction: (() -> Void)? {
+        guard let editor = model.selectedEditor else { return nil }
+        return { editor.toggleWordWrap() }
     }
 
     private var renameTargetTitle: String {
@@ -431,7 +476,11 @@ private struct FileTabView: View {
     let file: EditorSession
 
     var body: some View {
-        FileViewer(content: file.content, fileURL: file.document.url)
+        FileViewer(
+            content: file.content,
+            fileURL: file.document.url,
+            isWordWrapEnabled: file.isWordWrapEnabled
+        )
     }
 }
 

@@ -30,7 +30,6 @@ APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 INFO_PLIST_SOURCE="$ROOT_DIR/Packaging/Info.plist"
 ICONSET_SOURCE="$ROOT_DIR/Resources/AppIcon.iconset"
-ICON_SOURCE="$ROOT_DIR/Resources/AppIcon.icns"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
@@ -99,25 +98,18 @@ if [[ ! -f "$INFO_PLIST_SOURCE" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$ICON_SOURCE" && ! -d "$ICONSET_SOURCE" ]]; then
-  echo "App icon source not found: $ICON_SOURCE" >&2
+if [[ ! -d "$ICONSET_SOURCE" ]]; then
+  echo "App icon source not found: $ICONSET_SOURCE" >&2
   exit 1
 fi
 
-if [[ -d "$ICONSET_SOURCE" ]]; then
-  iconutil -c icns "$ICONSET_SOURCE" -o "$ICON_SOURCE"
-fi
-
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
+iconutil -c icns "$ICONSET_SOURCE" -o "$APP_RESOURCES/AppIcon.icns"
 cp -f "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
 for bundle in "${RESOURCE_BUNDLES[@]}"; do
   ditto "$BUILD_DIR/$bundle" "$APP_RESOURCES/$bundle"
 done
-
-if [[ -f "$ICON_SOURCE" ]]; then
-  cp -f "$ICON_SOURCE" "$APP_RESOURCES/AppIcon.icns"
-fi
 
 cp -f "$INFO_PLIST_SOURCE" "$INFO_PLIST"
 

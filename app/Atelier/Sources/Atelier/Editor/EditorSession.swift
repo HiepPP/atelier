@@ -6,6 +6,7 @@ import Observation
 final class EditorSession {
     let document: EditorDocument
     private(set) var content: FileContent = .loading
+    var isWordWrapEnabled = true
     private var loadTask: Task<Void, Never>?
 
     init(url: URL) {
@@ -27,6 +28,10 @@ final class EditorSession {
     func close() {
         loadTask?.cancel()
         loadTask = nil
+    }
+
+    func toggleWordWrap() {
+        isWordWrapEnabled.toggle()
     }
 
     isolated deinit {

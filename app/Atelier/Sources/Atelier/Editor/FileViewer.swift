@@ -17,11 +17,18 @@ struct FileViewer: NSViewRepresentable {
     let content: FileContent
     let fileURL: URL?
     let language: HighlightLanguage?
+    let isWordWrapEnabled: Bool
 
-    init(content: FileContent, fileURL: URL? = nil, language: HighlightLanguage? = nil) {
+    init(
+        content: FileContent,
+        fileURL: URL? = nil,
+        language: HighlightLanguage? = nil,
+        isWordWrapEnabled: Bool = true
+    ) {
         self.content = content
         self.fileURL = fileURL
         self.language = language ?? fileURL.flatMap(FileViewerLanguage.language(for:))
+        self.isWordWrapEnabled = isWordWrapEnabled
     }
 
     func makeCoordinator() -> NativeEditorController {
@@ -64,7 +71,8 @@ struct FileViewer: NSViewRepresentable {
             content: content,
             fileURL: fileURL,
             language: language,
-            scale: scale
+            scale: scale,
+            isWordWrapEnabled: isWordWrapEnabled
         )
     }
 
@@ -85,6 +93,7 @@ struct FileViewer: NSViewRepresentable {
         private var language: HighlightLanguage?
         private var renderedLanguage: String?
         private var renderedScale: CGFloat = 0
+        private var renderedWordWrapEnabled: Bool?
         private var highlightGeneration = 0
         private var highlightTask: Task<Void, Never>?
         private var saveGeneration = 0
@@ -104,11 +113,13 @@ struct FileViewer: NSViewRepresentable {
             content: FileContent,
             fileURL: URL?,
             language: HighlightLanguage?,
-            scale: CGFloat
+            scale: CGFloat,
+            isWordWrapEnabled: Bool
         ) {
             let contentChanged = renderedContent != content
                 || renderedLanguage != language?.rawValue
             let scaleChanged = renderedScale != scale
+            let wordWrapChanged = renderedWordWrapEnabled != isWordWrapEnabled
             self.fileURL = fileURL
             if let fileURL {
                 open(EditorDocument(url: fileURL))
@@ -117,9 +128,13 @@ struct FileViewer: NSViewRepresentable {
             }
             self.language = language
             renderedScale = scale
+            renderedWordWrapEnabled = isWordWrapEnabled
             textView?.isEditable = fileURL != nil && content.isEditableText
             textView?.allowsUndo = textView?.isEditable == true
 
+            if wordWrapChanged {
+                applyWordWrap(isEnabled: isWordWrapEnabled)
+            }
             if scaleChanged {
                 applyFont()
             }
@@ -336,6 +351,21 @@ struct FileViewer: NSViewRepresentable {
                 ofSize: 10.5 * renderedScale,
                 weight: .regular
             )
+        }
+
+        @MainActor
+        private func applyWordWrap(isEnabled: Bool) {
+            guard let scrollView, let textView else { return }
+            textView.isHorizontallyResizable = !isEnabled
+            scrollView.hasHorizontalScroller = !isEnabled
+            if isEnabled {
+                scrollView.contentView.scroll(
+                    to: NSPoint(x: 0, y: scrollView.contentView.bounds.minY)
+                )
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+            textView.needsLayout = true
+            textView.needsDisplay = true
         }
 
         @MainActor
