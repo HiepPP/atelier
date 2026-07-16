@@ -10,6 +10,7 @@ final class WorkspaceSession {
     let gitModel: GitWorkspaceModel
     private(set) var fileTreeRevision = 0
 
+    private let fileTreeService = FileTreeService()
     private var fileWatcher: FileWatcher?
     private var isStarted = false
 
@@ -43,6 +44,19 @@ final class WorkspaceSession {
         gitModel.stop()
         terminalTabs.closeAll()
         AppLogger.workspace.info("Stopped workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
+    }
+
+    func createFile(named name: String, in directory: URL) async throws {
+        let url = try await fileTreeService.createFile(named: name, in: directory)
+        fileTreeRevision &+= 1
+        terminalTabs.openFile(url)
+        AppLogger.fileTree.info("Created file: \(url.lastPathComponent, privacy: .public)")
+    }
+
+    func createFolder(named name: String, in directory: URL) async throws {
+        let url = try await fileTreeService.createFolder(named: name, in: directory)
+        fileTreeRevision &+= 1
+        AppLogger.fileTree.info("Created folder: \(url.lastPathComponent, privacy: .public)")
     }
 
     isolated deinit {

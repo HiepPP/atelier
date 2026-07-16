@@ -4,7 +4,7 @@ Atelier is a native macOS IDE for browsing, editing, running, and reviewing a lo
 
 ## Features
 
-- Lazy native file tree with ignored-path filtering.
+- Lazy native file tree with ignored-path filtering and inline item creation.
 - Editable, syntax-highlighted file tabs with per-file word wrapping.
 - Embedded multi-tab SwiftTerm terminals.
 - Git status, diff, staging, commit, and branch controls.

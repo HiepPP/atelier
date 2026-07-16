@@ -2,11 +2,20 @@ import Foundation
 
 nonisolated enum FileTreeServiceError: LocalizedError, Sendable {
     case read(path: String, message: String)
+    case invalidName(String)
+    case alreadyExists(String)
+    case create(path: String, message: String)
 
     var errorDescription: String? {
         switch self {
         case .read(let path, let message):
             "Could not read \(path): \(message)"
+        case .invalidName(let name):
+            "\"\(name)\" is not a valid file or folder name."
+        case .alreadyExists(let path):
+            "An item already exists at \(path)."
+        case .create(let path, let message):
+            "Could not create \(path): \(message)"
         }
     }
 }
@@ -41,5 +50,54 @@ actor FileTreeService {
                 $1.url.lastPathComponent
             ) == .orderedAscending
         }
+    }
+
+    func createFile(named name: String, in directory: URL) throws -> URL {
+        let url = try destination(named: name, in: directory, isDirectory: false)
+        do {
+            try Data().write(to: url, options: .withoutOverwriting)
+            return url
+        } catch {
+            throw FileTreeServiceError.create(
+                path: url.path,
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    func createFolder(named name: String, in directory: URL) throws -> URL {
+        let url = try destination(named: name, in: directory, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: url,
+                withIntermediateDirectories: false
+            )
+            return url
+        } catch {
+            throw FileTreeServiceError.create(
+                path: url.path,
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    private func destination(
+        named name: String,
+        in directory: URL,
+        isDirectory: Bool
+    ) throws -> URL {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty,
+              cleanName != ".",
+              cleanName != "..",
+              !cleanName.contains("/") else {
+            throw FileTreeServiceError.invalidName(name)
+        }
+
+        let url = directory.appendingPathComponent(cleanName, isDirectory: isDirectory)
+        guard !FileManager.default.fileExists(atPath: url.path) else {
+            throw FileTreeServiceError.alreadyExists(url.path)
+        }
+        return url
     }
 }

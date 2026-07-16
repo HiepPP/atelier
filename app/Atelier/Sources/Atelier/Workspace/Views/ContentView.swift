@@ -81,6 +81,8 @@ struct WorkspaceView: View {
     let session: WorkspaceSession
     @Environment(AppModel.self) private var app
     @Environment(AtelierZoomModel.self) private var zoom
+    @State private var fileTreeCreationRequest: FileTreeCreationRequest?
+    @State private var fileTreeTargetDirectory: URL?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -213,20 +215,62 @@ struct WorkspaceView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    app.chooseWorkspace()
+                    fileTreeCreationRequest = FileTreeCreationRequest(
+                        kind: .file,
+                        parentURL: fileTreeTargetDirectory ?? workspaceURL
+                    )
+                } label: {
+                    Image(systemName: "doc.badge.plus")
+                }
+                .buttonStyle(AtelierLuminareIconButtonStyle())
+                .help("New file")
+
+                Button {
+                    fileTreeCreationRequest = FileTreeCreationRequest(
+                        kind: .folder,
+                        parentURL: fileTreeTargetDirectory ?? workspaceURL
+                    )
                 } label: {
                     Image(systemName: "folder.badge.plus")
                 }
                 .buttonStyle(AtelierLuminareIconButtonStyle())
-                .help("Change folder")
+                .help("New folder")
             }
             .padding(.horizontal, 12)
             .frame(height: 36)
             .environment(\.atelierZoomScale, zoom.sidebarScale)
 
-            FileTreeView(rootURL: workspaceURL, revision: session.fileTreeRevision) { url in
-                terminalTabs.openFile(url)
+            if let request = fileTreeCreationRequest {
+                ExplorerInlineCreationRow(
+                    request: request,
+                    workspaceURL: workspaceURL,
+                    onCreate: { name in
+                        switch request.kind {
+                        case .file:
+                            try await session.createFile(named: name, in: request.parentURL)
+                        case .folder:
+                            try await session.createFolder(named: name, in: request.parentURL)
+                        }
+                    },
+                    onCancel: { fileTreeCreationRequest = nil },
+                    onCreated: { fileTreeCreationRequest = nil }
+                )
+                .id(request.id)
+                .environment(\.atelierZoomScale, zoom.sidebarScale)
             }
+
+            FileTreeView(
+                rootURL: workspaceURL,
+                revision: session.fileTreeRevision,
+                onTargetDirectoryChange: { fileTreeTargetDirectory = $0 },
+                onCreateItem: { kind, parentURL in
+                    fileTreeCreationRequest = FileTreeCreationRequest(
+                        kind: kind,
+                        parentURL: parentURL
+                    )
+                },
+                onSelect: terminalTabs.openFile
+            )
             .environment(\.atelierZoomScale, zoom.sidebarScale)
         }
         .background(AtelierTheme.sidebar)
@@ -290,5 +334,97 @@ struct WorkspaceView: View {
                 .fill(AtelierTheme.border)
                 .frame(height: 0.5)
         }
+    }
+}
+
+private struct ExplorerInlineCreationRow: View {
+    let request: FileTreeCreationRequest
+    let workspaceURL: URL
+    let onCreate: (String) async throws -> Void
+    let onCancel: () -> Void
+    let onCreated: () -> Void
+
+    @State private var name = ""
+    @State private var errorMessage: String?
+    @State private var creationTask: Task<Void, Never>?
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: request.kind.systemImage)
+                    .atelierFont(size: 11, weight: .medium)
+                    .foregroundStyle(AtelierTheme.accent)
+                    .frame(width: 14)
+
+                TextField(request.kind.placeholder, text: $name)
+                    .textFieldStyle(.plain)
+                    .atelierFont(size: 12)
+                    .focused($isFocused)
+                    .disabled(creationTask != nil)
+                    .onSubmit(submit)
+
+                if creationTask != nil {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            Text(errorMessage ?? "in \(targetLabel)")
+                .atelierFont(size: 9.5)
+                .foregroundStyle(errorMessage == nil ? Color.secondary : Color.red)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(AtelierTheme.accent.opacity(0.08))
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(errorMessage == nil ? AtelierTheme.accent : Color.red)
+                .frame(width: 2)
+        }
+        .onAppear { isFocused = true }
+        .onExitCommand(perform: cancel)
+        .onDisappear {
+            creationTask?.cancel()
+            creationTask = nil
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(request.kind.title)
+    }
+
+    private var targetLabel: String {
+        let root = workspaceURL.standardizedFileURL.pathComponents
+        let target = request.parentURL.standardizedFileURL.pathComponents
+        guard target.starts(with: root) else { return request.parentURL.lastPathComponent }
+        let relative = target.dropFirst(root.count).joined(separator: "/")
+        return relative.isEmpty ? workspaceURL.lastPathComponent : relative
+    }
+
+    private func submit() {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty, creationTask == nil else { return }
+        errorMessage = nil
+        creationTask = Task { @MainActor in
+            do {
+                try await onCreate(cleanName)
+                guard !Task.isCancelled else { return }
+                onCreated()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                errorMessage = error.localizedDescription
+                creationTask = nil
+                isFocused = true
+            }
+        }
+    }
+
+    private func cancel() {
+        creationTask?.cancel()
+        creationTask = nil
+        onCancel()
     }
 }

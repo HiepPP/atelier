@@ -53,6 +53,43 @@ struct AtelierTests {
         #expect(entries.map { $0.url.lastPathComponent } == ["Sources", "README.md"])
     }
 
+    @Test("File tree service creates files and folders without overwriting")
+    func fileTreeCreation() async throws {
+        let root = temporaryDirectory("file-tree-creation")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let service = FileTreeService()
+
+        let fileURL = try await service.createFile(named: "main.swift", in: root)
+        let folderURL = try await service.createFolder(named: "Sources", in: root)
+        let nestedFileURL = try await service.createFile(named: "Feature.swift", in: folderURL)
+
+        #expect(FileManager.default.fileExists(atPath: fileURL.path))
+        var isDirectory: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: folderURL.path, isDirectory: &isDirectory))
+        #expect(isDirectory.boolValue)
+        #expect(FileManager.default.fileExists(atPath: nestedFileURL.path))
+
+        do {
+            _ = try await service.createFile(named: "main.swift", in: root)
+            Issue.record("Creating a duplicate file should fail")
+        } catch let error as FileTreeServiceError {
+            guard case .alreadyExists = error else {
+                Issue.record("Expected an already-exists error")
+                return
+            }
+        }
+
+        do {
+            _ = try await service.createFolder(named: "../Outside", in: root)
+            Issue.record("Creating an invalid path should fail")
+        } catch let error as FileTreeServiceError {
+            guard case .invalidName = error else {
+                Issue.record("Expected an invalid-name error")
+                return
+            }
+        }
+    }
+
     @Test("Git porcelain parser preserves rename and conflict details")
     func gitParsing() {
         let sample = [

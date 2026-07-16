@@ -6,10 +6,17 @@ struct FileTreeRepresentable: NSViewRepresentable {
 
     let rootURL: URL
     let revision: Int
+    let onTargetDirectoryChange: (URL) -> Void
+    let onCreateItem: (FileTreeCreationKind, URL) -> Void
     let onSelect: (URL) -> Void
 
     func makeCoordinator() -> FileTreeController {
-        FileTreeController(rootURL: rootURL, onSelect: onSelect)
+        FileTreeController(
+            rootURL: rootURL,
+            onTargetDirectoryChange: onTargetDirectoryChange,
+            onCreateItem: onCreateItem,
+            onSelect: onSelect
+        )
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -21,6 +28,8 @@ struct FileTreeRepresentable: NSViewRepresentable {
             rootURL: rootURL,
             revision: revision,
             scale: scale,
+            onTargetDirectoryChange: onTargetDirectoryChange,
+            onCreateItem: onCreateItem,
             onSelect: onSelect
         )
     }

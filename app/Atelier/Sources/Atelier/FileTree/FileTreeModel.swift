@@ -5,6 +5,21 @@ nonisolated struct FileTreeEntry: Equatable, Sendable {
     let isDirectory: Bool
 }
 
+enum FileTreeCreationKind: Equatable, Sendable {
+    case file
+    case folder
+
+    var title: String { self == .file ? "New File" : "New Folder" }
+    var placeholder: String { self == .file ? "File name" : "Folder name" }
+    var systemImage: String { self == .file ? "doc" : "folder.fill" }
+}
+
+struct FileTreeCreationRequest: Equatable, Identifiable {
+    let id = UUID()
+    let kind: FileTreeCreationKind
+    let parentURL: URL
+}
+
 @MainActor
 final class FileTreeNode {
     let url: URL
