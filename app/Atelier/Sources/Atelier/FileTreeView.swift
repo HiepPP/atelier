@@ -54,7 +54,6 @@ struct FileTreeView: NSViewRepresentable {
                 cell?.textField?.font = .systemFont(ofSize: 11.5 * scale, weight: .regular)
             }
             outlineView.needsDisplay = true
-            outlineView.displayIfNeeded()
         }
         if context.coordinator.root.url != rootURL {
             context.coordinator.reset(rootURL: rootURL)

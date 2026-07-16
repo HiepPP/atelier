@@ -35,6 +35,12 @@ enum AtelierShortcuts {
     static func zoomWorkspaceWindow() {
         workspaceWindow?.zoom(nil)
     }
+
+    @MainActor
+    static func maximizeWorkspaceWindow() {
+        guard let workspaceWindow, !workspaceWindow.isZoomed else { return }
+        workspaceWindow.zoom(nil)
+    }
 }
 
 private final class AtelierWorkspaceWindowMarkerView: NSView {

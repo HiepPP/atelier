@@ -30,6 +30,7 @@ struct AtelierApp: App {
         .commands {
             CommandGroup(after: .toolbar) {
                 Button("Zoom In") {
+                    AtelierShortcuts.maximizeWorkspaceWindow()
                     zoom.zoomIn()
                 }
                 .keyboardShortcut("+", modifiers: .command)
@@ -40,6 +41,16 @@ struct AtelierApp: App {
                 }
                 .keyboardShortcut("-", modifiers: .command)
                 .disabled(!zoom.canZoomOut)
+
+                Button("Actual Size") {
+                    zoom.reset()
+                }
+                .keyboardShortcut("0", modifiers: .command)
+
+                Button(zoom.isFocusMode ? "Exit Focus Mode" : "Enter Focus Mode") {
+                    zoom.toggleFocusMode()
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
             }
         }
 
@@ -54,17 +65,24 @@ final class AtelierZoomModel: ObservableObject {
     static let baseMinimumSize = CGSize(width: 1_000, height: 600)
 
     @Published private(set) var scale: CGFloat = 1
+    @Published private(set) var isFocusMode = false
 
-    private static let minimumScale: CGFloat = 0.75
-    private static let maximumScale: CGFloat = 1.5
+    private static let minimumScale: CGFloat = 0.8
+    private static let maximumScale: CGFloat = 2
+    private static let chromeMaximumScale: CGFloat = 1.2
+    private static let sidebarMaximumScale: CGFloat = 1.5
     private static let step: CGFloat = 0.1
-    private static let settleDelay: UInt64 = 150_000_000
+    private static let settleDelay: UInt64 = 200_000_000
 
     private var requestedScale: CGFloat = 1
     private var settleTask: Task<Void, Never>?
+    private var focusModeIsAutomatic = false
 
     var canZoomIn: Bool { requestedScale < Self.maximumScale }
     var canZoomOut: Bool { requestedScale > Self.minimumScale }
+    var chromeScale: CGFloat { min(scale, Self.chromeMaximumScale) }
+    var sidebarScale: CGFloat { min(scale, Self.sidebarMaximumScale) }
+    var contentScale: CGFloat { scale }
 
     func zoomIn() {
         requestScale(requestedScale + Self.step)
@@ -74,16 +92,36 @@ final class AtelierZoomModel: ObservableObject {
         requestScale(requestedScale - Self.step)
     }
 
+    func reset() {
+        if requestedScale > Self.sidebarMaximumScale {
+            focusModeIsAutomatic = true
+        } else {
+            isFocusMode = false
+            focusModeIsAutomatic = false
+        }
+        requestScale(1)
+    }
+
+    func toggleFocusMode() {
+        if isFocusMode {
+            if requestedScale > Self.sidebarMaximumScale {
+                focusModeIsAutomatic = true
+                requestScale(Self.sidebarMaximumScale)
+            } else {
+                isFocusMode = false
+                focusModeIsAutomatic = false
+            }
+        } else {
+            isFocusMode = true
+            focusModeIsAutomatic = false
+        }
+    }
+
     private func requestScale(_ value: CGFloat) {
         let clamped = min(Self.maximumScale, max(Self.minimumScale, value))
         requestedScale = (clamped * 100).rounded() / 100
 
-        let isRepeating = settleTask != nil
         settleTask?.cancel()
-
-        if !isRepeating {
-            scale = requestedScale
-        }
 
         settleTask = Task { @MainActor [weak self] in
             do {
@@ -92,8 +130,21 @@ final class AtelierZoomModel: ObservableObject {
                 return
             }
             guard let self else { return }
-            scale = requestedScale
+            updateFocusMode(for: requestedScale)
+            if scale != requestedScale {
+                scale = requestedScale
+            }
             settleTask = nil
+        }
+    }
+
+    private func updateFocusMode(for scale: CGFloat) {
+        if scale > Self.sidebarMaximumScale, !isFocusMode {
+            isFocusMode = true
+            focusModeIsAutomatic = true
+        } else if scale <= Self.sidebarMaximumScale, focusModeIsAutomatic {
+            isFocusMode = false
+            focusModeIsAutomatic = false
         }
     }
 }
@@ -104,15 +155,8 @@ private struct AtelierZoomContainer<Content: View>: View {
 
     var body: some View {
         content()
-            .environment(\.atelierZoomScale, zoom.scale)
-            .font(.system(size: 13 * zoom.scale))
-            .controlSize(controlSize)
-    }
-
-    private var controlSize: ControlSize {
-        if zoom.scale < 0.9 { return .small }
-        if zoom.scale > 1.2 { return .large }
-        return .regular
+            .environment(\.atelierZoomScale, zoom.chromeScale)
+            .font(.system(size: 13 * zoom.chromeScale))
     }
 }
 

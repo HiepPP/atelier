@@ -175,6 +175,7 @@ final class TerminalTabsModel: ObservableObject {
 
 struct TerminalTabs: View {
     @ObservedObject var model: TerminalTabsModel
+    @EnvironmentObject private var zoom: AtelierZoomModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -270,13 +271,17 @@ struct TerminalTabs: View {
             if let tab = model.selectedTab {
                 switch tab.content {
                 case .terminal(let session):
-                    TerminalView(terminal: session.terminal)
+                    TerminalView(
+                        terminal: session.terminal,
+                        scale: zoom.contentScale
+                    )
                         .id(tab.id)
                         .background(AtelierTheme.editor)
                 case .file(let file):
                     FileViewer(content: file.content, fileURL: file.url)
                         .id(tab.id)
                         .background(AtelierTheme.editor)
+                        .environment(\.atelierZoomScale, zoom.contentScale)
                 }
             } else {
                 VStack(spacing: 8) {

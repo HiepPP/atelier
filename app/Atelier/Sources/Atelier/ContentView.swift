@@ -83,6 +83,7 @@ struct EmptyStateView: View {
 struct WorkspaceView: View {
     let state: WorkspaceState
     @EnvironmentObject var store: WorkspaceStore
+    @EnvironmentObject private var zoom: AtelierZoomModel
     @StateObject private var terminalTabs: TerminalTabsModel
     @StateObject private var gitModel: GitWorkspaceModel
     @State private var fileWatcher: FileWatcher?
@@ -99,21 +100,23 @@ struct WorkspaceView: View {
 
             Divider()
 
-            HStack(spacing: 0) {
-                HSplitView {
+            HSplitView {
+                if !zoom.isFocusMode {
                     explorerColumn
                         .frame(minWidth: 220, idealWidth: 300, maxWidth: 400)
+                }
 
-                    TerminalTabs(model: terminalTabs)
-                        .frame(minWidth: 420, idealWidth: 660)
-                        .layoutPriority(2)
+                TerminalTabs(model: terminalTabs)
+                    .frame(minWidth: 420, idealWidth: 660)
+                    .layoutPriority(2)
 
+                if !zoom.isFocusMode {
                     ChangesView(model: gitModel)
                         .frame(minWidth: 320, idealWidth: 420, maxWidth: 540)
                         .layoutPriority(1)
                 }
-                .atelierSplitViewChrome()
             }
+            .atelierSplitViewChrome()
 
             statusBar
         }
@@ -183,6 +186,18 @@ struct WorkspaceView: View {
             .buttonStyle(AtelierLuminareIconButtonStyle())
             .help("Change folder")
 
+            Button {
+                zoom.toggleFocusMode()
+            } label: {
+                Image(
+                    systemName: zoom.isFocusMode
+                        ? "rectangle.split.3x1"
+                        : "rectangle.center.inset.filled"
+                )
+            }
+            .buttonStyle(AtelierLuminareIconButtonStyle())
+            .help(zoom.isFocusMode ? "Exit focus mode" : "Enter focus mode")
+
             Image(systemName: "gearshape")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
@@ -217,10 +232,12 @@ struct WorkspaceView: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 36)
+            .environment(\.atelierZoomScale, zoom.sidebarScale)
 
             FileTreeView(rootURL: workspaceURL) { url in
                 terminalTabs.openFile(url)
             }
+            .environment(\.atelierZoomScale, zoom.sidebarScale)
         }
         .background(AtelierTheme.sidebar)
     }
@@ -263,9 +280,15 @@ struct WorkspaceView: View {
                 systemImage: "arrow.triangle.branch"
             )
             Spacer()
-            Text("Explorer")
+            if zoom.isFocusMode {
+                Text("Focus")
+            }
+            Text("\(Int((zoom.scale * 100).rounded()))%")
             Text("Terminal")
-            Text("Git")
+            if !zoom.isFocusMode {
+                Text("Explorer")
+                Text("Git")
+            }
         }
         .atelierFont(size: 10.5, weight: .medium)
         .foregroundStyle(.secondary)

@@ -162,6 +162,7 @@ final class GitWorkspaceModel: ObservableObject {
 
 struct ChangesView: View {
     @ObservedObject var model: GitWorkspaceModel
+    @EnvironmentObject private var zoom: AtelierZoomModel
     @State private var commitMessage = ""
     @State private var discardCandidate: GitChange?
 
@@ -177,6 +178,7 @@ struct ChangesView: View {
                         branches: model.snapshot.branches,
                         onSwitch: model.switchBranch
                     )
+                    .environment(\.atelierZoomScale, zoom.sidebarScale)
                     Spacer()
                     if model.isLoading { ProgressView().controlSize(.small) }
                     Button {
@@ -205,6 +207,7 @@ struct ChangesView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .padding(10)
+                    .environment(\.atelierZoomScale, zoom.sidebarScale)
                 }
 
                 if model.snapshot.status.changes.isEmpty && !model.isLoading {
@@ -223,6 +226,7 @@ struct ChangesView: View {
                     .frame(maxWidth: 320)
                     .padding(16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .environment(\.atelierZoomScale, zoom.sidebarScale)
                 } else {
                     List {
                         changeSection("Staged", changes: model.snapshot.status.staged, staged: true)
@@ -233,11 +237,13 @@ struct ChangesView: View {
                     .scrollContentBackground(.hidden)
                     .background(AtelierTheme.sidebar)
                     .atelierListChrome()
+                    .environment(\.atelierZoomScale, zoom.sidebarScale)
                 }
 
                 HStack(spacing: 8) {
                     TextField("Commit message", text: $commitMessage)
                         .textFieldStyle(.plain)
+                        .font(.system(size: 13 * zoom.sidebarScale))
                         .padding(.horizontal, 10)
                         .frame(height: 28)
                         .background(AtelierTheme.editor)
@@ -255,6 +261,7 @@ struct ChangesView: View {
                             .stroke(AtelierTheme.border, lineWidth: 0.75)
                         }
                         .onSubmit(commit)
+                        .environment(\.atelierZoomScale, zoom.sidebarScale)
                     Button("Commit") { commit() }
                         .buttonStyle(AtelierLuminarePrimaryButtonStyle())
                         .disabled(
@@ -282,6 +289,7 @@ struct ChangesView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .environment(\.atelierZoomScale, zoom.sidebarScale)
                     Spacer()
                     if model.diffNeedsReload {
                         Button {
@@ -303,6 +311,7 @@ struct ChangesView: View {
                 }
 
                 DiffView(text: model.diffText)
+                    .environment(\.atelierZoomScale, zoom.contentScale)
             }
             .frame(minHeight: 200, idealHeight: 280)
             .background(AtelierTheme.editor)
