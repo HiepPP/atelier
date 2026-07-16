@@ -7,10 +7,10 @@ Atelier is a macOS 26+ SwiftUI application built with Swift 6.2 and Swift Packag
 - `app/Atelier/Sources/Atelier/`: production Swift sources. Keep views, models, services, and AppKit bridges in focused files.
 - `app/Atelier/Tests/AtelierTests/`: focused tests for models, parsers, persistence, and services.
 - `app/Atelier/Packaging/`: application bundle metadata, including `Info.plist`.
+- `app/Atelier/Resources/`: source assets used to build the application bundle.
 - `app/Atelier/scripts/`: build, install, signing, logging, and verification scripts.
-- `spike/swiftterm-spike/`: isolated SwiftTerm experiments. Do not add production behavior here.
-- `watchtower/tasks/`: task specifications and verification outcomes. Update these only when working through the Watchtower workflow.
-- `IDEA.md`, `PLAN.md`, `M0.md`, and `M1.md`: product and milestone notes.
+- `Vendor/Luminare/`: pinned local Luminare package and its required license.
+- `README.md`: current product, architecture, and development reference.
 
 Generated directories such as `.build/` and `dist/` must remain untracked.
 
@@ -41,6 +41,6 @@ Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swi
 
 ## Commit & Pull Request Guidelines
 
-This repository has no commit history yet. Use concise Conventional Commit messages, such as `fix(ui): align split-view dividers`. Keep commits scoped to one outcome.
+Use concise Conventional Commit messages, such as `fix(ui): align split-view dividers`. Keep commits scoped to one outcome.
 
-Pull requests should include a short problem statement, implementation summary, verification commands, linked Watchtower task when applicable, and before/after screenshots for visual changes. Never include `.build`, `dist`, temporary workspaces, credentials, or signing identities.
+Pull requests should include a short problem statement, implementation summary, verification commands, and before/after screenshots for visual changes. Never include `.build`, `dist`, temporary workspaces, credentials, or signing identities.
