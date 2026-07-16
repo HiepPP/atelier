@@ -4,7 +4,7 @@
 
 - Title: Atelier Native UI Library Integration
 - Slug: 20260716-atelier-minimal-luminare-integration
-- Status: ACTIVE
+- Status: ARCHIVED
 - Updated: 2026-07-16
 
 ## Tracker
@@ -45,4 +45,5 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Archive
 
+- Archived: 2026-07-16 -> watchtower/archive/20260716-atelier-minimal-luminare-integration/
 - [20260716-atelier-mvp-milestones](watchtower/archive/20260716-atelier-mvp-milestones/)
