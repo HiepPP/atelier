@@ -105,34 +105,3 @@ extension macOSViewVersion<AtelierSplitViewType, NSSplitView> {
     static let v15 = Self(for: .v15)
     static let v26 = Self(for: .v26)
 }
-
-struct AtelierIconButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(isEnabled ? Color.primary : Color.secondary.opacity(0.55))
-            .frame(minWidth: 24, minHeight: 24)
-            .background(configuration.isPressed ? AtelierTheme.raised : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .opacity(isEnabled ? 1 : 0.6)
-    }
-}
-
-struct AtelierPrimaryButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(AtelierTheme.accentInk)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 28)
-            .background(AtelierTheme.accent.opacity(isEnabled ? 1 : 0.42))
-            .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .opacity(isEnabled ? 1 : 0.7)
-    }
-}

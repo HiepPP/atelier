@@ -181,7 +181,7 @@ struct ChangesView: View {
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
-                    .buttonStyle(AtelierIconButtonStyle())
+                    .buttonStyle(AtelierLuminareIconButtonStyle())
                     .help("Refresh git status")
                 }
                 .padding(.horizontal, 10)
@@ -194,25 +194,30 @@ struct ChangesView: View {
                 }
 
                 if let message = model.errorMessage {
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.red)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.red.opacity(0.08))
+                    AtelierStatusCard {
+                        Label(message, systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(10)
                 }
 
                 if model.snapshot.status.changes.isEmpty && !model.isLoading {
-                    VStack(spacing: 10) {
-                        Image(systemName: "checkmark.circle")
-                            .font(.system(size: 32, weight: .ultraLight))
-                            .foregroundStyle(AtelierTheme.accent)
-                        Text("Working tree clean")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text("No staged or unstaged files.")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(.secondary)
+                    AtelierStatusCard {
+                        VStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle")
+                                .font(.system(size: 32, weight: .ultraLight))
+                                .foregroundStyle(AtelierTheme.accent)
+                            Text("Working tree clean")
+                                .font(.system(size: 15, weight: .semibold))
+                            Text("No staged or unstaged files.")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .frame(maxWidth: 320)
+                    .padding(16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
@@ -247,7 +252,7 @@ struct ChangesView: View {
                         }
                         .onSubmit(commit)
                     Button("Commit") { commit() }
-                        .buttonStyle(AtelierPrimaryButtonStyle())
+                        .buttonStyle(AtelierLuminarePrimaryButtonStyle())
                         .disabled(
                             commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                 || model.snapshot.status.staged.isEmpty
@@ -281,7 +286,7 @@ struct ChangesView: View {
                             Label("Reload", systemImage: "arrow.clockwise")
                                 .padding(.horizontal, 7)
                         }
-                        .buttonStyle(AtelierIconButtonStyle())
+                        .buttonStyle(AtelierLuminareIconButtonStyle())
                     }
                 }
                 .padding(.horizontal, 10)
@@ -350,7 +355,7 @@ struct ChangesView: View {
                             } label: {
                                 Image(systemName: "minus")
                             }
-                            .buttonStyle(AtelierIconButtonStyle())
+                            .buttonStyle(AtelierLuminareIconButtonStyle())
                             .help("Unstage")
                         } else {
                             Button {
@@ -358,7 +363,7 @@ struct ChangesView: View {
                             } label: {
                                 Image(systemName: "plus")
                             }
-                            .buttonStyle(AtelierIconButtonStyle())
+                            .buttonStyle(AtelierLuminareIconButtonStyle())
                             .help("Stage")
                             if change.kind != .untracked {
                                 Button {
@@ -366,7 +371,7 @@ struct ChangesView: View {
                                 } label: {
                                     Image(systemName: "trash")
                                 }
-                                .buttonStyle(AtelierIconButtonStyle())
+                                .buttonStyle(AtelierLuminareIconButtonStyle())
                                 .help("Discard changes")
                             }
                         }

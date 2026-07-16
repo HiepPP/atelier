@@ -24,6 +24,13 @@ struct FileTreeView: NSViewRepresentable {
         outlineView.selectionHighlightStyle = .regular
         outlineView.dataSource = context.coordinator
         outlineView.delegate = context.coordinator
+        let clickRecognizer = NSClickGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(FileTreeCoordinator.handleSingleClick(_:))
+        )
+        outlineView.addGestureRecognizer(clickRecognizer)
+        outlineView.reloadData()
+        outlineView.expandItem(context.coordinator.root)
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
@@ -40,6 +47,7 @@ struct FileTreeView: NSViewRepresentable {
         if context.coordinator.root.url != rootURL {
             context.coordinator.reset(rootURL: rootURL)
             outlineView.reloadData()
+            outlineView.expandItem(context.coordinator.root)
         }
     }
 }

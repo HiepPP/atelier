@@ -57,7 +57,7 @@ struct EmptyStateView: View {
                     } label: {
                         Label("Mở Folder", systemImage: "arrow.up.right")
                     }
-                    .buttonStyle(AtelierPrimaryButtonStyle())
+                    .buttonStyle(AtelierLuminarePrimaryButtonStyle())
                     .keyboardShortcut("o", modifiers: .command)
                 }
 
@@ -183,7 +183,7 @@ struct WorkspaceView: View {
             } label: {
                 Image(systemName: "folder.badge.gearshape")
             }
-            .buttonStyle(AtelierIconButtonStyle())
+            .buttonStyle(AtelierLuminareIconButtonStyle())
             .help("Change folder")
 
             Image(systemName: "gearshape")
@@ -212,7 +212,7 @@ struct WorkspaceView: View {
                 } label: {
                     Image(systemName: "folder.badge.plus")
                 }
-                .buttonStyle(AtelierIconButtonStyle())
+                .buttonStyle(AtelierLuminareIconButtonStyle())
                 .help("Change folder")
             }
             .padding(.horizontal, 12)

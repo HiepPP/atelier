@@ -168,7 +168,7 @@ struct TerminalTabs: View {
                 } label: {
                     Image(systemName: "plus")
                 }
-                .buttonStyle(AtelierIconButtonStyle())
+                .buttonStyle(AtelierLuminareIconButtonStyle())
                 .help("New terminal")
 
                 Image(systemName: "ellipsis")

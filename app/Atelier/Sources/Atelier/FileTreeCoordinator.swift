@@ -59,6 +59,24 @@ final class FileTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineVie
         onSelect(node.url)
     }
 
+    @objc func handleSingleClick(_ recognizer: NSClickGestureRecognizer) {
+        guard recognizer.state == .ended,
+              let outlineView = recognizer.view as? NSOutlineView else { return }
+
+        let location = recognizer.location(in: outlineView)
+        let row = outlineView.row(at: location)
+        guard row >= 0,
+              !outlineView.frameOfOutlineCell(atRow: row).contains(location),
+              let node = outlineView.item(atRow: row) as? FileNode,
+              node.isDirectory else { return }
+
+        if outlineView.isItemExpanded(node) {
+            outlineView.collapseItem(node)
+        } else {
+            outlineView.expandItem(node)
+        }
+    }
+
     private func loadChildren(_ node: FileNode) -> [FileNode] {
         guard node.isDirectory else { return [] }
         if let children = node.children { return children }
