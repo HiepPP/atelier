@@ -1,6 +1,7 @@
 import Foundation
 
-enum FileContent: Equatable {
+enum FileContent: Equatable, Sendable {
+    case loading
     case text(String)
     case binary
     case tooLarge(Int)
@@ -8,6 +9,8 @@ enum FileContent: Equatable {
 
     var displayText: String {
         switch self {
+        case .loading:
+            return "Loading file..."
         case .text(let text):
             return text
         case .binary:
@@ -41,5 +44,11 @@ enum FileLoader {
         } catch {
             return .error(error.localizedDescription)
         }
+    }
+
+    static func loadAsync(url: URL, limit: Int = defaultLimit) async -> FileContent {
+        await Task.detached(priority: .userInitiated) {
+            load(url: url, limit: limit)
+        }.value
     }
 }

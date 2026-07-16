@@ -193,6 +193,23 @@ enum SelfTest {
         }
     }
 
+    private final class AsyncFileContentBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var content: FileContent?
+
+        func set(_ content: FileContent) {
+            lock.lock()
+            self.content = content
+            lock.unlock()
+        }
+
+        func get() -> FileContent? {
+            lock.lock()
+            defer { lock.unlock() }
+            return content
+        }
+    }
+
     static func run() -> Never {
         var pass = true
         func check(_ name: String, _ ok: Bool, _ detail: String) {
@@ -243,6 +260,32 @@ enum SelfTest {
         check("FileLoader text", FileLoader.load(url: textURL) == .text("hello"), "text decoded")
         check("FileLoader binary", FileLoader.load(url: binaryURL) == .binary, "null byte detected")
         check("FileLoader tooLarge", FileLoader.load(url: largeURL, limit: 8) == .tooLarge(9), "size capped")
+        let asyncLoadSemaphore = DispatchSemaphore(value: 0)
+        let asyncContent = AsyncFileContentBox()
+        Task.detached {
+            asyncContent.set(await FileLoader.loadAsync(url: textURL))
+            asyncLoadSemaphore.signal()
+        }
+        asyncLoadSemaphore.wait()
+        check(
+            "FileLoader async",
+            asyncContent.get() == .text("hello"),
+            "background load decoded text"
+        )
+        check(
+            "FileViewer highlight small",
+            FileHighlightPolicy.usesSyntaxHighlighting(
+                byteCount: FileHighlightPolicy.maximumHighlightedBytes
+            ),
+            "threshold content keeps syntax colors"
+        )
+        check(
+            "FileViewer fallback large",
+            !FileHighlightPolicy.usesSyntaxHighlighting(
+                byteCount: FileHighlightPolicy.maximumHighlightedBytes + 1
+            ),
+            "large content uses plain native text"
+        )
 
         // 6. Porcelain v2 parser phân tách staged, unstaged, và untracked.
         let statusSample = [

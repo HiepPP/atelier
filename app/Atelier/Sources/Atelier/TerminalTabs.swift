@@ -54,9 +54,35 @@ final class TerminalSession: Identifiable {
     }
 }
 
-private struct FileTab {
+private final class FileTab: ObservableObject {
     let url: URL
-    let content: FileContent
+    @Published private(set) var content: FileContent = .loading
+    private var loadTask: Task<Void, Never>?
+
+    init(url: URL) {
+        self.url = url
+        reload()
+    }
+
+    func reload() {
+        loadTask?.cancel()
+        content = .loading
+        let url = url
+        loadTask = Task { @MainActor [weak self] in
+            let content = await FileLoader.loadAsync(url: url)
+            guard !Task.isCancelled else { return }
+            self?.content = content
+        }
+    }
+
+    func close() {
+        loadTask?.cancel()
+        loadTask = nil
+    }
+
+    deinit {
+        loadTask?.cancel()
+    }
 }
 
 private enum CenterTabContent {
@@ -142,31 +168,29 @@ final class TerminalTabsModel: ObservableObject {
 
     func openFile(_ url: URL) {
         let standardizedURL = url.standardizedFileURL
-        let content = FileLoader.load(url: standardizedURL)
 
-        if let index = tabs.firstIndex(where: { tab in
+        if let tab = tabs.first(where: { tab in
             guard case .file(let file) = tab.content else { return false }
             return file.url.standardizedFileURL == standardizedURL
         }) {
-            let refreshed = CenterTab(
-                id: tabs[index].id,
-                content: .file(FileTab(url: standardizedURL, content: content)),
-                customTitle: tabs[index].customTitle
-            )
-            tabs[index] = refreshed
-            selectedID = refreshed.id
+            guard case .file(let file) = tab.content else { return }
+            file.reload()
+            selectedID = tab.id
             return
         }
 
-        let tab = CenterTab(content: .file(FileTab(url: standardizedURL, content: content)))
+        let tab = CenterTab(content: .file(FileTab(url: standardizedURL)))
         tabs.append(tab)
         selectedID = tab.id
     }
 
     fileprivate func close(_ tab: CenterTab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-        if case .terminal(let session) = tab.content {
+        switch tab.content {
+        case .terminal(let session):
             session.close()
+        case .file(let file):
+            file.close()
         }
         tabs.remove(at: index)
         if selectedID == tab.id {
@@ -376,7 +400,7 @@ struct TerminalTabs: View {
                         .id(tab.id)
                         .background(AtelierTheme.editor)
                 case .file(let file):
-                    FileViewer(content: file.content, fileURL: file.url)
+                    FileTabView(file: file)
                         .id(tab.id)
                         .background(AtelierTheme.editor)
                         .environment(\.atelierZoomScale, zoom.contentScale)
@@ -445,6 +469,14 @@ struct TerminalTabs: View {
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
             model.moveTab(id: id, over: targetID)
         }
+    }
+}
+
+private struct FileTabView: View {
+    @ObservedObject var file: FileTab
+
+    var body: some View {
+        FileViewer(content: file.content, fileURL: file.url)
     }
 }
 
