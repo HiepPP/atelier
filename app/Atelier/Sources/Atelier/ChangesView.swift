@@ -361,6 +361,7 @@ struct ChangesView: View {
                             }
                         }
                         .buttonStyle(.plain)
+                        .atelierPointerCursor()
 
                         if staged {
                             Button {

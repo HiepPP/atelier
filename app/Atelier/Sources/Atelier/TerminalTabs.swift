@@ -67,13 +67,16 @@ private enum CenterTabContent {
 private final class CenterTab: Identifiable {
     let id: UUID
     let content: CenterTabContent
+    let customTitle: String?
 
-    init(id: UUID = UUID(), content: CenterTabContent) {
+    init(id: UUID = UUID(), content: CenterTabContent, customTitle: String? = nil) {
         self.id = id
         self.content = content
+        self.customTitle = customTitle
     }
 
     var title: String {
+        if let customTitle { return customTitle }
         switch content {
         case .terminal(let session):
             return session.title
@@ -147,7 +150,8 @@ final class TerminalTabsModel: ObservableObject {
         }) {
             let refreshed = CenterTab(
                 id: tabs[index].id,
-                content: .file(FileTab(url: standardizedURL, content: content))
+                content: .file(FileTab(url: standardizedURL, content: content)),
+                customTitle: tabs[index].customTitle
             )
             tabs[index] = refreshed
             selectedID = refreshed.id
@@ -171,12 +175,61 @@ final class TerminalTabsModel: ObservableObject {
                 : tabs.last?.id
         }
     }
+
+    fileprivate func renameTab(id: UUID, to title: String) {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty,
+              let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let tab = tabs[index]
+        tabs[index] = CenterTab(id: tab.id, content: tab.content, customTitle: title)
+    }
+
+    fileprivate func moveTab(id: UUID, over destinationID: UUID) {
+        guard id != destinationID,
+              let sourceIndex = tabs.firstIndex(where: { $0.id == id }),
+              let destinationIndex = tabs.firstIndex(where: { $0.id == destinationID }) else {
+            return
+        }
+        tabs.move(
+            fromOffsets: IndexSet(integer: sourceIndex),
+            toOffset: destinationIndex > sourceIndex ? destinationIndex + 1 : destinationIndex
+        )
+    }
+}
+
+private struct RenameActiveTabKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+extension FocusedValues {
+    var renameActiveTab: (() -> Void)? {
+        get { self[RenameActiveTabKey.self] }
+        set { self[RenameActiveTabKey.self] = newValue }
+    }
+}
+
+struct AtelierTabCommands: Commands {
+    @FocusedValue(\.renameActiveTab) private var renameActiveTab
+
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Button("Rename Tab...") {
+                renameActiveTab?()
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .disabled(renameActiveTab == nil)
+        }
+    }
 }
 
 struct TerminalTabs: View {
     @ObservedObject var model: TerminalTabsModel
     @EnvironmentObject private var zoom: AtelierZoomModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var renameTargetID: UUID?
+    @State private var tabFrames: [UUID: CGRect] = [:]
+    @State private var draggedTabID: UUID?
+    @State private var lastReorderTargetID: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -256,8 +309,36 @@ struct TerminalTabs: View {
                                     NSCursor.arrow.set()
                                 }
                             }
+                            .background {
+                                GeometryReader { proxy in
+                                    Color.clear.preference(
+                                        key: TabFramePreferenceKey.self,
+                                        value: [tab.id: proxy.frame(in: .named("tabStrip"))]
+                                    )
+                                }
+                            }
+                            .highPriorityGesture(
+                                DragGesture(
+                                    minimumDistance: 6,
+                                    coordinateSpace: .named("tabStrip")
+                                )
+                                .onChanged { value in
+                                    reorderTab(tab.id, at: value.location)
+                                }
+                                .onEnded { _ in
+                                    draggedTabID = nil
+                                    lastReorderTargetID = nil
+                                }
+                            )
+                            .contextMenu {
+                                Button("Rename Tab...") {
+                                    beginRename(tab.id)
+                                }
+                            }
                         }
                     }
+                    .coordinateSpace(name: "tabStrip")
+                    .onPreferenceChange(TabFramePreferenceKey.self) { tabFrames = $0 }
                 }
                 .atelierScrollChrome(backgroundColor: AtelierNativePalette.chrome)
 
@@ -314,6 +395,112 @@ struct TerminalTabs: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .focusedSceneValue(\.renameActiveTab) {
+            guard let selectedID = model.selectedID else { return }
+            beginRename(selectedID)
+        }
+        .sheet(isPresented: renameSheetPresented) {
+            TabRenameSheet(currentTitle: renameTargetTitle) { title in
+                guard let renameTargetID else { return }
+                model.renameTab(id: renameTargetID, to: title)
+                self.renameTargetID = nil
+            } onCancel: {
+                renameTargetID = nil
+            }
+        }
+    }
+
+    private var renameSheetPresented: Binding<Bool> {
+        Binding(
+            get: { renameTargetID != nil },
+            set: { isPresented in
+                if !isPresented { renameTargetID = nil }
+            }
+        )
+    }
+
+    private var renameTargetTitle: String {
+        guard let renameTargetID,
+              let tab = model.visibleTabs.first(where: { $0.id == renameTargetID }) else {
+            return "Tab name"
+        }
+        return tab.title
+    }
+
+    private func beginRename(_ id: UUID) {
+        guard model.visibleTabs.contains(where: { $0.id == id }) else { return }
+        renameTargetID = id
+    }
+
+    private func reorderTab(_ id: UUID, at location: CGPoint) {
+        if draggedTabID != id {
+            draggedTabID = id
+            lastReorderTargetID = nil
+        }
+        guard let targetID = tabFrames.first(where: {
+            $0.key != id && $0.value.contains(location)
+        })?.key,
+              targetID != lastReorderTargetID else { return }
+        lastReorderTargetID = targetID
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
+            model.moveTab(id: id, over: targetID)
+        }
+    }
+}
+
+private struct TabRenameSheet: View {
+    let currentTitle: String
+    let onRename: (String) -> Void
+    let onCancel: () -> Void
+
+    @State private var title = ""
+    @FocusState private var isTitleFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Rename Tab")
+                .atelierFont(size: 15, weight: .semibold)
+
+            TextField("Tab name", text: $title, prompt: Text(currentTitle))
+                .textFieldStyle(.roundedBorder)
+                .focused($isTitleFocused)
+                .onSubmit(submit)
+
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                    .atelierPointerCursor()
+                Button("Rename", action: submit)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(cleanTitle.isEmpty)
+                    .atelierPointerCursor()
+            }
+        }
+        .padding(20)
+        .frame(width: 340)
+        .onAppear {
+            Task { @MainActor in
+                isTitleFocused = true
+            }
+        }
+    }
+
+    private var cleanTitle: String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func submit() {
+        guard !cleanTitle.isEmpty else { return }
+        onRename(cleanTitle)
+    }
+}
+
+private struct TabFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
 

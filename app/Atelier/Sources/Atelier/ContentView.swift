@@ -224,6 +224,7 @@ struct WorkspaceView: View {
         .onTapGesture(count: 2) {
             AtelierShortcuts.zoomWorkspaceWindow()
         }
+        .atelierPointerCursor()
     }
 
     private var explorerColumn: some View {

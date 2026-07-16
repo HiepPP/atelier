@@ -1,6 +1,31 @@
 import Luminare
 import SwiftUI
 
+private struct AtelierPointerCursorModifier: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func body(content: Content) -> some View {
+        content
+            .onContinuousHover { phase in
+                switch phase {
+                case .active:
+                    (isEnabled ? NSCursor.pointingHand : NSCursor.arrow).set()
+                case .ended:
+                    NSCursor.arrow.set()
+                }
+            }
+            .onDisappear {
+                NSCursor.arrow.set()
+            }
+    }
+}
+
+extension View {
+    func atelierPointerCursor() -> some View {
+        modifier(AtelierPointerCursorModifier())
+    }
+}
+
 struct AtelierLuminareIconButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button(action: configuration.trigger) {
@@ -17,6 +42,7 @@ struct AtelierLuminareIconButtonStyle: PrimitiveButtonStyle {
         .luminareCompactButtonCornerRadius(AtelierTheme.controlRadius)
         .luminareButtonMaterial(nil)
         .luminareBordered(false)
+        .atelierPointerCursor()
     }
 }
 
@@ -31,6 +57,7 @@ struct AtelierLuminarePrimaryButtonStyle: PrimitiveButtonStyle {
         .buttonStyle(AtelierLuminarePrimaryButtonBodyStyle())
         .fixedSize(horizontal: true, vertical: false)
         .luminareButtonMaterial(nil)
+        .atelierPointerCursor()
     }
 }
 

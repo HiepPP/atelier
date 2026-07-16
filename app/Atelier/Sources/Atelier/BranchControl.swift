@@ -30,6 +30,7 @@ struct BranchControl: View {
                 .frame(maxWidth: 170, alignment: .leading)
         }
         .menuStyle(.borderlessButton)
+        .atelierPointerCursor()
         .help(current.isEmpty ? "Detached HEAD" : current)
     }
 }

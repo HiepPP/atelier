@@ -52,6 +52,8 @@ struct AtelierApp: App {
                 }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
             }
+
+            AtelierTabCommands()
         }
 
         Settings {

@@ -82,5 +82,6 @@ struct AtelierShortcutRecorder: View {
             "Show Atelier:",
             name: .showAtelier
         )
+        .atelierPointerCursor()
     }
 }

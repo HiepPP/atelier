@@ -161,6 +161,11 @@ final class FileTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineVie
 }
 
 private final class AtelierFileTreeRowView: NSTableRowView {
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
     override func drawSelection(in dirtyRect: NSRect) {
         guard selectionHighlightStyle != .none else { return }
         AtelierNativePalette.selection.setFill()
