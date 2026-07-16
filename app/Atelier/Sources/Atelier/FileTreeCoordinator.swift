@@ -39,7 +39,7 @@ final class FileTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineVie
         let cell = (outlineView.makeView(withIdentifier: identifier, owner: nil) as? NSTableCellView)
             ?? makeCell(identifier: identifier)
         cell.textField?.stringValue = node.name
-        cell.textField?.font = .systemFont(ofSize: 11.5 * scale, weight: .regular)
+        cell.textField?.font = .systemFont(ofSize: 13 * scale, weight: .regular)
         cell.textField?.textColor = node.isDirectory
             ? AtelierNativePalette.accent
             : AtelierNativePalette.foreground

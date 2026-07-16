@@ -51,7 +51,7 @@ struct FileTreeView: NSViewRepresentable {
             for row in 0..<outlineView.numberOfRows {
                 let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
                     as? NSTableCellView
-                cell?.textField?.font = .systemFont(ofSize: 11.5 * scale, weight: .regular)
+                cell?.textField?.font = .systemFont(ofSize: 13 * scale, weight: .regular)
             }
             outlineView.needsDisplay = true
         }

@@ -69,20 +69,27 @@ final class AtelierZoomModel: ObservableObject {
 
     private static let minimumScale: CGFloat = 0.8
     private static let maximumScale: CGFloat = 2
+    private static let defaultRenderScale: CGFloat = 1.5
     private static let chromeMaximumScale: CGFloat = 1.2
     private static let sidebarMaximumScale: CGFloat = 1.5
+    private static let focusThresholdScale = sidebarMaximumScale / defaultRenderScale
     private static let step: CGFloat = 0.1
     private static let settleDelay: UInt64 = 200_000_000
 
     private var requestedScale: CGFloat = 1
     private var settleTask: Task<Void, Never>?
     private var focusModeIsAutomatic = false
+    private weak var responderBeforeZoom: NSResponder?
 
     var canZoomIn: Bool { requestedScale < Self.maximumScale }
     var canZoomOut: Bool { requestedScale > Self.minimumScale }
-    var chromeScale: CGFloat { min(scale, Self.chromeMaximumScale) }
-    var sidebarScale: CGFloat { min(scale, Self.sidebarMaximumScale) }
-    var contentScale: CGFloat { scale }
+    var chromeScale: CGFloat { min(renderScale, Self.chromeMaximumScale) }
+    var sidebarScale: CGFloat { min(renderScale, Self.sidebarMaximumScale) }
+    var contentScale: CGFloat { renderScale }
+
+    private var renderScale: CGFloat {
+        scale * Self.defaultRenderScale
+    }
 
     func zoomIn() {
         requestScale(requestedScale + Self.step)
@@ -93,7 +100,7 @@ final class AtelierZoomModel: ObservableObject {
     }
 
     func reset() {
-        if requestedScale > Self.sidebarMaximumScale {
+        if requestedScale > Self.focusThresholdScale {
             focusModeIsAutomatic = true
         } else {
             isFocusMode = false
@@ -104,9 +111,9 @@ final class AtelierZoomModel: ObservableObject {
 
     func toggleFocusMode() {
         if isFocusMode {
-            if requestedScale > Self.sidebarMaximumScale {
+            if requestedScale > Self.focusThresholdScale {
                 focusModeIsAutomatic = true
-                requestScale(Self.sidebarMaximumScale)
+                requestScale(Self.focusThresholdScale)
             } else {
                 isFocusMode = false
                 focusModeIsAutomatic = false
@@ -121,6 +128,9 @@ final class AtelierZoomModel: ObservableObject {
         let clamped = min(Self.maximumScale, max(Self.minimumScale, value))
         requestedScale = (clamped * 100).rounded() / 100
 
+        if settleTask == nil {
+            responderBeforeZoom = AtelierShortcuts.currentWorkspaceFirstResponder()
+        }
         settleTask?.cancel()
 
         settleTask = Task { @MainActor [weak self] in
@@ -135,14 +145,16 @@ final class AtelierZoomModel: ObservableObject {
                 scale = requestedScale
             }
             settleTask = nil
+            AtelierShortcuts.restoreWorkspaceFirstResponder(responderBeforeZoom)
+            responderBeforeZoom = nil
         }
     }
 
     private func updateFocusMode(for scale: CGFloat) {
-        if scale > Self.sidebarMaximumScale, !isFocusMode {
+        if scale > Self.focusThresholdScale, !isFocusMode {
             isFocusMode = true
             focusModeIsAutomatic = true
-        } else if scale <= Self.sidebarMaximumScale, focusModeIsAutomatic {
+        } else if scale <= Self.focusThresholdScale, focusModeIsAutomatic {
             isFocusMode = false
             focusModeIsAutomatic = false
         }

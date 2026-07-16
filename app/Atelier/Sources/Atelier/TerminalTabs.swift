@@ -5,7 +5,7 @@ import SwiftTerm
 final class TerminalSession: Identifiable {
     let id = UUID()
     let title: String
-    let terminal = LocalProcessTerminalView(frame: .zero)
+    let terminal = AtelierTerminalNativeView(frame: .zero)
     private var isClosed = false
 
     private static let lightAnsiPalette: [SwiftTerm.Color] = [

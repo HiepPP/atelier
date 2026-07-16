@@ -39,7 +39,23 @@ enum AtelierShortcuts {
     @MainActor
     static func maximizeWorkspaceWindow() {
         guard let workspaceWindow, !workspaceWindow.isZoomed else { return }
+        let firstResponder = workspaceWindow.firstResponder
         workspaceWindow.zoom(nil)
+        restoreWorkspaceFirstResponder(firstResponder)
+    }
+
+    @MainActor
+    static func currentWorkspaceFirstResponder() -> NSResponder? {
+        workspaceWindow?.firstResponder
+    }
+
+    @MainActor
+    static func restoreWorkspaceFirstResponder(_ responder: NSResponder?) {
+        guard let workspaceWindow, let responder else { return }
+        DispatchQueue.main.async { [weak workspaceWindow, weak responder] in
+            guard let workspaceWindow, let responder else { return }
+            workspaceWindow.makeFirstResponder(responder)
+        }
     }
 }
 

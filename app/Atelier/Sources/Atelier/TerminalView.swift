@@ -1,40 +1,45 @@
-import AppKit
 import SwiftUI
 import SwiftTerm
 
-struct TerminalView: View {
-    let terminal: LocalProcessTerminalView
-    let scale: CGFloat
+final class AtelierTerminalNativeView: LocalProcessTerminalView {
+    private var shouldFocusWhenAttached = false
 
-    var body: some View {
-        ZStack {
-            AtelierTheme.editor
-
-            TerminalRepresentable(terminal: terminal)
-        }
-        .task(id: scale) {
-            updateFont()
-        }
+    func requestFocusWhenAttached() {
+        shouldFocusWhenAttached = true
+        focusIfPossible()
     }
 
-    @MainActor
-    private func updateFont() {
-        let targetSize = 13.5 * scale
-        guard abs(terminal.font.pointSize - targetSize) > 0.01 else { return }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        focusIfPossible()
+    }
 
-        terminal.font = .monospacedSystemFont(ofSize: targetSize, weight: .regular)
-        terminal.setNeedsDisplay(terminal.bounds)
-        terminal.layoutSubtreeIfNeeded()
-        terminal.displayIfNeeded()
+    private func focusIfPossible() {
+        guard shouldFocusWhenAttached, let window else { return }
+        shouldFocusWhenAttached = false
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window else { return }
+            window.makeFirstResponder(self)
+        }
     }
 }
 
-private struct TerminalRepresentable: NSViewRepresentable {
-    let terminal: LocalProcessTerminalView
+struct TerminalView: NSViewRepresentable {
+    let terminal: AtelierTerminalNativeView
+    let scale: CGFloat
 
-    func makeNSView(context: Context) -> LocalProcessTerminalView {
-        terminal
+    func makeNSView(context: Context) -> AtelierTerminalNativeView {
+        terminal.requestFocusWhenAttached()
+        return terminal
     }
 
-    func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {}
+    func updateNSView(_ nsView: AtelierTerminalNativeView, context: Context) {
+        let targetSize = 13.5 * scale
+        guard abs(nsView.font.pointSize - targetSize) > 0.01 else { return }
+
+        nsView.font = .monospacedSystemFont(ofSize: targetSize, weight: .regular)
+        nsView.setNeedsDisplay(nsView.bounds)
+        nsView.layoutSubtreeIfNeeded()
+        nsView.displayIfNeeded()
+    }
 }

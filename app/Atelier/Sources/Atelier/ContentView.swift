@@ -176,6 +176,21 @@ struct WorkspaceView: View {
 
             Spacer(minLength: 18)
 
+            Text("\(Int((zoom.scale * 100).rounded()))%")
+                .atelierFont(size: 10.5, weight: .medium, design: .monospaced)
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 42)
+                .frame(height: 24)
+                .background(AtelierTheme.panel)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(AtelierTheme.border, lineWidth: 0.75)
+                }
+                .accessibilityLabel("Zoom level")
+                .accessibilityValue("\(Int((zoom.scale * 100).rounded())) percent")
+                .help("Zoom level")
+
             Button {
                 if let next = OpenFolder.pick() {
                     store.setWorkspace(next)
