@@ -184,16 +184,7 @@ struct TerminalTabs: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
                         ForEach(model.visibleTabs) { tab in
-                            HStack(spacing: 7) {
-                                Button {
-                                    model.close(tab)
-                                } label: {
-                                    Image(systemName: "xmark")
-                                        .atelierFont(size: 8, weight: .medium)
-                                }
-                                .buttonStyle(.borderless)
-                                .help(tab.closeHelp)
-
+                            ZStack(alignment: .leading) {
                                 Button {
                                     withAnimation(
                                         reduceMotion
@@ -204,23 +195,37 @@ struct TerminalTabs: View {
                                     }
                                 } label: {
                                     HStack(spacing: 7) {
+                                        Color.clear
+                                            .frame(width: 9, height: 9)
                                         Image(systemName: tab.systemImage)
                                             .atelierFont(size: 10)
                                         Text(tab.title)
                                             .atelierFont(size: 11.5, weight: .medium)
                                             .lineLimit(1)
                                     }
+                                    .padding(.horizontal, 12)
+                                    .frame(height: 42)
+                                    .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityValue(
                                     model.selectedID == tab.id ? "Selected" : "Not selected"
                                 )
+
+                                Button {
+                                    model.close(tab)
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .atelierFont(size: 8, weight: .medium)
+                                        .frame(width: 28, height: 42)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.borderless)
+                                .help(tab.closeHelp)
                             }
                             .foregroundStyle(
                                 model.selectedID == tab.id ? Color.primary : Color.secondary
                             )
-                            .padding(.horizontal, 12)
-                            .frame(height: 42)
                             .background(
                                 model.selectedID == tab.id
                                     ? AtelierTheme.editor
@@ -238,7 +243,19 @@ struct TerminalTabs: View {
                                     .fill(AtelierTheme.border)
                                     .frame(width: 0.5)
                             }
+                            .overlay {
+                                PointingHandCursorRegion()
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            }
                             .contentShape(Rectangle())
+                            .onContinuousHover { phase in
+                                switch phase {
+                                case .active:
+                                    NSCursor.pointingHand.set()
+                                case .ended:
+                                    NSCursor.arrow.set()
+                                }
+                            }
                         }
                     }
                 }
@@ -297,5 +314,65 @@ struct TerminalTabs: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+}
+
+private struct PointingHandCursorRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        PointingHandCursorView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        nsView.window?.invalidateCursorRects(for: nsView)
+    }
+}
+
+private final class PointingHandCursorView: NSView {
+    private var trackingArea: NSTrackingArea?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func updateTrackingAreas() {
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited, .cursorUpdate],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        self.trackingArea = trackingArea
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        NSCursor.pointingHand.set()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.pointingHand.set()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        window?.invalidateCursorRects(for: self)
     }
 }
