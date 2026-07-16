@@ -47,7 +47,9 @@ final class GitWorkspaceModel: ObservableObject {
                 guard !Task.isCancelled, refreshID == requestID else { return }
                 errorMessage = error.localizedDescription
             }
-            if refreshID == requestID { isLoading = false }
+            if refreshID == requestID {
+                isLoading = false
+            }
         }
     }
 
@@ -167,6 +169,7 @@ struct ChangesView: View {
         VSplitView {
             VStack(alignment: .leading, spacing: 0) {
                 gitActivityBar
+                    .atelierGitErrorEffect(value: model.errorMessage)
 
                 HStack {
                     BranchControl(
@@ -182,6 +185,7 @@ struct ChangesView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                     .buttonStyle(AtelierLuminareIconButtonStyle())
+                    .atelierRefreshCompletionEffect(isLoading: model.isLoading)
                     .help("Refresh git status")
                 }
                 .padding(.horizontal, 10)

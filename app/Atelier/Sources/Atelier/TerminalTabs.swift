@@ -169,6 +169,7 @@ struct TerminalTabs: View {
                     Image(systemName: "plus")
                 }
                 .buttonStyle(AtelierLuminareIconButtonStyle())
+                .atelierNewTerminalEffect(sessionCount: model.sessions.count)
                 .help("New terminal")
 
                 Image(systemName: "ellipsis")

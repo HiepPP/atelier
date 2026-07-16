@@ -9,13 +9,20 @@ struct AtelierApp: App {
         if CommandLine.arguments.contains("--selftest") {
             SelfTest.run()   // exit() bên trong
         }
+        AtelierShortcuts.install()
     }
 
     var body: some Scene {
         WindowGroup("Atelier") {
-            ContentView().environmentObject(store)
+            ContentView()
+                .environmentObject(store)
+                .background(AtelierWorkspaceWindowMarker())
         }
         .windowStyle(.hiddenTitleBar)
+
+        Settings {
+            AtelierSettingsView()
+        }
     }
 }
 

@@ -22,13 +22,19 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 install -m 0755 "$BIN_DIR/Atelier" "$APP/Contents/MacOS/Atelier"
 install -m 0644 "$ROOT/Packaging/Info.plist" "$APP/Contents/Info.plist"
 
-SWIFTTERM_BUNDLE="$BIN_DIR/SwiftTerm_SwiftTerm.bundle"
-if [[ ! -d "$SWIFTTERM_BUNDLE" ]]; then
-    echo "missing SwiftTerm resource bundle: $SWIFTTERM_BUNDLE" >&2
-    exit 1
-fi
+RESOURCE_BUNDLES=(
+    "SwiftTerm_SwiftTerm.bundle"
+    "KeyboardShortcuts_KeyboardShortcuts.bundle"
+    "Pow_Pow.bundle"
+)
 
-ditto "$SWIFTTERM_BUNDLE" "$APP/Contents/Resources/SwiftTerm_SwiftTerm.bundle"
+for bundle in "${RESOURCE_BUNDLES[@]}"; do
+    if [[ ! -d "$BIN_DIR/$bundle" ]]; then
+        echo "missing resource bundle: $BIN_DIR/$bundle" >&2
+        exit 1
+    fi
+    ditto "$BIN_DIR/$bundle" "$APP/Contents/Resources/$bundle"
+done
 codesign --force --deep --sign - "$APP"
 plutil -lint "$APP/Contents/Info.plist"
 test -x "$APP/Contents/MacOS/Atelier"

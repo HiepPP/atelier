@@ -50,3 +50,9 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - Learned: upstream `.luminareProminent` uses a weak tint fill that drifts from Atelier's solid accent.
 - Source: [app/Atelier/Sources/Atelier/AtelierLuminareStyle.swift](../app/Atelier/Sources/Atelier/AtelierLuminareStyle.swift)
 - Use next time: keep Luminare interaction modifiers, but own palette fills and disabled opacity in the adapter.
+
+### 2026-07-16 - Focused library boundaries
+
+- Learned: SwiftUIX, KeyboardShortcuts, and Pow integrate cleanly when each stays behind one app-owned source boundary.
+- Source: [app/Atelier/Package.swift](../app/Atelier/Package.swift)
+- Use next time: copy package resource bundles into the app, then require full native proof before marking UI tasks done.

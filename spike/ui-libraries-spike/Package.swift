@@ -2,25 +2,23 @@
 import PackageDescription
 
 let package = Package(
-    name: "Atelier",
+    name: "AtelierLibraryCompatibility",
     platforms: [.macOS(.v13)],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.14.0"),
-        .package(url: "https://github.com/siteline/swiftui-introspect", exact: "26.0.1"),
         .package(url: "https://github.com/SwiftUIX/SwiftUIX", exact: "0.3.1"),
         .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", exact: "3.0.1"),
         .package(url: "https://github.com/EmergeTools/Pow", exact: "1.0.5"),
+        .package(url: "https://github.com/siteline/swiftui-introspect", exact: "26.0.1"),
         .package(path: "../../Vendor/Luminare")
     ],
     targets: [
         .executableTarget(
-            name: "Atelier",
+            name: "UILibrariesSpike",
             dependencies: [
-                .product(name: "SwiftTerm", package: "SwiftTerm"),
-                .product(name: "SwiftUIIntrospect", package: "swiftui-introspect"),
                 "SwiftUIX",
                 "KeyboardShortcuts",
                 "Pow",
+                .product(name: "SwiftUIIntrospect", package: "swiftui-introspect"),
                 "Luminare"
             ]
         )

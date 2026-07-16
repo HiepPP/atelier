@@ -62,17 +62,23 @@ sign_app_bundle() {
 swift build --package-path "$ROOT_DIR"
 BUILD_DIR="$(swift build --package-path "$ROOT_DIR" --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$APP_NAME"
-SWIFTTERM_RESOURCE_BUNDLE="$BUILD_DIR/SwiftTerm_SwiftTerm.bundle"
+RESOURCE_BUNDLES=(
+  "SwiftTerm_SwiftTerm.bundle"
+  "KeyboardShortcuts_KeyboardShortcuts.bundle"
+  "Pow_Pow.bundle"
+)
 
 if [[ ! -x "$BUILD_BINARY" ]]; then
   echo "Build output not found: $BUILD_BINARY" >&2
   exit 1
 fi
 
-if [[ ! -d "$SWIFTTERM_RESOURCE_BUNDLE" ]]; then
-  echo "SwiftTerm resource bundle not found: $SWIFTTERM_RESOURCE_BUNDLE" >&2
-  exit 1
-fi
+for bundle in "${RESOURCE_BUNDLES[@]}"; do
+  if [[ ! -d "$BUILD_DIR/$bundle" ]]; then
+    echo "Resource bundle not found: $BUILD_DIR/$bundle" >&2
+    exit 1
+  fi
+done
 
 if [[ ! -f "$INFO_PLIST_SOURCE" ]]; then
   echo "Bundle metadata not found: $INFO_PLIST_SOURCE" >&2
@@ -86,7 +92,9 @@ fi
 mkdir -p "$APP_MACOS" "$APP_RESOURCES"
 cp -f "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
-ditto "$SWIFTTERM_RESOURCE_BUNDLE" "$APP_RESOURCES/SwiftTerm_SwiftTerm.bundle"
+for bundle in "${RESOURCE_BUNDLES[@]}"; do
+  ditto "$BUILD_DIR/$bundle" "$APP_RESOURCES/$bundle"
+done
 
 if [[ -f "$ICON_SOURCE" ]]; then
   cp -f "$ICON_SOURCE" "$APP_RESOURCES/AppIcon.icns"
@@ -125,7 +133,7 @@ case "$MODE" in
   --verify|verify)
     open_app
     sleep 1
-    pgrep -x "$APP_NAME" >/dev/null
+    pgrep -f "$INSTALLED_APP_BUNDLE/Contents/MacOS/$APP_NAME" >/dev/null
     ;;
   *)
     echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
