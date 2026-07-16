@@ -1,40 +1,94 @@
+import HighlightSwift
 import SwiftUI
-import AppKit
-import SwiftUIX
 
 struct FileViewer: View {
     let content: FileContent
-
-    private static let font = NSFont.monospacedSystemFont(ofSize: 12.5, weight: .regular)
+    let language: HighlightLanguage?
 
     private let displayText: String
     private let contentIdentity: FileViewerContentIdentity
-    private let contentSize: CGSize
 
-    init(content: FileContent) {
+    init(content: FileContent, fileURL: URL? = nil, language: HighlightLanguage? = nil) {
         self.content = content
+        self.language = language ?? fileURL.flatMap(FileViewerLanguage.language(for:))
         displayText = content.displayText
         contentIdentity = FileViewerContentIdentity(content)
-        contentSize = FileViewerMeasurementCache.size(
-            for: displayText,
-            identity: contentIdentity,
-            font: Self.font
-        )
     }
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            TextView(displayText)
-                .editable(false)
-                .isSelectable(true)
-                .font(Self.font)
-                .foregroundColor(AtelierNativePalette.foreground)
-                .textContainerInset(NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16))
-                .frame(width: contentSize.width, height: contentSize.height, alignment: .topLeading)
+        GeometryReader { geometry in
+            ScrollView([.horizontal, .vertical]) {
+                highlightedText
+                    .atelierFont(size: 12.5, design: .monospaced)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: true)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .frame(
+                        minWidth: geometry.size.width,
+                        minHeight: geometry.size.height,
+                        alignment: .topLeading
+                    )
+            }
+            .atelierScrollChrome(backgroundColor: AtelierNativePalette.code)
         }
         .id(contentIdentity)
         .background(Color(nsColor: AtelierNativePalette.code))
-        .atelierScrollChrome(backgroundColor: AtelierNativePalette.code)
+    }
+
+    @ViewBuilder
+    private var highlightedText: some View {
+        if case .text = content {
+            if let language {
+                CodeText(displayText)
+                    .highlightLanguage(language)
+                    .codeTextColors(.theme(.xcode))
+            } else {
+                CodeText(displayText)
+                    .codeTextColors(.theme(.xcode))
+            }
+        } else {
+            Text(displayText)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private enum FileViewerLanguage {
+    static func language(for url: URL) -> HighlightLanguage? {
+        switch url.lastPathComponent.lowercased() {
+        case "dockerfile": return .dockerfile
+        case "makefile": return .makefile
+        default: break
+        }
+
+        switch url.pathExtension.lowercased() {
+        case "ts", "tsx", "mts", "cts": return .typeScript
+        case "js", "jsx", "mjs", "cjs": return .javaScript
+        case "swift": return .swift
+        case "json", "jsonc": return .json
+        case "md", "markdown": return .markdown
+        case "yml", "yaml": return .yaml
+        case "html", "htm": return .html
+        case "css": return .css
+        case "scss": return .scss
+        case "less": return .less
+        case "sh", "bash", "zsh": return .bash
+        case "py": return .python
+        case "rb": return .ruby
+        case "rs": return .rust
+        case "go": return .go
+        case "java": return .java
+        case "kt", "kts": return .kotlin
+        case "sql": return .sql
+        case "toml": return .toml
+        case "c", "h": return .c
+        case "cc", "cpp", "cxx", "hpp": return .cPlusPlus
+        case "cs": return .cSharp
+        case "m", "mm": return .objectiveC
+        case "diff", "patch": return .diff
+        default: return nil
+        }
     }
 }
 
@@ -62,58 +116,5 @@ private struct FileViewerContentIdentity: Hashable {
             byteCount = message.utf8.count
             fingerprint = message.hashValue
         }
-    }
-
-    var cacheKey: NSString {
-        "\(kind):\(byteCount):\(fingerprint)" as NSString
-    }
-}
-
-private final class FileViewerMeasurement: NSObject {
-    let text: String
-    let size: CGSize
-
-    init(text: String, size: CGSize) {
-        self.text = text
-        self.size = size
-    }
-}
-
-private enum FileViewerMeasurementCache {
-    private static let cache: NSCache<NSString, FileViewerMeasurement> = {
-        let cache = NSCache<NSString, FileViewerMeasurement>()
-        cache.countLimit = 8
-        return cache
-    }()
-
-    static func size(
-        for text: String,
-        identity: FileViewerContentIdentity,
-        font: NSFont
-    ) -> CGSize {
-        if let cached = cache.object(forKey: identity.cacheKey), cached.text == text {
-            return cached.size
-        }
-
-        let text = NSAttributedString(
-            string: text,
-            attributes: [.font: font]
-        )
-        let bounds = text.boundingRect(
-            with: NSSize(
-                width: CGFloat.greatestFiniteMagnitude,
-                height: CGFloat.greatestFiniteMagnitude
-            ),
-            options: [.usesLineFragmentOrigin, .usesFontLeading]
-        )
-        let size = NSSize(
-            width: max(1, ceil(bounds.width) + 32),
-            height: max(1, ceil(bounds.height) + 28)
-        )
-        cache.setObject(
-            FileViewerMeasurement(text: text.string, size: size),
-            forKey: identity.cacheKey
-        )
-        return size
     }
 }

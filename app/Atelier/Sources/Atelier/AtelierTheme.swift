@@ -38,6 +38,39 @@ enum AtelierTheme {
     static let controlRadius: CGFloat = 5
 }
 
+private struct AtelierZoomScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+extension EnvironmentValues {
+    var atelierZoomScale: CGFloat {
+        get { self[AtelierZoomScaleKey.self] }
+        set { self[AtelierZoomScaleKey.self] = newValue }
+    }
+}
+
+private struct AtelierScaledFontModifier: ViewModifier {
+    @Environment(\.atelierZoomScale) private var scale
+
+    let size: CGFloat
+    let weight: Font.Weight
+    let design: Font.Design
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size * scale, weight: weight, design: design))
+    }
+}
+
+extension View {
+    func atelierFont(
+        size: CGFloat,
+        weight: Font.Weight = .regular,
+        design: Font.Design = .default
+    ) -> some View {
+        modifier(AtelierScaledFontModifier(size: size, weight: weight, design: design))
+    }
+}
+
 struct AtelierPanelModifier: ViewModifier {
     func body(content: Content) -> some View {
         content

@@ -3,6 +3,7 @@ import AppKit
 final class FileTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private(set) var root: FileNode
     private let onSelect: (URL) -> Void
+    var scale: CGFloat = 1
 
     init(rootURL: URL, onSelect: @escaping (URL) -> Void) {
         root = FileNode(url: rootURL, isDirectory: true)
@@ -38,7 +39,7 @@ final class FileTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineVie
         let cell = (outlineView.makeView(withIdentifier: identifier, owner: nil) as? NSTableCellView)
             ?? makeCell(identifier: identifier)
         cell.textField?.stringValue = node.name
-        cell.textField?.font = .systemFont(ofSize: 11.5, weight: .regular)
+        cell.textField?.font = .systemFont(ofSize: 11.5 * scale, weight: .regular)
         cell.textField?.textColor = node.isDirectory
             ? AtelierNativePalette.accent
             : AtelierNativePalette.foreground
@@ -66,9 +67,18 @@ final class FileTreeCoordinator: NSObject, NSOutlineViewDataSource, NSOutlineVie
         let location = recognizer.location(in: outlineView)
         let row = outlineView.row(at: location)
         guard row >= 0,
-              !outlineView.frameOfOutlineCell(atRow: row).contains(location),
-              let node = outlineView.item(atRow: row) as? FileNode,
-              node.isDirectory else { return }
+              let node = outlineView.item(atRow: row) as? FileNode else { return }
+
+        if !node.isDirectory {
+            let wasSelected = outlineView.selectedRow == row
+            outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            if wasSelected {
+                onSelect(node.url)
+            }
+            return
+        }
+
+        guard !outlineView.frameOfOutlineCell(atRow: row).contains(location) else { return }
 
         if outlineView.isItemExpanded(node) {
             outlineView.collapseItem(node)

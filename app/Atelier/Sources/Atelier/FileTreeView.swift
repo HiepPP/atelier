@@ -2,6 +2,8 @@ import SwiftUI
 import AppKit
 
 struct FileTreeView: NSViewRepresentable {
+    @Environment(\.atelierZoomScale) private var scale
+
     let rootURL: URL
     let onSelect: (URL) -> Void
 
@@ -44,6 +46,16 @@ struct FileTreeView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let outlineView = scrollView.documentView as? NSOutlineView else { return }
+        if context.coordinator.scale != scale {
+            context.coordinator.scale = scale
+            for row in 0..<outlineView.numberOfRows {
+                let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                    as? NSTableCellView
+                cell?.textField?.font = .systemFont(ofSize: 11.5 * scale, weight: .regular)
+            }
+            outlineView.needsDisplay = true
+            outlineView.displayIfNeeded()
+        }
         if context.coordinator.root.url != rootURL {
             context.coordinator.reset(rootURL: rootURL)
             outlineView.reloadData()

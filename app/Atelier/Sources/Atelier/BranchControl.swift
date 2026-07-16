@@ -21,7 +21,7 @@ struct BranchControl: View {
             }
         } label: {
             Label(current.isEmpty ? "Detached HEAD" : current, systemImage: "arrow.triangle.branch")
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .atelierFont(size: 10.5, weight: .medium, design: .monospaced)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)

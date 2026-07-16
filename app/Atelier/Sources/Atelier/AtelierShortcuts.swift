@@ -30,6 +30,11 @@ enum AtelierShortcuts {
         guard let window else { return }
         workspaceWindow = window
     }
+
+    @MainActor
+    static func zoomWorkspaceWindow() {
+        workspaceWindow?.zoom(nil)
+    }
 }
 
 private final class AtelierWorkspaceWindowMarkerView: NSView {

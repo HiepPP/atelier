@@ -12,7 +12,6 @@ struct ContentView: View {
                 EmptyStateView()
             }
         }
-        .frame(minWidth: 1_000, minHeight: 600)
         .background(AtelierTheme.canvas)
         .tint(AtelierTheme.accent)
         .preferredColorScheme(.light)
@@ -37,16 +36,16 @@ struct EmptyStateView: View {
             HStack(alignment: .center, spacing: 64) {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("ATELIER")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .atelierFont(size: 11, weight: .bold, design: .monospaced)
                         .tracking(2.4)
                         .foregroundStyle(AtelierTheme.accent)
 
                     Text("Chưa mở workspace")
-                        .font(.system(size: 38, weight: .semibold, design: .default))
+                        .atelierFont(size: 38, weight: .semibold)
                         .tracking(-1.4)
 
                     Text("Chọn một folder để xem changes, đọc file và chạy terminal.")
-                        .font(.system(size: 14, weight: .regular))
+                        .atelierFont(size: 14)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: 360, alignment: .leading)
 
@@ -64,7 +63,7 @@ struct EmptyStateView: View {
                 Spacer(minLength: 0)
 
                 Image(systemName: "folder")
-                    .font(.system(size: 116, weight: .ultraLight))
+                    .atelierFont(size: 116, weight: .ultraLight)
                     .foregroundStyle(AtelierTheme.accent.opacity(0.72))
                     .frame(width: 230, height: 230)
                     .background(AtelierTheme.panel)
@@ -84,8 +83,6 @@ struct EmptyStateView: View {
 struct WorkspaceView: View {
     let state: WorkspaceState
     @EnvironmentObject var store: WorkspaceStore
-    @State private var selectedFile: URL?
-    @State private var fileContent: FileContent = .text("Select a file to preview.")
     @StateObject private var terminalTabs: TerminalTabsModel
     @StateObject private var gitModel: GitWorkspaceModel
     @State private var fileWatcher: FileWatcher?
@@ -158,10 +155,10 @@ struct WorkspaceView: View {
 
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 10, weight: .medium))
+                    .atelierFont(size: 10, weight: .medium)
                     .foregroundStyle(.secondary)
                 Text(folderName)
-                    .font(.system(size: 11.5, weight: .medium))
+                    .atelierFont(size: 11.5, weight: .medium)
                     .lineLimit(1)
             }
             .padding(.horizontal, 12)
@@ -194,6 +191,9 @@ struct WorkspaceView: View {
         .padding(.horizontal, 10)
         .frame(height: 40)
         .background(AtelierTheme.chrome)
+        .onTapGesture(count: 2) {
+            AtelierShortcuts.zoomWorkspaceWindow()
+        }
     }
 
     private var explorerColumn: some View {
@@ -202,7 +202,7 @@ struct WorkspaceView: View {
 
             HStack {
                 Text(folderName.uppercased())
-                    .font(.system(size: 10, weight: .medium))
+                    .atelierFont(size: 10, weight: .medium)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
@@ -219,30 +219,7 @@ struct WorkspaceView: View {
             .frame(height: 36)
 
             FileTreeView(rootURL: workspaceURL) { url in
-                selectedFile = url
-                fileContent = FileLoader.load(url: url)
-            }
-
-            if selectedFile != nil {
-                Divider()
-
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.text")
-                        .foregroundStyle(AtelierTheme.accent)
-                    Text(selectedFile?.path ?? "No file selected")
-                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                    Spacer()
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 34)
-                .background(AtelierTheme.chrome)
-
-                FileViewer(content: fileContent)
-                    .frame(minHeight: 150, idealHeight: 230)
+                terminalTabs.openFile(url)
             }
         }
         .background(AtelierTheme.sidebar)
@@ -255,7 +232,7 @@ struct WorkspaceView: View {
                 id: \.self
             ) { icon in
                 Image(systemName: icon)
-                    .font(.system(size: 13, weight: .regular))
+                    .atelierFont(size: 13)
                     .foregroundStyle(icon == "doc.on.doc" ? Color.primary : Color.secondary)
                     .frame(width: 30, height: 40)
                     .overlay(alignment: .bottom) {
@@ -290,7 +267,7 @@ struct WorkspaceView: View {
             Text("Terminal")
             Text("Git")
         }
-        .font(.system(size: 10.5, weight: .medium))
+        .atelierFont(size: 10.5, weight: .medium)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 10)
         .frame(height: 24)

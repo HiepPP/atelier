@@ -4,6 +4,7 @@ import AppKit
 @main
 struct AtelierApp: App {
     @StateObject private var store = WorkspaceStore()
+    @StateObject private var zoom = AtelierZoomModel()
 
     init() {
         if CommandLine.arguments.contains("--selftest") {
@@ -14,15 +15,104 @@ struct AtelierApp: App {
 
     var body: some Scene {
         WindowGroup("Atelier") {
-            ContentView()
-                .environmentObject(store)
-                .background(AtelierWorkspaceWindowMarker())
+            AtelierZoomContainer {
+                ContentView()
+                    .environmentObject(store)
+                    .background(AtelierWorkspaceWindowMarker())
+            }
+            .environmentObject(zoom)
+            .frame(
+                minWidth: AtelierZoomModel.baseMinimumSize.width,
+                minHeight: AtelierZoomModel.baseMinimumSize.height
+            )
         }
         .windowStyle(.hiddenTitleBar)
+        .commands {
+            CommandGroup(after: .toolbar) {
+                Button("Zoom In") {
+                    zoom.zoomIn()
+                }
+                .keyboardShortcut("+", modifiers: .command)
+                .disabled(!zoom.canZoomIn)
+
+                Button("Zoom Out") {
+                    zoom.zoomOut()
+                }
+                .keyboardShortcut("-", modifiers: .command)
+                .disabled(!zoom.canZoomOut)
+            }
+        }
 
         Settings {
             AtelierSettingsView()
         }
+    }
+}
+
+@MainActor
+final class AtelierZoomModel: ObservableObject {
+    static let baseMinimumSize = CGSize(width: 1_000, height: 600)
+
+    @Published private(set) var scale: CGFloat = 1
+
+    private static let minimumScale: CGFloat = 0.75
+    private static let maximumScale: CGFloat = 1.5
+    private static let step: CGFloat = 0.1
+    private static let settleDelay: UInt64 = 150_000_000
+
+    private var requestedScale: CGFloat = 1
+    private var settleTask: Task<Void, Never>?
+
+    var canZoomIn: Bool { requestedScale < Self.maximumScale }
+    var canZoomOut: Bool { requestedScale > Self.minimumScale }
+
+    func zoomIn() {
+        requestScale(requestedScale + Self.step)
+    }
+
+    func zoomOut() {
+        requestScale(requestedScale - Self.step)
+    }
+
+    private func requestScale(_ value: CGFloat) {
+        let clamped = min(Self.maximumScale, max(Self.minimumScale, value))
+        requestedScale = (clamped * 100).rounded() / 100
+
+        let isRepeating = settleTask != nil
+        settleTask?.cancel()
+
+        if !isRepeating {
+            scale = requestedScale
+        }
+
+        settleTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.settleDelay)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            scale = requestedScale
+            settleTask = nil
+        }
+    }
+}
+
+private struct AtelierZoomContainer<Content: View>: View {
+    @EnvironmentObject private var zoom: AtelierZoomModel
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+            .environment(\.atelierZoomScale, zoom.scale)
+            .font(.system(size: 13 * zoom.scale))
+            .controlSize(controlSize)
+    }
+
+    private var controlSize: ControlSize {
+        if zoom.scale < 0.9 { return .small }
+        if zoom.scale > 1.2 { return .large }
+        return .regular
     }
 }
 

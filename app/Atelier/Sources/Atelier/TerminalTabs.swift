@@ -54,8 +54,55 @@ final class TerminalSession: Identifiable {
     }
 }
 
+private struct FileTab {
+    let url: URL
+    let content: FileContent
+}
+
+private enum CenterTabContent {
+    case terminal(TerminalSession)
+    case file(FileTab)
+}
+
+private final class CenterTab: Identifiable {
+    let id: UUID
+    let content: CenterTabContent
+
+    init(id: UUID = UUID(), content: CenterTabContent) {
+        self.id = id
+        self.content = content
+    }
+
+    var title: String {
+        switch content {
+        case .terminal(let session):
+            return session.title
+        case .file(let file):
+            return file.url.lastPathComponent
+        }
+    }
+
+    var systemImage: String {
+        switch content {
+        case .terminal:
+            return "terminal"
+        case .file:
+            return "doc.text"
+        }
+    }
+
+    var closeHelp: String {
+        switch content {
+        case .terminal:
+            return "Close terminal"
+        case .file:
+            return "Close file"
+        }
+    }
+}
+
 final class TerminalTabsModel: ObservableObject {
-    @Published private(set) var sessions: [TerminalSession] = []
+    @Published private var tabs: [CenterTab] = []
     @Published var selectedID: UUID?
 
     private let workspacePath: String
@@ -66,25 +113,62 @@ final class TerminalTabsModel: ObservableObject {
         add()
     }
 
-    var selectedSession: TerminalSession? {
-        sessions.first { $0.id == selectedID }
+    fileprivate var visibleTabs: [CenterTab] {
+        tabs
+    }
+
+    fileprivate var selectedTab: CenterTab? {
+        tabs.first { $0.id == selectedID }
+    }
+
+    var terminalCount: Int {
+        tabs.reduce(into: 0) { count, tab in
+            if case .terminal = tab.content {
+                count += 1
+            }
+        }
     }
 
     func add() {
         let session = TerminalSession(number: nextNumber, workspacePath: workspacePath)
+        let tab = CenterTab(content: .terminal(session))
         nextNumber += 1
-        sessions.append(session)
-        selectedID = session.id
+        tabs.append(tab)
+        selectedID = tab.id
     }
 
-    func close(_ session: TerminalSession) {
-        guard let index = sessions.firstIndex(where: { $0.id == session.id }) else { return }
-        session.close()
-        sessions.remove(at: index)
-        if selectedID == session.id {
-            selectedID = sessions.indices.contains(index)
-                ? sessions[index].id
-                : sessions.last?.id
+    func openFile(_ url: URL) {
+        let standardizedURL = url.standardizedFileURL
+        let content = FileLoader.load(url: standardizedURL)
+
+        if let index = tabs.firstIndex(where: { tab in
+            guard case .file(let file) = tab.content else { return false }
+            return file.url.standardizedFileURL == standardizedURL
+        }) {
+            let refreshed = CenterTab(
+                id: tabs[index].id,
+                content: .file(FileTab(url: standardizedURL, content: content))
+            )
+            tabs[index] = refreshed
+            selectedID = refreshed.id
+            return
+        }
+
+        let tab = CenterTab(content: .file(FileTab(url: standardizedURL, content: content)))
+        tabs.append(tab)
+        selectedID = tab.id
+    }
+
+    fileprivate func close(_ tab: CenterTab) {
+        guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        if case .terminal(let session) = tab.content {
+            session.close()
+        }
+        tabs.remove(at: index)
+        if selectedID == tab.id {
+            selectedID = tabs.indices.contains(index)
+                ? tabs[index].id
+                : tabs.last?.id
         }
     }
 }
@@ -98,16 +182,16 @@ struct TerminalTabs: View {
             HStack(spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
-                        ForEach(model.sessions) { session in
+                        ForEach(model.visibleTabs) { tab in
                             HStack(spacing: 7) {
                                 Button {
-                                    model.close(session)
+                                    model.close(tab)
                                 } label: {
                                     Image(systemName: "xmark")
-                                        .font(.system(size: 8, weight: .medium))
+                                        .atelierFont(size: 8, weight: .medium)
                                 }
                                 .buttonStyle(.borderless)
-                                .help("Close terminal")
+                                .help(tab.closeHelp)
 
                                 Button {
                                     withAnimation(
@@ -115,38 +199,34 @@ struct TerminalTabs: View {
                                             ? nil
                                             : .spring(response: 0.28, dampingFraction: 0.84)
                                     ) {
-                                        model.selectedID = session.id
+                                        model.selectedID = tab.id
                                     }
                                 } label: {
                                     HStack(spacing: 7) {
-                                        Image(systemName: "terminal")
-                                            .font(.system(size: 10, weight: .regular))
-                                        Text(session.title)
-                                            .font(
-                                                .system(
-                                                    size: 11.5,
-                                                    weight: .medium
-                                                )
-                                            )
+                                        Image(systemName: tab.systemImage)
+                                            .atelierFont(size: 10)
+                                        Text(tab.title)
+                                            .atelierFont(size: 11.5, weight: .medium)
+                                            .lineLimit(1)
                                     }
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityValue(
-                                    model.selectedID == session.id ? "Selected" : "Not selected"
+                                    model.selectedID == tab.id ? "Selected" : "Not selected"
                                 )
                             }
                             .foregroundStyle(
-                                model.selectedID == session.id ? Color.primary : Color.secondary
+                                model.selectedID == tab.id ? Color.primary : Color.secondary
                             )
                             .padding(.horizontal, 12)
                             .frame(height: 42)
                             .background(
-                                model.selectedID == session.id
+                                model.selectedID == tab.id
                                     ? AtelierTheme.editor
                                     : AtelierTheme.tabInactive
                             )
                             .overlay(alignment: .top) {
-                                if model.selectedID == session.id {
+                                if model.selectedID == tab.id {
                                     Rectangle()
                                         .fill(AtelierTheme.gitOrange)
                                         .frame(height: 1.5)
@@ -169,11 +249,11 @@ struct TerminalTabs: View {
                     Image(systemName: "plus")
                 }
                 .buttonStyle(AtelierLuminareIconButtonStyle())
-                .atelierNewTerminalEffect(sessionCount: model.sessions.count)
+                .atelierNewTerminalEffect(sessionCount: model.terminalCount)
                 .help("New terminal")
 
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 11, weight: .medium))
+                    .atelierFont(size: 11, weight: .medium)
                     .foregroundStyle(.secondary)
                     .frame(width: 28, height: 40)
                     .accessibilityHidden(true)
@@ -187,19 +267,26 @@ struct TerminalTabs: View {
                     .frame(height: 0.5)
             }
 
-            if let session = model.selectedSession {
-                TerminalView(terminal: session.terminal)
-                    .id(session.id)
-                    .background(AtelierTheme.editor)
+            if let tab = model.selectedTab {
+                switch tab.content {
+                case .terminal(let session):
+                    TerminalView(terminal: session.terminal)
+                        .id(tab.id)
+                        .background(AtelierTheme.editor)
+                case .file(let file):
+                    FileViewer(content: file.content, fileURL: file.url)
+                        .id(tab.id)
+                        .background(AtelierTheme.editor)
+                }
             } else {
                 VStack(spacing: 8) {
-                    Image(systemName: "terminal")
-                        .font(.system(size: 42, weight: .ultraLight))
+                    Image(systemName: "rectangle.stack")
+                        .atelierFont(size: 42, weight: .ultraLight)
                         .foregroundStyle(AtelierTheme.accent)
-                    Text("No Terminal")
-                        .font(.system(size: 22, weight: .semibold))
+                    Text("No Open Tabs")
+                        .atelierFont(size: 22, weight: .semibold)
                         .tracking(-0.5)
-                    Text("Add a terminal tab to start a shell.")
+                    Text("Open a file or add a terminal tab.")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

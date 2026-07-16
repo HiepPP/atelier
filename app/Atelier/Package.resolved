@@ -1,6 +1,15 @@
 {
   "pins" : [
     {
+      "identity" : "highlightswift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/appstefan/HighlightSwift.git",
+      "state" : {
+        "revision" : "784ca3ccfc8a2cf724fbb2f06cb6ec3329424da3",
+        "version" : "1.1.0"
+      }
+    },
+    {
       "identity" : "keyboardshortcuts",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/sindresorhus/KeyboardShortcuts",
@@ -52,15 +61,6 @@
       "state" : {
         "revision" : "af67d0e85bd2b499fbfb4cda834117e7c52b12b0",
         "version" : "1.0.0"
-      }
-    },
-    {
-      "identity" : "swiftuix",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/SwiftUIX/SwiftUIX",
-      "state" : {
-        "revision" : "e1754664a6105529b7978489164720185317c29e",
-        "version" : "0.3.1"
       }
     }
   ],

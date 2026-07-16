@@ -24,6 +24,7 @@ install -m 0644 "$ROOT/Packaging/Info.plist" "$APP/Contents/Info.plist"
 
 RESOURCE_BUNDLES=(
     "SwiftTerm_SwiftTerm.bundle"
+    "HighlightSwift_HighlightSwift.bundle"
     "KeyboardShortcuts_KeyboardShortcuts.bundle"
     "Pow_Pow.bundle"
 )

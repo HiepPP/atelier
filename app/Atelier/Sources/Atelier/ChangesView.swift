@@ -200,7 +200,7 @@ struct ChangesView: View {
                 if let message = model.errorMessage {
                     AtelierStatusCard {
                         Label(message, systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11, weight: .medium))
+                            .atelierFont(size: 11, weight: .medium)
                             .foregroundStyle(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -211,12 +211,12 @@ struct ChangesView: View {
                     AtelierStatusCard {
                         VStack(spacing: 10) {
                             Image(systemName: "checkmark.circle")
-                                .font(.system(size: 32, weight: .ultraLight))
+                                .atelierFont(size: 32, weight: .ultraLight)
                                 .foregroundStyle(AtelierTheme.accent)
                             Text("Working tree clean")
-                                .font(.system(size: 15, weight: .semibold))
+                                .atelierFont(size: 15, weight: .semibold)
                             Text("No staged or unstaged files.")
-                                .font(.system(size: 11.5))
+                                .atelierFont(size: 11.5)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -278,7 +278,7 @@ struct ChangesView: View {
                     Image(systemName: "doc.text.magnifyingglass")
                         .foregroundStyle(AtelierTheme.accent)
                     Text(model.selection?.change.path ?? "No diff selected")
-                        .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                        .atelierFont(size: 10.5, weight: .medium, design: .monospaced)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -341,11 +341,11 @@ struct ChangesView: View {
                                     .foregroundStyle(color(for: change.kind))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(change.path)
-                                        .font(.system(size: 11.5, weight: .medium))
+                                        .atelierFont(size: 11.5, weight: .medium)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
                                     Text(change.kind.rawValue)
-                                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                                        .atelierFont(size: 9.5, weight: .medium, design: .monospaced)
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -384,7 +384,7 @@ struct ChangesView: View {
                 }
             } header: {
                 Text(title.uppercased())
-                    .font(.system(size: 9.5, weight: .semibold))
+                    .atelierFont(size: 9.5, weight: .semibold)
                     .foregroundStyle(.secondary)
             }
         }
@@ -404,7 +404,7 @@ struct ChangesView: View {
             HStack(spacing: 3) {
                 Image(systemName: "arrow.triangle.branch")
                 Text("\(model.snapshot.status.changes.count)")
-                    .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                    .atelierFont(size: 9.5, weight: .semibold, design: .monospaced)
             }
             .foregroundStyle(.secondary)
             .frame(height: 40)

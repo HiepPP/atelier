@@ -5,7 +5,7 @@ struct AtelierLuminareIconButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button(action: configuration.trigger) {
             configuration.label
-                .font(.system(size: 11, weight: .medium))
+                .atelierFont(size: 11, weight: .medium)
                 .frame(minWidth: 24, minHeight: 24)
         }
         .buttonStyle(.luminareCompact)
@@ -24,7 +24,7 @@ struct AtelierLuminarePrimaryButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button(action: configuration.trigger) {
             configuration.label
-                .font(.system(size: 11, weight: .semibold))
+                .atelierFont(size: 11, weight: .semibold)
                 .foregroundStyle(AtelierTheme.accentInk)
                 .padding(.horizontal, 12)
         }
