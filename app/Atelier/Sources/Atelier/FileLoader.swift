@@ -52,3 +52,23 @@ enum FileLoader {
         }.value
     }
 }
+
+enum FileSaver {
+    private static let queue = DispatchQueue(
+        label: "app.atelier.file-saver",
+        qos: .userInitiated
+    )
+
+    static func saveAsync(text: String, url: URL) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                do {
+                    try Data(text.utf8).write(to: url, options: .atomic)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+}

@@ -272,6 +272,25 @@ enum SelfTest {
             asyncContent.get() == .text("hello"),
             "background load decoded text"
         )
+        let saveSemaphore = DispatchSemaphore(value: 0)
+        let savedURL = loaderFolder.appendingPathComponent("saved.txt")
+        let saveError = AsyncErrorBox()
+        Task.detached {
+            do {
+                try await FileSaver.saveAsync(text: "saved content", url: savedURL)
+                saveError.set(nil)
+            } catch {
+                saveError.set(error)
+            }
+            saveSemaphore.signal()
+        }
+        saveSemaphore.wait()
+        let savedText = try? String(contentsOf: savedURL, encoding: .utf8)
+        check(
+            "FileSaver async",
+            saveError.get() == nil && savedText == "saved content",
+            "serialized background save wrote content"
+        )
         check(
             "FileViewer highlight small",
             FileHighlightPolicy.usesSyntaxHighlighting(

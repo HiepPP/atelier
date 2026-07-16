@@ -1,5 +1,6 @@
 import AppKit
 import HighlightSwift
+import STTextView
 import SwiftUI
 
 enum FileHighlightPolicy {
@@ -14,10 +15,12 @@ struct FileViewer: NSViewRepresentable {
     @Environment(\.atelierZoomScale) private var scale
 
     let content: FileContent
+    let fileURL: URL?
     let language: HighlightLanguage?
 
     init(content: FileContent, fileURL: URL? = nil, language: HighlightLanguage? = nil) {
         self.content = content
+        self.fileURL = fileURL
         self.language = language ?? fileURL.flatMap(FileViewerLanguage.language(for:))
     }
 
@@ -26,31 +29,26 @@ struct FileViewer: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSTextView.scrollableTextView()
-        guard let textView = scrollView.documentView as? NSTextView else {
+        let scrollView = STTextView.scrollableTextView()
+        guard let textView = scrollView.documentView as? STTextView else {
             return scrollView
         }
 
         textView.isEditable = false
         textView.isSelectable = true
-        textView.isRichText = true
         textView.allowsUndo = false
-        textView.drawsBackground = true
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
         textView.backgroundColor = AtelierNativePalette.code
-        textView.textContainerInset = NSSize(width: 16, height: 14)
         textView.isHorizontallyResizable = true
         textView.isVerticallyResizable = true
-        textView.maxSize = NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude
-        )
-        textView.textContainer?.containerSize = NSSize(
-            width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude
-        )
-        textView.textContainer?.widthTracksTextView = false
-        textView.textContainer?.lineFragmentPadding = 0
-        textView.layoutManager?.allowsNonContiguousLayout = true
+        textView.showsLineNumbers = true
+        textView.gutterView?.drawSeparator = true
+        textView.gutterView?.minimumThickness = 46
+        textView.gutterView?.textColor = AtelierNativePalette.secondary
+        textView.gutterView?.separatorColor = AtelierNativePalette.border
 
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
@@ -64,6 +62,7 @@ struct FileViewer: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.update(
             content: content,
+            fileURL: fileURL,
             language: language,
             scale: scale
         )
@@ -73,48 +72,83 @@ struct FileViewer: NSViewRepresentable {
         coordinator.stop()
     }
 
-    final class Coordinator: @unchecked Sendable {
+    @MainActor
+    final class Coordinator: NSObject, @preconcurrency STTextViewDelegate, @unchecked Sendable {
         private static let highlighter = Highlight()
+        private static let saveDelay: UInt64 = 350_000_000
+        private static let highlightDelay: UInt64 = 450_000_000
 
         private weak var scrollView: NSScrollView?
+        private weak var textView: STTextView?
         private var renderedContent: FileContent?
+        private var fileURL: URL?
+        private var language: HighlightLanguage?
         private var renderedLanguage: String?
         private var renderedScale: CGFloat = 0
-        private var generation = 0
+        private var highlightGeneration = 0
         private var highlightTask: Task<Void, Never>?
+        private var saveGeneration = 0
+        private var saveTask: Task<Void, Never>?
+        private var isApplyingText = false
 
         func attach(_ scrollView: NSScrollView) {
             self.scrollView = scrollView
+            guard let textView = scrollView.documentView as? STTextView else { return }
+            self.textView = textView
+            textView.textDelegate = self
         }
 
         @MainActor
-        func update(content: FileContent, language: HighlightLanguage?, scale: CGFloat) {
+        func update(
+            content: FileContent,
+            fileURL: URL?,
+            language: HighlightLanguage?,
+            scale: CGFloat
+        ) {
             let contentChanged = renderedContent != content
                 || renderedLanguage != language?.rawValue
             let scaleChanged = renderedScale != scale
+            self.fileURL = fileURL
+            self.language = language
             renderedScale = scale
+            textView?.isEditable = fileURL != nil && content.isEditableText
+            textView?.allowsUndo = textView?.isEditable == true
 
+            if scaleChanged {
+                applyFont()
+            }
             if contentChanged {
                 renderedContent = content
                 renderedLanguage = language?.rawValue
                 render(content: content, language: language)
-            } else if scaleChanged {
-                applyFont()
             }
         }
 
         @MainActor
         func stop() {
-            generation += 1
+            highlightGeneration += 1
             highlightTask?.cancel()
             highlightTask = nil
+            saveGeneration += 1
+            saveTask?.cancel()
+            saveTask = nil
+            textView?.textDelegate = nil
+            textView = nil
             scrollView = nil
+        }
+
+        func textViewDidChangeText(_ notification: Notification) {
+            guard !isApplyingText,
+                  let textView = notification.object as? STTextView,
+                  let fileURL else { return }
+            let text = textView.text ?? ""
+            scheduleSave(text: text, url: fileURL)
+            scheduleHighlight(text: text, language: language, delayed: true)
         }
 
         @MainActor
         private func render(content: FileContent, language: HighlightLanguage?) {
-            generation += 1
-            let expectedGeneration = generation
+            highlightGeneration += 1
             highlightTask?.cancel()
             highlightTask = nil
 
@@ -142,9 +176,51 @@ struct FileViewer: NSViewRepresentable {
                 return
             }
 
+            scheduleHighlight(text: text, language: language, delayed: false)
+        }
+
+        @MainActor
+        private func scheduleSave(text: String, url: URL) {
+            saveGeneration += 1
+            let expectedGeneration = saveGeneration
+            saveTask?.cancel()
+            saveTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: Self.saveDelay)
+                    guard !Task.isCancelled else { return }
+                    try await FileSaver.saveAsync(text: text, url: url)
+                    guard !Task.isCancelled,
+                          self?.saveGeneration == expectedGeneration else { return }
+                    self?.textView?.toolTip = nil
+                } catch {
+                    guard !(error is CancellationError),
+                          self?.saveGeneration == expectedGeneration else { return }
+                    self?.textView?.toolTip = "Auto-save failed: \(error.localizedDescription)"
+                }
+            }
+        }
+
+        @MainActor
+        private func scheduleHighlight(
+            text: String,
+            language: HighlightLanguage?,
+            delayed: Bool
+        ) {
+            highlightGeneration += 1
+            let expectedGeneration = highlightGeneration
+            highlightTask?.cancel()
+            highlightTask = nil
+            guard FileHighlightPolicy.usesSyntaxHighlighting(byteCount: text.utf8.count) else {
+                return
+            }
+
             let mode = language.map(HighlightMode.language) ?? .automatic
             highlightTask = Task.detached(priority: .userInitiated) { [weak self] in
                 do {
+                    if delayed {
+                        try await Task.sleep(nanoseconds: Self.highlightDelay)
+                    }
+                    guard !Task.isCancelled else { return }
                     let result = try await Self.highlighter.request(
                         text,
                         mode: mode,
@@ -153,6 +229,7 @@ struct FileViewer: NSViewRepresentable {
                     guard !Task.isCancelled else { return }
                     await self?.apply(
                         highlightedText: result.attributedText,
+                        sourceText: text,
                         expectedGeneration: expectedGeneration
                     )
                 } catch {
@@ -164,33 +241,51 @@ struct FileViewer: NSViewRepresentable {
         @MainActor
         private func apply(
             highlightedText: AttributedString,
+            sourceText: String,
             expectedGeneration: Int
         ) {
-            guard generation == expectedGeneration else { return }
+            guard highlightGeneration == expectedGeneration,
+                  textView?.text == sourceText else { return }
+            let nativeHighlight = NSAttributedString(highlightedText)
             let nativeText = NSMutableAttributedString(
-                attributedString: NSAttributedString(highlightedText)
+                string: sourceText,
+                attributes: baseAttributes(
+                    foregroundColor: AtelierNativePalette.foreground
+                )
             )
-            nativeText.addAttribute(
-                .font,
-                value: font,
-                range: NSRange(location: 0, length: nativeText.length)
-            )
+            let sourceRange = (sourceText as NSString).range(of: nativeHighlight.string)
+            if sourceRange.location != NSNotFound {
+                nativeHighlight.enumerateAttribute(
+                    .foregroundColor,
+                    in: NSRange(location: 0, length: nativeHighlight.length)
+                ) { value, range, _ in
+                    guard let value else { return }
+                    nativeText.addAttribute(
+                        .foregroundColor,
+                        value: value,
+                        range: NSRange(
+                            location: sourceRange.location + range.location,
+                            length: range.length
+                        )
+                    )
+                }
+            }
             apply(nativeText)
         }
 
         @MainActor
         private func apply(_ text: NSAttributedString) {
             guard let scrollView,
-                  let textView = scrollView.documentView as? NSTextView else { return }
+                  let textView = scrollView.documentView as? STTextView else { return }
             let origin = scrollView.contentView.bounds.origin
-            let selection = textView.selectedRange()
-            textView.textStorage?.setAttributedString(text)
+            let selection = textView.textSelection
+            isApplyingText = true
+            textView.attributedText = text
+            isApplyingText = false
             if selection.location <= text.length {
-                textView.setSelectedRange(
-                    NSRange(
-                        location: selection.location,
-                        length: min(selection.length, text.length - selection.location)
-                    )
+                textView.textSelection = NSRange(
+                    location: selection.location,
+                    length: min(selection.length, text.length - selection.location)
                 )
             }
             scrollView.contentView.scroll(to: origin)
@@ -200,13 +295,11 @@ struct FileViewer: NSViewRepresentable {
         @MainActor
         private func applyFont() {
             guard renderedScale != 0,
-                  let textView = scrollView?.documentView as? NSTextView,
-                  let textStorage = textView.textStorage,
-                  textStorage.length > 0 else { return }
-            textStorage.addAttribute(
-                .font,
-                value: font,
-                range: NSRange(location: 0, length: textStorage.length)
+                  let textView = scrollView?.documentView as? STTextView else { return }
+            textView.font = font
+            textView.gutterView?.font = .monospacedDigitSystemFont(
+                ofSize: 10.5 * renderedScale,
+                weight: .regular
             )
         }
 
@@ -222,6 +315,13 @@ struct FileViewer: NSViewRepresentable {
         private var font: NSFont {
             .monospacedSystemFont(ofSize: 12.5 * renderedScale, weight: .regular)
         }
+    }
+}
+
+private extension FileContent {
+    var isEditableText: Bool {
+        if case .text = self { return true }
+        return false
     }
 }
 
