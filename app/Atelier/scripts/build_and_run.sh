@@ -5,6 +5,19 @@ MODE="${1:-run}"
 APP_NAME="Atelier"
 BUNDLE_ID="app.atelier.Atelier"
 
+case "$MODE" in
+  --release|release)
+    CONFIGURATION="release"
+    ;;
+  run|--debug|debug|--logs|logs|--telemetry|telemetry|--verify|verify)
+    CONFIGURATION="debug"
+    ;;
+  *)
+    echo "usage: $0 [run|--release|--debug|--logs|--telemetry|--verify]" >&2
+    exit 2
+    ;;
+esac
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
@@ -59,8 +72,8 @@ sign_app_bundle() {
   codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 }
 
-swift build --package-path "$ROOT_DIR"
-BUILD_DIR="$(swift build --package-path "$ROOT_DIR" --show-bin-path)"
+swift build --package-path "$ROOT_DIR" -c "$CONFIGURATION"
+BUILD_DIR="$(swift build --package-path "$ROOT_DIR" -c "$CONFIGURATION" --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$APP_NAME"
 RESOURCE_BUNDLES=(
   "SwiftTerm_SwiftTerm.bundle"
@@ -83,6 +96,11 @@ done
 
 if [[ ! -f "$INFO_PLIST_SOURCE" ]]; then
   echo "Bundle metadata not found: $INFO_PLIST_SOURCE" >&2
+  exit 1
+fi
+
+if [[ ! -f "$ICON_SOURCE" && ! -d "$ICONSET_SOURCE" ]]; then
+  echo "App icon source not found: $ICON_SOURCE" >&2
   exit 1
 fi
 
@@ -114,30 +132,31 @@ open_app() {
   /usr/bin/open -n "$INSTALLED_APP_BUNDLE"
 }
 
-install_app
-
 case "$MODE" in
+  --release|release)
+    echo "$APP_BUNDLE"
+    ;;
   run)
+    install_app
     open_app
     ;;
   --debug|debug)
     lldb -- "$APP_BINARY"
     ;;
   --logs|logs)
+    install_app
     open_app
     /usr/bin/log stream --info --style compact --predicate "process == \"$APP_NAME\""
     ;;
   --telemetry|telemetry)
+    install_app
     open_app
     /usr/bin/log stream --info --style compact --predicate "subsystem == \"$BUNDLE_ID\""
     ;;
   --verify|verify)
+    install_app
     open_app
     sleep 1
     pgrep -f "$INSTALLED_APP_BUNDLE/Contents/MacOS/$APP_NAME" >/dev/null
-    ;;
-  *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
-    exit 2
     ;;
 esac

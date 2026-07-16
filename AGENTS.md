@@ -7,7 +7,7 @@ Atelier is a macOS 26+ SwiftUI application built with Swift 6.2 and Swift Packag
 - `app/Atelier/Sources/Atelier/`: production Swift sources. Keep views, models, services, and AppKit bridges in focused files.
 - `app/Atelier/Tests/AtelierTests/`: focused tests for models, parsers, persistence, and services.
 - `app/Atelier/Packaging/`: application bundle metadata, including `Info.plist`.
-- `app/Atelier/script/` and `app/Atelier/scripts/`: build, install, signing, logging, and verification scripts.
+- `app/Atelier/scripts/`: build, install, signing, logging, and verification scripts.
 - `spike/swiftterm-spike/`: isolated SwiftTerm experiments. Do not add production behavior here.
 - `watchtower/tasks/`: task specifications and verification outcomes. Update these only when working through the Watchtower workflow.
 - `IDEA.md`, `PLAN.md`, `M0.md`, and `M1.md`: product and milestone notes.
@@ -22,9 +22,9 @@ Run commands from the repository root:
 swift build --package-path app/Atelier
 swift test --package-path app/Atelier
 app/Atelier/.build/debug/Atelier --selftest
-app/Atelier/script/build_and_run.sh run
-app/Atelier/script/build_and_run.sh --verify
-app/Atelier/scripts/build-app.sh release
+app/Atelier/scripts/build_and_run.sh run
+app/Atelier/scripts/build_and_run.sh --verify
+app/Atelier/scripts/build_and_run.sh --release
 ```
 
 `swift build` compiles the package. `swift test` runs focused core tests. `--selftest` checks persistence, file loading, Git parsing, and Git operations. The main script builds, signs, installs, and optionally verifies the app process. The release script creates `app/Atelier/dist/Atelier.app`.
