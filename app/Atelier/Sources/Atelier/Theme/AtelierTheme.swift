@@ -20,6 +20,14 @@ enum AtelierTheme {
     static let controlRadius: CGFloat = 5
 }
 
+enum AtelierFontScaling {
+    /// Snap a scaled point size to whole device pixels so text stays crisp on non-Retina displays.
+    static func snapped(_ size: CGFloat, displayScale: CGFloat) -> CGFloat {
+        guard size > 0, displayScale > 0 else { return size }
+        return (size * displayScale).rounded() / displayScale
+    }
+}
+
 private struct AtelierZoomScaleKey: EnvironmentKey {
     static let defaultValue: CGFloat = 1
 }
@@ -33,13 +41,15 @@ extension EnvironmentValues {
 
 private struct AtelierScaledFontModifier: ViewModifier {
     @Environment(\.atelierZoomScale) private var scale
+    @Environment(\.displayScale) private var displayScale
 
     let size: CGFloat
     let weight: Font.Weight
     let design: Font.Design
 
     func body(content: Content) -> some View {
-        content.font(.system(size: size * scale, weight: weight, design: design))
+        let resolved = AtelierFontScaling.snapped(size * scale, displayScale: displayScale)
+        content.font(.system(size: resolved, weight: weight, design: design))
     }
 }
 

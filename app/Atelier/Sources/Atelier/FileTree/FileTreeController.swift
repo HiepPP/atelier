@@ -8,6 +8,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     private var onCreateItem: (FileTreeCreationKind, URL) -> Void
     private var onSelect: (URL) -> Void
     private var scale: CGFloat = 1
+    private var displayScale: CGFloat = 2
     private var revision = 0
     private weak var outlineView: NSOutlineView?
     private var loadTasks: [URL: Task<Void, Never>] = [:]
@@ -25,8 +26,9 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         self.onSelect = onSelect
     }
 
-    func makeView(scale: CGFloat) -> NSScrollView {
+    func makeView(scale: CGFloat, displayScale: CGFloat) -> NSScrollView {
         self.scale = scale
+        self.displayScale = displayScale
 
         let outlineView = FileTreeOutlineView()
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("File"))
@@ -36,6 +38,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         outlineView.outlineTableColumn = column
         outlineView.headerView = nil
         outlineView.rowSizeStyle = .small
+        outlineView.rowHeight = rowHeight
         outlineView.intercellSpacing = .zero
         outlineView.usesAlternatingRowBackgroundColors = false
         outlineView.backgroundColor = AppKitThemeAdapter.sidebar
@@ -68,6 +71,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         rootURL: URL,
         revision: Int,
         scale: CGFloat,
+        displayScale: CGFloat,
         onTargetDirectoryChange: @escaping (URL) -> Void,
         onCreateItem: @escaping (FileTreeCreationKind, URL) -> Void,
         onSelect: @escaping (URL) -> Void
@@ -87,13 +91,16 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             refreshExpandedDirectories()
         }
 
-        guard self.scale != scale else { return }
+        guard self.scale != scale || self.displayScale != displayScale else { return }
         self.scale = scale
+        self.displayScale = displayScale
         guard let outlineView else { return }
+        outlineView.rowHeight = rowHeight
         for row in 0..<outlineView.numberOfRows {
             let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
                 as? NSTableCellView
             cell?.textField?.font = font
+            cell?.textField?.frame.size.height = rowHeight
         }
     }
 
@@ -276,7 +283,14 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     }
 
     private var font: NSFont {
-        .systemFont(ofSize: 13 * scale, weight: .regular)
+        .systemFont(
+            ofSize: AtelierFontScaling.snapped(13 * scale, displayScale: displayScale),
+            weight: .regular
+        )
+    }
+
+    private var rowHeight: CGFloat {
+        ceil(font.ascender - font.descender + font.leading + 4)
     }
 
     private func makeCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
@@ -288,7 +302,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         icon.autoresizingMask = [.maxXMargin]
 
         let label = NSTextField(labelWithString: "")
-        label.frame = NSRect(x: 21, y: 0, width: 240, height: 18)
+        label.frame = NSRect(x: 21, y: 0, width: 240, height: rowHeight)
         label.lineBreakMode = .byTruncatingMiddle
         label.autoresizingMask = [.width]
 

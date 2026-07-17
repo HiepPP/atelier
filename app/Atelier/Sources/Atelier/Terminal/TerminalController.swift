@@ -1,6 +1,16 @@
 import AppKit
 import SwiftTerm
 
+enum TerminalRenderingPolicy {
+    static func usesMetal(displayScale: CGFloat) -> Bool {
+        displayScale > 1
+    }
+
+    static func usesFontSmoothing(displayScale: CGFloat) -> Bool {
+        displayScale > 1
+    }
+}
+
 @MainActor
 final class TerminalController {
     private let processService: TerminalProcessService
@@ -33,10 +43,18 @@ final class TerminalController {
         return terminal
     }
 
-    func updateScale(_ scale: CGFloat) {
-        let targetSize = 13.5 * scale
-        guard abs(terminal.font.pointSize - targetSize) > 0.01 else { return }
-        terminal.font = .monospacedSystemFont(ofSize: targetSize, weight: .regular)
+    func updateScale(_ scale: CGFloat, displayScale: CGFloat) {
+        let targetSize = AtelierFontScaling.snapped(13.5 * scale, displayScale: displayScale)
+        let usesFontSmoothing = TerminalRenderingPolicy.usesFontSmoothing(
+            displayScale: displayScale
+        )
+        let fontChanged = abs(terminal.font.pointSize - targetSize) > 0.01
+        let smoothingChanged = terminal.fontSmoothing != usesFontSmoothing
+        guard fontChanged || smoothingChanged else { return }
+        terminal.fontSmoothing = usesFontSmoothing
+        if fontChanged {
+            terminal.font = .monospacedSystemFont(ofSize: targetSize, weight: .regular)
+        }
         terminal.setNeedsDisplay(terminal.bounds)
         terminal.layoutSubtreeIfNeeded()
     }
@@ -63,7 +81,6 @@ final class TerminalController {
 
 final class AtelierTerminalNativeView: LocalProcessTerminalView {
     private var shouldFocusWhenAttached = false
-    private var didAttemptMetalSetup = false
     private var preciseScrollRemainder: CGFloat = 0
     private var scrollWheelMonitor: Any?
 
@@ -75,8 +92,13 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         installScrollWheelMonitor()
-        enableMetalIfAvailable()
+        updateRendererForDisplay()
         focusIfPossible()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        updateRendererForDisplay()
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -144,14 +166,17 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
         }
     }
 
-    private func enableMetalIfAvailable() {
-        guard window != nil, !didAttemptMetalSetup else { return }
-        didAttemptMetalSetup = true
+    private func updateRendererForDisplay() {
+        guard let window else { return }
+        let shouldUseMetal = TerminalRenderingPolicy.usesMetal(
+            displayScale: window.backingScaleFactor
+        )
+        guard isUsingMetalRenderer != shouldUseMetal else { return }
         do {
-            try setUseMetal(true)
+            try setUseMetal(shouldUseMetal)
         } catch {
             AppLogger.terminal.warning(
-                "Metal renderer unavailable: \(error.localizedDescription, privacy: .public)"
+                "Terminal renderer update failed: \(error.localizedDescription, privacy: .public)"
             )
         }
     }

@@ -18,6 +18,9 @@ final class AppModel {
         self.environment = environment
         windowController = environment.windowController
         zoom = AtelierZoomModel(windowController: environment.windowController)
+        environment.windowController.onScreenDidChange = { [weak zoom] in
+            zoom?.updateForCurrentDisplay()
+        }
     }
 
     func start() {

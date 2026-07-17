@@ -248,7 +248,7 @@ struct ChangesView: View {
                 HStack(spacing: 8) {
                     TextField("Commit message", text: $commitMessage)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 13 * zoom.sidebarScale))
+                        .atelierFont(size: 13)
                         .padding(.horizontal, 10)
                         .frame(height: 28)
                         .background(AtelierTheme.editor)

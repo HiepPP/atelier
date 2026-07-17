@@ -13,6 +13,7 @@ enum FileHighlightPolicy {
 
 struct FileViewer: NSViewRepresentable {
     @Environment(\.atelierZoomScale) private var scale
+    @Environment(\.displayScale) private var displayScale
 
     let content: FileContent
     let fileURL: URL?
@@ -78,6 +79,7 @@ struct FileViewer: NSViewRepresentable {
             fileURL: fileURL,
             language: language,
             scale: scale,
+            displayScale: displayScale,
             isWordWrapEnabled: isWordWrapEnabled
         )
     }
@@ -110,6 +112,7 @@ struct FileViewer: NSViewRepresentable {
         private var language: HighlightLanguage?
         private var renderedLanguage: String?
         private var renderedScale: CGFloat = 0
+        private var renderedDisplayScale: CGFloat = 0
         private var renderedWordWrapEnabled: Bool?
         private var highlightGeneration = 0
         private var highlightTask: Task<Void, Never>?
@@ -131,11 +134,12 @@ struct FileViewer: NSViewRepresentable {
             fileURL: URL?,
             language: HighlightLanguage?,
             scale: CGFloat,
+            displayScale: CGFloat,
             isWordWrapEnabled: Bool
         ) {
             let contentChanged = renderedContent != content
                 || renderedLanguage != language?.rawValue
-            let scaleChanged = renderedScale != scale
+            let scaleChanged = renderedScale != scale || renderedDisplayScale != displayScale
             let wordWrapChanged = renderedWordWrapEnabled != isWordWrapEnabled
             self.fileURL = fileURL
             if let fileURL {
@@ -145,6 +149,7 @@ struct FileViewer: NSViewRepresentable {
             }
             self.language = language
             renderedScale = scale
+            renderedDisplayScale = displayScale
             renderedWordWrapEnabled = isWordWrapEnabled
             textView?.isEditable = fileURL != nil && content.isEditableText
             textView?.allowsUndo = textView?.isEditable == true
@@ -365,7 +370,7 @@ struct FileViewer: NSViewRepresentable {
                   let textView = scrollView?.documentView as? STTextView else { return }
             textView.font = font
             textView.gutterView?.font = .monospacedDigitSystemFont(
-                ofSize: 10.5 * renderedScale,
+                ofSize: AtelierFontScaling.snapped(10.5 * renderedScale, displayScale: backingScale),
                 weight: .regular
             )
         }
@@ -394,8 +399,16 @@ struct FileViewer: NSViewRepresentable {
         }
 
         @MainActor
+        private var backingScale: CGFloat {
+            renderedDisplayScale > 0 ? renderedDisplayScale : 2
+        }
+
+        @MainActor
         private var font: NSFont {
-            .monospacedSystemFont(ofSize: 12.5 * renderedScale, weight: .regular)
+            .monospacedSystemFont(
+                ofSize: AtelierFontScaling.snapped(12.5 * renderedScale, displayScale: backingScale),
+                weight: .regular
+            )
         }
     }
 }

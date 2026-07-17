@@ -2,6 +2,8 @@ import SwiftTerm
 import SwiftUI
 
 struct TerminalRepresentable: NSViewRepresentable {
+    @Environment(\.displayScale) private var displayScale
+
     let controller: TerminalController
     let scale: CGFloat
 
@@ -10,6 +12,6 @@ struct TerminalRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: AtelierTerminalNativeView, context: Context) {
-        controller.updateScale(scale)
+        controller.updateScale(scale, displayScale: displayScale)
     }
 }

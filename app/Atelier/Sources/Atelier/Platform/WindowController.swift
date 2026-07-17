@@ -3,6 +3,8 @@ import KeyboardShortcuts
 
 @MainActor
 final class WindowController {
+    var onScreenDidChange: (() -> Void)?
+
     private weak var workspaceWindow: NSWindow?
     private var shortcutInstalled = false
 
@@ -18,8 +20,15 @@ final class WindowController {
 
     func track(_ window: NSWindow?) {
         guard let window else { return }
+        let changed = workspaceWindow !== window
         workspaceWindow = window
+        guard changed else { return }
         configure(window)
+        onScreenDidChange?()
+    }
+
+    func currentScreen() -> NSScreen? {
+        workspaceWindow?.screen ?? NSScreen.main
     }
 
     func showWorkspaceWindow() {
