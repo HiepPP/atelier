@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+nonisolated struct GemmaTranscriptScrollAnchor: Equatable, Sendable {
+    let messageID: UUID?
+    let status: GemmaAgentStatus
+}
+
 struct GemmaAgentView: View {
     @Bindable var model: GemmaAgentModel
     let workspaceRoot: URL
@@ -64,7 +69,7 @@ struct GemmaAgentView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 14) {
                     if model.messages.isEmpty {
                         emptyState
                     }
@@ -79,17 +84,25 @@ struct GemmaAgentView: View {
                     if let error = model.errorMessage {
                         errorView(error, recoverySuggestion: model.recoverySuggestion)
                     }
+                    Color.clear
+                        .frame(height: 1)
+                        .id("gemma-transcript-bottom")
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.editor)
-            .onChange(of: model.messages.last?.content) {
-                if let id = model.messages.last?.id {
-                    proxy.scrollTo(id, anchor: .bottom)
-                }
+            .onChange(of: transcriptScrollAnchor) {
+                proxy.scrollTo("gemma-transcript-bottom", anchor: .bottom)
             }
         }
+    }
+
+    private var transcriptScrollAnchor: GemmaTranscriptScrollAnchor {
+        GemmaTranscriptScrollAnchor(
+            messageID: model.messages.last?.id,
+            status: model.status
+        )
     }
 
     private var emptyState: some View {

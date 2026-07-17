@@ -23,11 +23,8 @@ nonisolated enum MermaidResponsePresentationPolicy {
 struct AgentMarkdownView: View {
     let source: String
 
-    private var blocks: [AgentMarkdownBlock] {
-        AgentMarkdownBlock.parse(source)
-    }
-
     var body: some View {
+        let blocks = AgentMarkdownBlock.parse(source)
         VStack(alignment: .leading, spacing: 9) {
             ForEach(blocks.indices, id: \.self) { index in
                 blockView(blocks[index])

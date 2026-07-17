@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-enum GemmaAgentStatus: Equatable {
+nonisolated enum GemmaAgentStatus: Equatable, Sendable {
     case idle
     case running
     case completed

@@ -33,6 +33,22 @@ struct GemmaAgentModelTests {
         #expect(model.messages.isEmpty)
     }
 
+    @Test("Streaming content does not create another scroll request")
+    func stableStreamingScrollAnchor() {
+        let messageID = UUID()
+        let streaming = GemmaTranscriptScrollAnchor(messageID: messageID, status: .running)
+        let sameStreamingMessage = GemmaTranscriptScrollAnchor(
+            messageID: messageID,
+            status: .running
+        )
+        let completed = GemmaTranscriptScrollAnchor(messageID: messageID, status: .completed)
+        let nextMessage = GemmaTranscriptScrollAnchor(messageID: UUID(), status: .running)
+
+        #expect(streaming == sameStreamingMessage)
+        #expect(streaming != completed)
+        #expect(streaming != nextMessage)
+    }
+
     @Test("Workspace cleanup cancels its active Gemma run")
     func workspaceCleanup() async {
         let root = temporaryDirectory()
