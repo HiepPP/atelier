@@ -23,6 +23,7 @@ final class AppModel {
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
+        presentLastResourceExitIfNeeded()
         windowController.installGlobalShortcut()
         startupTask = Task { [weak self] in
             guard let self else { return }
@@ -73,6 +74,13 @@ final class AppModel {
         workspace = session
         session.start()
         if shouldPersist { persist(state) }
+    }
+
+    private func presentLastResourceExitIfNeeded() {
+        guard let url = ResourceExitMarker.defaultURL(),
+              let record = ResourceExitMarker.read(from: url) else { return }
+        presentedError = .resourceExit(record)
+        ResourceExitMarker.clear(at: url)
     }
 
     private func persist(_ state: WorkspaceState?) {
