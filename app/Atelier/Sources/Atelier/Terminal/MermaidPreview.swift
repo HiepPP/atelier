@@ -1,6 +1,28 @@
 import AppKit
 import WebKit
 
+enum MermaidRenderingPolicy {
+    private static let minimumWidth: CGFloat = 420
+    private static let maximumWidth: CGFloat = 960
+
+    static func targetWidth(containerWidth: CGFloat) -> CGFloat {
+        let availableWidth = max(1, min(containerWidth, maximumWidth))
+        let preferredWidth = max(minimumWidth, containerWidth * 0.9)
+        return min(availableWidth, preferredWidth)
+    }
+
+    static func imageColumns(
+        imageWidth: CGFloat,
+        terminalWidth: CGFloat,
+        terminalColumns: Int
+    ) -> Int {
+        guard terminalWidth > 0, terminalColumns > 0 else { return 1 }
+        let cellWidth = terminalWidth / CGFloat(terminalColumns)
+        let columns = Int(ceil(min(imageWidth, terminalWidth) / cellWidth))
+        return min(max(1, columns), terminalColumns)
+    }
+}
+
 enum MermaidImageRendererError: LocalizedError {
     case missingResources
     case invalidResult
@@ -49,7 +71,7 @@ final class MermaidImageRenderer: NSObject, WKNavigationDelegate {
         }
         try await waitUntilLoaded()
 
-        let renderWidth = min(max(width, 420), 1_100)
+        let renderWidth = min(max(width, 1), 960)
         webView.setFrameSize(CGSize(width: renderWidth, height: 1_200))
         let result = try await webView.callAsyncJavaScript(
             "return await renderMermaidForSnapshot(source);",

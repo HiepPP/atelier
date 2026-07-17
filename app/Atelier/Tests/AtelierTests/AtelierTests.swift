@@ -140,6 +140,27 @@ struct AtelierTests {
         #expect(environment["PATH"] == "/usr/bin")
     }
 
+    @Test("Terminal caps Mermaid width and keeps narrow layouts contained")
+    func terminalMermaidRenderWidth() {
+        #expect(MermaidRenderingPolicy.targetWidth(containerWidth: 300) == 300)
+        #expect(MermaidRenderingPolicy.targetWidth(containerWidth: 800) == 720)
+        #expect(MermaidRenderingPolicy.targetWidth(containerWidth: 1_600) == 960)
+    }
+
+    @Test("Terminal sizes Mermaid images from rendered width")
+    func terminalMermaidImageColumns() {
+        #expect(MermaidRenderingPolicy.imageColumns(
+            imageWidth: 960,
+            terminalWidth: 1_600,
+            terminalColumns: 160
+        ) == 96)
+        #expect(MermaidRenderingPolicy.imageColumns(
+            imageWidth: 600,
+            terminalWidth: 600,
+            terminalColumns: 60
+        ) == 60)
+    }
+
     @Test("Terminal detects Mermaid only in Codex final answers")
     func terminalCodexMermaidResponse() {
         let transcript = """

@@ -26,7 +26,6 @@ final class TerminalController {
     private var handledMermaidIDs: Set<String> = []
     private var mermaidImageIDs: [String: UInt32] = [:]
     private var nextMermaidImageID: UInt32 = 1
-    private var needsMermaidResizeRefresh = false
 
     private static let lightAnsiPalette: [SwiftTerm.Color] = [
         terminalColor(0x4b, 0x49, 0x44), terminalColor(0xb8, 0x3a, 0x32),
@@ -48,9 +47,6 @@ final class TerminalController {
         terminal.installColors(Self.lightAnsiPalette)
         terminal.onOutputActivity = { [weak self] in
             self?.scheduleMermaidTranscriptScan()
-        }
-        terminal.onSizeChanged = { [weak self] in
-            self?.scheduleMermaidTranscriptScan(forceRefresh: true)
         }
         processService.start(in: terminal, workspacePath: workspacePath)
         AppLogger.terminal.info("Started terminal session")
@@ -93,35 +89,19 @@ final class TerminalController {
         close()
     }
 
-    private func scheduleMermaidTranscriptScan(forceRefresh: Bool = false) {
-        needsMermaidResizeRefresh = needsMermaidResizeRefresh || forceRefresh
+    private func scheduleMermaidTranscriptScan() {
         mermaidTranscriptTask?.cancel()
         mermaidTranscriptTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(1_200))
             guard !Task.isCancelled, let self else { return }
             let diagrams = await mermaidMonitor.diagrams()
             guard !Task.isCancelled else { return }
-            let shouldForceRefresh = needsMermaidResizeRefresh
-            needsMermaidResizeRefresh = false
-            enqueueMermaidDiagrams(diagrams, forceRefresh: shouldForceRefresh)
+            enqueueMermaidDiagrams(diagrams)
         }
     }
 
-    private func enqueueMermaidDiagrams(
-        _ diagrams: [AgentMermaidDiagram],
-        forceRefresh: Bool
-    ) {
-        if forceRefresh {
-            let diagramIDs = Set(diagrams.map(\.id))
-            pendingMermaidDiagrams.removeAll { diagramIDs.contains($0.id) }
-            for diagram in diagrams {
-                terminal.removeInlineImage(id: imageID(for: diagram))
-            }
-            handledMermaidIDs.subtract(diagramIDs)
-        }
-        terminal.hideMermaidSources(diagrams.map(\.source))
-        if !forceRefresh,
-           !terminal.hasInlineImages,
+    private func enqueueMermaidDiagrams(_ diagrams: [AgentMermaidDiagram]) {
+        if !terminal.hasInlineImages,
            mermaidRenderTask == nil,
            pendingMermaidDiagrams.isEmpty {
             handledMermaidIDs.subtract(diagrams.map(\.id))
@@ -136,14 +116,18 @@ final class TerminalController {
                 let diagram = pendingMermaidDiagrams.removeFirst()
                 let imageID = imageID(for: diagram)
                 do {
-                    let width = max(420, terminal.bounds.width * 0.9)
+                    let outputRevision = terminal.outputRevision
+                    let width = MermaidRenderingPolicy.targetWidth(
+                        containerWidth: terminal.bounds.width
+                    )
                     let png = try await mermaidRenderer.render(
                         source: diagram.source,
                         width: width
                     )
                     guard !Task.isCancelled else { break }
+                    guard terminal.outputRevision == outputRevision else { continue }
                     terminal.hideMermaidSources([diagram.source])
-                    terminal.insertInlineImage(png, id: imageID)
+                    terminal.insertInlineImage(png, id: imageID, width: width)
                 } catch {
                     AppLogger.terminal.warning(
                         "Inline Mermaid rendering failed: \(error.localizedDescription, privacy: .public)"
@@ -178,7 +162,7 @@ final class TerminalController {
 
 final class AtelierTerminalNativeView: LocalProcessTerminalView {
     var onOutputActivity: (() -> Void)?
-    var onSizeChanged: (() -> Void)?
+    private(set) var outputRevision: UInt64 = 0
     private var shouldFocusWhenAttached = false
     private var preciseScrollRemainder: CGFloat = 0
     private var scrollWheelMonitor: Any?
@@ -188,9 +172,13 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
         focusIfPossible()
     }
 
-    func insertInlineImage(_ png: Data, id: UInt32) {
+    func insertInlineImage(_ png: Data, id: UInt32, width: CGFloat) {
         let payload = Array(png.base64EncodedString().utf8)
-        let columns = max(1, getTerminal().cols)
+        let columns = MermaidRenderingPolicy.imageColumns(
+            imageWidth: width,
+            terminalWidth: bounds.width,
+            terminalColumns: getTerminal().cols
+        )
         feed(text: "\r\n")
 
         for offset in stride(from: 0, to: payload.count, by: 4_096) {
@@ -203,10 +191,6 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
             feed(text: "\u{1B}_G\(control);\(chunk)\u{1B}\\")
         }
         feed(text: "\r\n")
-    }
-
-    func removeInlineImage(id: UInt32) {
-        feed(text: "\u{1B}_Ga=d,d=I,i=\(id),q=2\u{1B}\\")
     }
 
     var hasInlineImages: Bool {
@@ -235,22 +219,20 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
             sources: sources
         )
         guard !ranges.isEmpty else { return }
-        let emptyCell = terminal.makeCharData(attribute: .empty, code: 0)
         for range in ranges {
             for index in range {
-                rows[index].line.fill(with: emptyCell)
+                let line = rows[index].line
+                for column in 0..<line.count {
+                    let emptyCell = terminal.makeCharData(
+                        attribute: line[column].attribute,
+                        code: 0
+                    )
+                    line[column] = emptyCell
+                }
             }
         }
         terminal.updateFullScreen()
         setNeedsDisplay(bounds)
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        let previousSize = frame.size
-        super.setFrameSize(newSize)
-        if previousSize != newSize, window != nil {
-            onSizeChanged?()
-        }
     }
 
     override func viewDidMoveToWindow() {
@@ -262,6 +244,7 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
+        outputRevision &+= 1
         onOutputActivity?()
     }
 
