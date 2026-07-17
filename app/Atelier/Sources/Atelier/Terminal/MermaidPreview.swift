@@ -10,17 +10,6 @@ enum MermaidRenderingPolicy {
         let preferredWidth = max(minimumWidth, containerWidth * 0.9)
         return min(availableWidth, preferredWidth)
     }
-
-    static func imageColumns(
-        imageWidth: CGFloat,
-        terminalWidth: CGFloat,
-        terminalColumns: Int
-    ) -> Int {
-        guard terminalWidth > 0, terminalColumns > 0 else { return 1 }
-        let cellWidth = terminalWidth / CGFloat(terminalColumns)
-        let columns = Int(ceil(min(imageWidth, terminalWidth) / cellWidth))
-        return min(max(1, columns), terminalColumns)
-    }
 }
 
 enum MermaidImageRendererError: LocalizedError {

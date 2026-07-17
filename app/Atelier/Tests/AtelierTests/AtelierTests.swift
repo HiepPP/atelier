@@ -147,20 +147,6 @@ struct AtelierTests {
         #expect(MermaidRenderingPolicy.targetWidth(containerWidth: 1_600) == 960)
     }
 
-    @Test("Terminal sizes Mermaid images from rendered width")
-    func terminalMermaidImageColumns() {
-        #expect(MermaidRenderingPolicy.imageColumns(
-            imageWidth: 960,
-            terminalWidth: 1_600,
-            terminalColumns: 160
-        ) == 96)
-        #expect(MermaidRenderingPolicy.imageColumns(
-            imageWidth: 600,
-            terminalWidth: 600,
-            terminalColumns: 60
-        ) == 60)
-    }
-
     @Test("Terminal detects Mermaid only in Codex final answers")
     func terminalCodexMermaidResponse() {
         let transcript = """
