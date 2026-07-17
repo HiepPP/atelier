@@ -170,158 +170,22 @@ struct ChangesView: View {
     @Environment(AtelierZoomModel.self) private var zoom
     @State private var commitMessage = ""
     @State private var discardCandidate: GitChange?
+    @State private var hoveredChangeID: String?
 
     var body: some View {
-        VSplitView {
-            VStack(alignment: .leading, spacing: 0) {
-                gitActivityBar
-                    .atelierGitErrorEffect(value: model.errorMessage)
-
-                HStack {
-                    BranchControl(
-                        current: model.snapshot.branch,
-                        branches: model.snapshot.branches,
-                        onSwitch: model.switchBranch
-                    )
-                    .environment(\.atelierZoomScale, zoom.sidebarScale)
-                    Spacer()
-                    if model.isLoading { ProgressView().controlSize(.small) }
-                    Button {
-                        model.refresh()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .buttonStyle(AtelierLuminareIconButtonStyle())
-                    .atelierRefreshCompletionEffect(isLoading: model.isLoading)
-                    .help("Refresh git status")
+        Group {
+            if model.selection == nil {
+                sourceControlPanel
+            } else {
+                VSplitView {
+                    sourceControlPanel
+                        .frame(minHeight: 240, idealHeight: 400)
+                    diffPanel
+                        .frame(minHeight: 200, idealHeight: 280)
                 }
-                .padding(.horizontal, 10)
-                .frame(height: 36)
-                .background(AtelierTheme.sidebar)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(AtelierTheme.border)
-                        .frame(height: 0.5)
-                }
-
-                if let message = model.errorMessage {
-                    AtelierStatusCard {
-                        Label(message, systemImage: "exclamationmark.triangle.fill")
-                            .atelierFont(size: 11, weight: .medium)
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(10)
-                    .environment(\.atelierZoomScale, zoom.sidebarScale)
-                }
-
-                if model.snapshot.status.changes.isEmpty && !model.isLoading {
-                    AtelierStatusCard {
-                        VStack(spacing: 10) {
-                            Image(systemName: "checkmark.circle")
-                                .atelierFont(size: 32, weight: .ultraLight)
-                                .foregroundStyle(AtelierTheme.accent)
-                            Text("Working tree clean")
-                                .atelierFont(size: 15, weight: .semibold)
-                            Text("No staged or unstaged files.")
-                                .atelierFont(size: 11.5)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: 320)
-                    .padding(16)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .environment(\.atelierZoomScale, zoom.sidebarScale)
-                } else {
-                    List {
-                        changeSection("Staged", changes: model.snapshot.status.staged, staged: true)
-                        changeSection("Unstaged", changes: model.snapshot.status.unstaged, staged: false)
-                        changeSection("Untracked", changes: model.snapshot.status.untracked, staged: false)
-                    }
-                    .listStyle(.sidebar)
-                    .scrollContentBackground(.hidden)
-                    .background(AtelierTheme.sidebar)
-                    .atelierListChrome()
-                    .environment(\.atelierZoomScale, zoom.sidebarScale)
-                }
-
-                HStack(spacing: 8) {
-                    TextField("Commit message", text: $commitMessage)
-                        .textFieldStyle(.plain)
-                        .atelierFont(size: 13)
-                        .padding(.horizontal, 10)
-                        .frame(height: 28)
-                        .background(AtelierTheme.editor)
-                        .clipShape(
-                            RoundedRectangle(
-                                cornerRadius: AtelierTheme.controlRadius,
-                                style: .continuous
-                            )
-                        )
-                        .overlay {
-                            RoundedRectangle(
-                                cornerRadius: AtelierTheme.controlRadius,
-                                style: .continuous
-                            )
-                            .stroke(AtelierTheme.border, lineWidth: 0.75)
-                        }
-                        .onSubmit(commit)
-                        .environment(\.atelierZoomScale, zoom.sidebarScale)
-                    Button("Commit") { commit() }
-                        .buttonStyle(AtelierLuminarePrimaryButtonStyle())
-                        .disabled(
-                            commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                || model.snapshot.status.staged.isEmpty
-                        )
-                }
-                .padding(8)
-                .background(AtelierTheme.chrome)
-                .overlay(alignment: .top) {
-                    Rectangle()
-                        .fill(AtelierTheme.border)
-                        .frame(height: 0.5)
-                }
+                .atelierSplitViewChrome()
             }
-            .frame(minHeight: 280, idealHeight: 430)
-            .background(AtelierTheme.sidebar)
-
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .foregroundStyle(AtelierTheme.accent)
-                    Text(model.selection?.change.path ?? "No diff selected")
-                        .atelierFont(size: 10.5, weight: .medium, design: .monospaced)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .environment(\.atelierZoomScale, zoom.sidebarScale)
-                    Spacer()
-                    if model.diffNeedsReload {
-                        Button {
-                            model.loadSelectedDiff()
-                        } label: {
-                            Label("Reload", systemImage: "arrow.clockwise")
-                                .padding(.horizontal, 7)
-                        }
-                        .buttonStyle(AtelierLuminareIconButtonStyle())
-                    }
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 36)
-                .background(AtelierTheme.chrome)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(AtelierTheme.border)
-                        .frame(height: 0.5)
-                }
-
-                DiffView(text: model.diffText)
-                    .environment(\.atelierZoomScale, zoom.contentScale)
-            }
-            .frame(minHeight: 200, idealHeight: 280)
-            .background(AtelierTheme.editor)
         }
-        .atelierSplitViewChrome()
         .background(AtelierTheme.sidebar)
         .confirmationDialog(
             "Discard changes to \(discardCandidate?.path ?? "this file")?",
@@ -341,6 +205,186 @@ struct ChangesView: View {
         }
     }
 
+    private var sourceControlPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sourceControlHeader
+                .atelierGitErrorEffect(value: model.errorMessage)
+            repositoryHeader
+            commitInput
+            commitButton
+
+            if let message = model.errorMessage {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .atelierFont(size: AtelierTypography.uiSize)
+                    .foregroundStyle(AtelierTheme.gitDeleted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(11)
+                    .environment(\.atelierZoomScale, zoom.sidebarScale)
+            }
+
+            if model.snapshot.status.changes.isEmpty {
+                Spacer(minLength: 0)
+            } else {
+                List {
+                    changeSection("Staged Changes", changes: model.snapshot.status.staged, staged: true)
+                    changeSection("Changes", changes: model.snapshot.status.unstaged, staged: false)
+                    changeSection("Untracked", changes: model.snapshot.status.untracked, staged: false)
+                }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+                .background(AtelierTheme.sidebar)
+                .atelierListChrome()
+                .environment(\.atelierZoomScale, zoom.sidebarScale)
+            }
+        }
+        .background(AtelierTheme.sidebar)
+    }
+
+    private var sourceControlHeader: some View {
+        HStack(spacing: 10) {
+            Text("SOURCE CONTROL")
+                .atelierFont(size: AtelierTypography.uiSize)
+            Spacer()
+            Image(systemName: "ellipsis")
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .environment(\.atelierZoomScale, zoom.sidebarScale)
+    }
+
+    private var repositoryHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "chevron.down")
+                .atelierFont(size: 10, weight: .medium)
+            Image(systemName: "desktopcomputer")
+            Text(repositoryName)
+                .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            BranchControl(
+                current: model.snapshot.branch,
+                branches: model.snapshot.branches,
+                onSwitch: model.switchBranch
+            )
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .help("Synchronize changes")
+            Button(action: commit) {
+                Image(systemName: "checkmark")
+            }
+            .buttonStyle(.plain)
+            .disabled(!canCommit)
+            Button {
+                model.refresh()
+            } label: {
+                if model.isLoading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            .buttonStyle(.plain)
+            .atelierRefreshCompletionEffect(isLoading: model.isLoading)
+            .help("Refresh git status")
+            Image(systemName: "ellipsis")
+        }
+        .atelierFont(size: AtelierTypography.uiSize)
+        .padding(.horizontal, 11)
+        .frame(height: 32)
+        .environment(\.atelierZoomScale, zoom.sidebarScale)
+    }
+
+    private var commitInput: some View {
+        TextField(commitPlaceholder, text: $commitMessage)
+            .textFieldStyle(.plain)
+            .atelierFont(size: AtelierTypography.uiSize)
+            .padding(.horizontal, 8)
+            .frame(height: 30)
+            .background(AtelierTheme.editor)
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(AtelierTheme.border, lineWidth: 1)
+            }
+            .padding(.horizontal, 11)
+            .onSubmit(commit)
+            .environment(\.atelierZoomScale, zoom.sidebarScale)
+    }
+
+    private var commitButton: some View {
+        HStack(spacing: 0) {
+            Button(action: commit) {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark")
+                    Text("Commit")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .buttonStyle(.plain)
+
+            Rectangle()
+                .fill(AtelierTheme.editor.opacity(0.55))
+                .frame(width: 1)
+
+            Menu {
+                Button("Commit", action: commit)
+            } label: {
+                Image(systemName: "chevron.down")
+                    .frame(width: 30, height: 28)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+        }
+        .atelierFont(size: AtelierTypography.uiSize)
+        .foregroundStyle(AtelierTheme.editor)
+        .frame(height: 29)
+        .background(AtelierTheme.accent.opacity(canCommit ? 1 : 0.42))
+        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .disabled(!canCommit)
+        .padding(.horizontal, 11)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+        .environment(\.atelierZoomScale, zoom.sidebarScale)
+    }
+
+    private var diffPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .foregroundStyle(AtelierTheme.accent)
+                Text(model.selection?.change.path ?? "No diff selected")
+                    .atelierFont(size: AtelierTypography.uiSize)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                if model.diffNeedsReload {
+                    Button {
+                        model.loadSelectedDiff()
+                    } label: {
+                        Label("Reload", systemImage: "arrow.clockwise")
+                            .padding(.horizontal, 7)
+                    }
+                    .buttonStyle(AtelierLuminareIconButtonStyle())
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 36)
+            .background(AtelierTheme.chrome)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(AtelierTheme.border)
+                    .frame(height: 0.5)
+            }
+            .environment(\.atelierZoomScale, zoom.sidebarScale)
+
+            DiffView(text: model.diffText)
+                .environment(\.atelierZoomScale, zoom.contentScale)
+        }
+        .background(AtelierTheme.editor)
+    }
+
     @ViewBuilder
     private func changeSection(_ title: String, changes: [GitChange], staged: Bool) -> some View {
         if !changes.isEmpty {
@@ -350,108 +394,98 @@ struct ChangesView: View {
                         Button {
                             model.select(change, staged: staged)
                         } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: icon(for: change.kind))
+                            HStack(spacing: 6) {
+                                Image(systemName: "doc")
                                     .foregroundStyle(color(for: change.kind))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(change.path)
-                                        .atelierFont(size: 11.5, weight: .medium)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                    Text(change.kind.rawValue)
-                                        .atelierFont(size: 9.5, weight: .medium, design: .monospaced)
-                                        .foregroundStyle(.secondary)
-                                }
+                                Text(change.path)
+                                    .atelierFont(size: AtelierTypography.uiSize)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
                                 Spacer()
                             }
                         }
                         .buttonStyle(.plain)
                         .atelierPointerCursor()
 
-                        if staged {
-                            Button {
-                                model.unstage(change)
-                            } label: {
-                                Image(systemName: "minus")
-                            }
-                            .buttonStyle(AtelierLuminareIconButtonStyle())
-                            .help("Unstage")
-                        } else {
-                            Button {
-                                model.stage(change)
-                            } label: {
-                                Image(systemName: "plus")
-                            }
-                            .buttonStyle(AtelierLuminareIconButtonStyle())
-                            .help("Stage")
-                            if change.kind != .untracked {
+                        if hoveredChangeID == change.id {
+                            if staged {
                                 Button {
-                                    discardCandidate = change
+                                    model.unstage(change)
                                 } label: {
-                                    Image(systemName: "trash")
+                                    Image(systemName: "minus")
                                 }
-                                .buttonStyle(AtelierLuminareIconButtonStyle())
-                                .help("Discard changes")
+                                .buttonStyle(.plain)
+                                .help("Unstage")
+                            } else {
+                                Button {
+                                    model.stage(change)
+                                } label: {
+                                    Image(systemName: "plus")
+                                }
+                                .buttonStyle(.plain)
+                                .help("Stage")
+                                if change.kind != .untracked {
+                                    Button {
+                                        discardCandidate = change
+                                    } label: {
+                                        Image(systemName: "arrow.uturn.backward")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Discard changes")
+                                }
                             }
+                        } else {
+                            Text(statusLabel(for: change.kind))
+                                .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
+                                .foregroundStyle(color(for: change.kind))
                         }
                     }
-                    .padding(.vertical, 3)
+                    .frame(height: 24)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 10))
+                    .onHover { hoveredChangeID = $0 ? change.id : nil }
                 }
             } header: {
                 Text(title.uppercased())
-                    .atelierFont(size: 9.5, weight: .semibold)
+                    .atelierFont(size: 11, weight: .semibold)
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    private var gitActivityBar: some View {
-        HStack(spacing: 2) {
-            Image(systemName: "line.3.horizontal.decrease")
-                .foregroundStyle(.primary)
-                .frame(width: 32, height: 40)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(AtelierTheme.gitOrange)
-                        .frame(height: 1.5)
-                }
-
-            HStack(spacing: 3) {
-                Image(systemName: "arrow.triangle.branch")
-                Text("\(model.snapshot.status.changes.count)")
-                    .atelierFont(size: 9.5, weight: .semibold, design: .monospaced)
-            }
-            .foregroundStyle(.secondary)
-            .frame(height: 40)
-
-            Spacer()
-        }
-        .padding(.horizontal, 4)
-        .background(AtelierTheme.chrome)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(AtelierTheme.border)
-                .frame(height: 0.5)
-        }
-    }
-
-    private func icon(for kind: GitChangeKind) -> String {
-        switch kind {
-        case .added, .untracked: "plus.circle"
-        case .deleted: "minus.circle"
-        case .renamed, .copied: "arrow.right.circle"
-        case .conflicted: "exclamationmark.triangle"
-        case .modified, .other: "pencil.circle"
-        }
-    }
-
     private func color(for kind: GitChangeKind) -> Color {
         switch kind {
-        case .added, .untracked: .green
-        case .deleted, .conflicted: .red
-        case .renamed, .copied: .blue
-        case .modified, .other: .orange
+        case .added: AtelierTheme.gitAdded
+        case .untracked: AtelierTheme.gitUntracked
+        case .deleted, .conflicted: AtelierTheme.gitDeleted
+        case .renamed, .copied, .modified, .other: AtelierTheme.gitOrange
         }
+    }
+
+    private func statusLabel(for kind: GitChangeKind) -> String {
+        switch kind {
+        case .modified: "M"
+        case .added: "A"
+        case .deleted: "D"
+        case .renamed: "R"
+        case .copied: "C"
+        case .untracked: "U"
+        case .conflicted: "!"
+        case .other: "?"
+        }
+    }
+
+    private var repositoryName: String {
+        URL(fileURLWithPath: model.workspacePath).lastPathComponent
+    }
+
+    private var commitPlaceholder: String {
+        let branch = model.snapshot.branch.isEmpty ? "HEAD" : model.snapshot.branch
+        return "Message (⌘Enter to commit on \"\(branch)\")"
+    }
+
+    private var canCommit: Bool {
+        !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !model.snapshot.status.staged.isEmpty
     }
 
     private func commit() {

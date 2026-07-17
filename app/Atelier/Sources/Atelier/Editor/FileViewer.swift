@@ -369,9 +369,11 @@ struct FileViewer: NSViewRepresentable {
             guard renderedScale != 0,
                   let textView = scrollView?.documentView as? STTextView else { return }
             textView.font = font
-            textView.gutterView?.font = .monospacedDigitSystemFont(
-                ofSize: AtelierFontScaling.snapped(10.5 * renderedScale, displayScale: backingScale),
-                weight: .regular
+            textView.gutterView?.font = AtelierTypography.codeFont(
+                size: AtelierFontScaling.snapped(
+                    AtelierTypography.editorSize * renderedScale,
+                    displayScale: backingScale
+                )
             )
         }
 
@@ -405,9 +407,11 @@ struct FileViewer: NSViewRepresentable {
 
         @MainActor
         private var font: NSFont {
-            .monospacedSystemFont(
-                ofSize: AtelierFontScaling.snapped(12.5 * renderedScale, displayScale: backingScale),
-                weight: .regular
+            AtelierTypography.codeFont(
+                size: AtelierFontScaling.snapped(
+                    AtelierTypography.editorSize * renderedScale,
+                    displayScale: backingScale
+                )
             )
         }
     }

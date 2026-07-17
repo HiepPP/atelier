@@ -32,7 +32,7 @@ final class TerminalController {
         self.processService = processService
         terminal.nativeBackgroundColor = AppKitThemeAdapter.terminalBackground
         terminal.nativeForegroundColor = AppKitThemeAdapter.terminalForeground
-        terminal.font = .monospacedSystemFont(ofSize: 13.5, weight: .regular)
+        terminal.font = AtelierTypography.codeFont(size: AtelierTypography.terminalSize)
         terminal.installColors(Self.lightAnsiPalette)
         processService.start(in: terminal, workspacePath: workspacePath)
         AppLogger.terminal.info("Started terminal session")
@@ -44,7 +44,10 @@ final class TerminalController {
     }
 
     func updateScale(_ scale: CGFloat, displayScale: CGFloat) {
-        let targetSize = AtelierFontScaling.snapped(13.5 * scale, displayScale: displayScale)
+        let targetSize = AtelierFontScaling.snapped(
+            AtelierTypography.terminalSize * scale,
+            displayScale: displayScale
+        )
         let usesFontSmoothing = TerminalRenderingPolicy.usesFontSmoothing(
             displayScale: displayScale
         )
@@ -53,7 +56,7 @@ final class TerminalController {
         guard fontChanged || smoothingChanged else { return }
         terminal.fontSmoothing = usesFontSmoothing
         if fontChanged {
-            terminal.font = .monospacedSystemFont(ofSize: targetSize, weight: .regular)
+            terminal.font = AtelierTypography.codeFont(size: targetSize)
         }
         terminal.setNeedsDisplay(terminal.bounds)
         terminal.layoutSubtreeIfNeeded()

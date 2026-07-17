@@ -214,7 +214,6 @@ private struct AtelierZoomContainer<Content: View>: View {
     var body: some View {
         content()
             .environment(\.atelierZoomScale, zoom.chromeScale)
-            .font(.system(size: AtelierFontScaling.snapped(13 * zoom.chromeScale, displayScale: displayScale)))
+            .font(.system(size: AtelierFontScaling.snapped(AtelierTypography.uiSize * zoom.chromeScale, displayScale: displayScale)))
     }
 }
-

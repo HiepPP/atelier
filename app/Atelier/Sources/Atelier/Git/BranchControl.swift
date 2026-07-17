@@ -21,12 +21,12 @@ struct BranchControl: View {
             }
         } label: {
             Label(current.isEmpty ? "Detached HEAD" : current, systemImage: "arrow.triangle.branch")
-                .atelierFont(size: 10.5, weight: .medium, design: .monospaced)
+                .atelierFont(size: AtelierTypography.uiSize)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .padding(.horizontal, 6)
-                .frame(height: 24)
+                .frame(height: 26)
                 .frame(maxWidth: 170, alignment: .leading)
         }
         .menuStyle(.borderlessButton)

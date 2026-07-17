@@ -37,7 +37,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         outlineView.addTableColumn(column)
         outlineView.outlineTableColumn = column
         outlineView.headerView = nil
-        outlineView.rowSizeStyle = .small
+        outlineView.rowSizeStyle = .custom
         outlineView.rowHeight = rowHeight
         outlineView.intercellSpacing = .zero
         outlineView.usesAlternatingRowBackgroundColors = false
@@ -284,7 +284,10 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
 
     private var font: NSFont {
         .systemFont(
-            ofSize: AtelierFontScaling.snapped(13 * scale, displayScale: displayScale),
+            ofSize: AtelierFontScaling.snapped(
+                AtelierTypography.uiSize * scale,
+                displayScale: displayScale
+            ),
             weight: .regular
         )
     }
@@ -303,6 +306,8 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
 
         let label = NSTextField(labelWithString: "")
         label.frame = NSRect(x: 21, y: 0, width: 240, height: rowHeight)
+        label.controlSize = .regular
+        label.font = font
         label.lineBreakMode = .byTruncatingMiddle
         label.autoresizingMask = [.width]
 

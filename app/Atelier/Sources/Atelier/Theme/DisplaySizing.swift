@@ -11,9 +11,9 @@ enum DisplaySizeTier: String, CaseIterable, Sendable {
     /// Base render scale applied before any manual zoom offset.
     var baseScale: CGFloat {
         switch self {
-        case .compact: return 1.35
-        case .comfortable: return 1.60
-        case .large: return 1.90
+        case .compact: return 1.00
+        case .comfortable: return 1.10
+        case .large: return 1.20
         }
     }
 }

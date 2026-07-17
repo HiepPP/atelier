@@ -17,9 +17,9 @@ struct DisplaySizingTests {
 
     @Test("Base scale grows with tier")
     func baseScaleOrdering() {
-        #expect(DisplaySizeTier.compact.baseScale == 1.35)
-        #expect(DisplaySizeTier.comfortable.baseScale == 1.60)
-        #expect(DisplaySizeTier.large.baseScale == 1.90)
+        #expect(DisplaySizeTier.compact.baseScale == 1.00)
+        #expect(DisplaySizeTier.comfortable.baseScale == 1.10)
+        #expect(DisplaySizeTier.large.baseScale == 1.20)
         #expect(DisplaySizeTier.compact.baseScale < DisplaySizeTier.comfortable.baseScale)
         #expect(DisplaySizeTier.comfortable.baseScale < DisplaySizeTier.large.baseScale)
     }

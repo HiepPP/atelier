@@ -14,10 +14,24 @@ enum AtelierTheme {
     static let code = editor
     static let tabInactive = Color(nsColor: AppKitThemeAdapter.tabInactive)
     static let border = Color(nsColor: AppKitThemeAdapter.border)
-    static let codeCyan = Color(red: 0.00, green: 0.48, blue: 0.58)
-    static let gitOrange = Color(red: 0.77, green: 0.31, blue: 0.15)
+    static let codeCyan = Color(nsColor: AppKitThemeAdapter.gitUntracked)
+    static let gitOrange = Color(nsColor: AppKitThemeAdapter.gitModified)
+    static let gitAdded = Color(nsColor: AppKitThemeAdapter.gitAdded)
+    static let gitDeleted = Color(nsColor: AppKitThemeAdapter.gitDeleted)
+    static let gitUntracked = Color(nsColor: AppKitThemeAdapter.gitUntracked)
     static let panelRadius: CGFloat = 0
     static let controlRadius: CGFloat = 5
+}
+
+enum AtelierTypography {
+    static let uiSize: CGFloat = 13
+    static let editorSize: CGFloat = 16
+    static let terminalSize: CGFloat = 20
+
+    static func codeFont(size: CGFloat) -> NSFont {
+        NSFont(name: "JetBrains Mono", size: size)
+            ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+    }
 }
 
 enum AtelierFontScaling {
