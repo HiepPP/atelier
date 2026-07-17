@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct GemmaAgentView: View {
@@ -16,7 +17,19 @@ struct GemmaAgentView: View {
             composer
         }
         .background(AtelierTheme.editor)
-        .onAppear { isComposerFocused = true }
+        .background(GemmaKeyCaptureView(onCharacters: captureKeystroke))
+        .onAppear { focusComposer() }
+    }
+
+    private func focusComposer() {
+        Task { @MainActor in isComposerFocused = true }
+    }
+
+    private func captureKeystroke(_ characters: String) -> Bool {
+        guard !model.isRunning else { return false }
+        model.prompt.append(characters)
+        isComposerFocused = true
+        return true
     }
 
     private var header: some View {
@@ -194,6 +207,66 @@ struct GemmaAgentView: View {
         let resolved = url.standardizedFileURL.resolvingSymlinksInPath()
         guard resolved.pathComponents.starts(with: workspaceRoot.pathComponents) else { return }
         onOpenFile(resolved)
+    }
+}
+
+private struct GemmaKeyCaptureView: NSViewRepresentable {
+    let onCharacters: (String) -> Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let view = KeyCaptureBackingView()
+        view.onCharacters = onCharacters
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? KeyCaptureBackingView)?.onCharacters = onCharacters
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: ()) {
+        (nsView as? KeyCaptureBackingView)?.removeMonitor()
+    }
+}
+
+private final class KeyCaptureBackingView: NSView {
+    var onCharacters: ((String) -> Bool)?
+    private var monitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { removeMonitor() } else { installMonitor() }
+    }
+
+    private func installMonitor() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let window = self.window, event.window === window else { return event }
+            // Editing a text field already? Let it handle the key.
+            if window.firstResponder is NSText { return event }
+            guard let characters = Self.captureableCharacters(from: event),
+                  self.onCharacters?(characters) == true else { return event }
+            return nil
+        }
+    }
+
+    func removeMonitor() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+    }
+
+    private static func captureableCharacters(from event: NSEvent) -> String? {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags.contains(.command) || flags.contains(.control) || flags.contains(.option) {
+            return nil
+        }
+        guard let characters = event.characters, !characters.isEmpty else { return nil }
+        for scalar in characters.unicodeScalars {
+            if scalar.value >= 0xF700 { return nil } // function / arrow keys
+            if CharacterSet.controlCharacters.contains(scalar) { return nil } // esc, tab, return
+        }
+        return characters
     }
 }
 

@@ -29,6 +29,15 @@ app/Atelier/scripts/build_and_run.sh --release
 
 `swift build` compiles the package. `swift test` runs focused core tests. `--selftest` checks persistence, file loading, Git parsing, and Git operations. The main script builds, signs, installs, and optionally verifies the app process. The release script creates `app/Atelier/dist/Atelier.app`.
 
+## Post-Implementation Build
+
+After completing any implementation task, automatically run `app/Atelier/scripts/build_and_run.sh` to build and launch the updated app.
+
+- Run it once the code change is finished and `swift build`/`swift test` pass.
+- Default to `app/Atelier/scripts/build_and_run.sh run` to build, sign, install, and open the app.
+- If the build fails, report the failure and stop. Do not mark the task complete.
+- Skip only when the change touches no Swift sources (docs, scripts, or metadata only).
+
 ## Coding Style & Naming Conventions
 
 Use four-space indentation and standard Swift API naming. Types use `UpperCamelCase`; properties, methods, and enum cases use `lowerCamelCase`. Name SwiftUI views with a `View` suffix and observable models with a `Model` suffix. Prefer small extensions and native SwiftUI modifiers before adding abstractions. Keep AppKit customization defensive and idempotent.
