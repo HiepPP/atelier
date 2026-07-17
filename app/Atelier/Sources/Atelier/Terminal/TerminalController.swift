@@ -6,8 +6,8 @@ enum TerminalRenderingPolicy {
         displayScale > 1
     }
 
-    static func usesFontSmoothing(displayScale: CGFloat) -> Bool {
-        displayScale > 1
+    static func usesFontSmoothing(displayScale _: CGFloat) -> Bool {
+        true
     }
 }
 

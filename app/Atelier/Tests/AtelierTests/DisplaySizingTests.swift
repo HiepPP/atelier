@@ -50,11 +50,11 @@ struct DisplaySizingTests {
         #expect(AtelierFontScaling.snapped(12.5, displayScale: 0) == 12.5)
     }
 
-    @Test("Metal terminal rendering stays off on 1x displays")
+    @Test("Terminal smoothing stays enabled on every display")
     func terminalRenderingPolicy() {
         #expect(!TerminalRenderingPolicy.usesMetal(displayScale: 1))
         #expect(TerminalRenderingPolicy.usesMetal(displayScale: 2))
-        #expect(!TerminalRenderingPolicy.usesFontSmoothing(displayScale: 1))
+        #expect(TerminalRenderingPolicy.usesFontSmoothing(displayScale: 1))
         #expect(TerminalRenderingPolicy.usesFontSmoothing(displayScale: 2))
     }
 }
