@@ -104,10 +104,13 @@ nonisolated struct DefaultWatchdogResponder: WatchdogResponder {
     }
 
     static func requestNotificationAuthorization() {
+        // UNUserNotificationCenter traps without a real app bundle; skip when unbundled.
+        guard Bundle.main.bundleIdentifier != nil else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .provisional]) { _, _ in }
     }
 
     private func postNotification(_ record: ResourceExitRecord) {
+        guard Bundle.main.bundleIdentifier != nil else { return }
         let content = UNMutableNotificationContent()
         content.title = record.reason == .memory
             ? "Atelier hit its memory limit"
