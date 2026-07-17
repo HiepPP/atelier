@@ -513,12 +513,17 @@ struct TerminalTabs: View {
 private struct FileTabView: View {
     let file: EditorSession
 
+    @ViewBuilder
     var body: some View {
-        FileViewer(
-            content: file.content,
-            fileURL: file.document.url,
-            isWordWrapEnabled: file.isWordWrapEnabled
-        )
+        if case .image(let data) = file.content {
+            ImageViewer(data: data, name: file.document.displayName)
+        } else {
+            FileViewer(
+                content: file.content,
+                fileURL: file.document.url,
+                isWordWrapEnabled: file.isWordWrapEnabled
+            )
+        }
     }
 }
 

@@ -41,10 +41,18 @@ enum SelfTest {
             let textURL = root.appendingPathComponent("text.txt")
             let binaryURL = root.appendingPathComponent("binary.bin")
             let largeURL = root.appendingPathComponent("large.txt")
+            let imageURL = root.appendingPathComponent("pixel.png")
             let savedURL = root.appendingPathComponent("saved.txt")
+            guard let imageData = Data(base64Encoded:
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+            ) else {
+                check("FileLoader image setup", false, "fixture decoded")
+                return false
+            }
             try Data("hello".utf8).write(to: textURL)
             try Data([0x41, 0x00, 0x42]).write(to: binaryURL)
             try Data(repeating: 0x41, count: 9).write(to: largeURL)
+            try imageData.write(to: imageURL)
 
             check("FileLoader text", FileLoader.load(url: textURL) == .text("hello"), "text decoded")
             check("FileLoader binary", FileLoader.load(url: binaryURL) == .binary, "null byte detected")
@@ -57,6 +65,11 @@ enum SelfTest {
                 "FileLoader async",
                 await FileLoader.loadAsync(url: textURL) == .text("hello"),
                 "background load decoded text"
+            )
+            check(
+                "FileLoader image",
+                await FileLoader.loadAsync(url: imageURL) == .image(imageData),
+                "image data preserved"
             )
 
             try await FileSaver.saveAsync(text: "saved content", url: savedURL)

@@ -227,7 +227,7 @@ struct FileViewer: NSViewRepresentable {
             case .text:
                 isText = true
                 foregroundColor = AppKitThemeAdapter.foreground
-            case .loading, .binary, .tooLarge, .error:
+            case .loading, .image, .binary, .tooLarge, .error:
                 isText = false
                 foregroundColor = AppKitThemeAdapter.secondary
             }

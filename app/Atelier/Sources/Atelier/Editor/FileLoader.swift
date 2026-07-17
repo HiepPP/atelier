@@ -1,8 +1,10 @@
 import Foundation
+import UniformTypeIdentifiers
 
 nonisolated enum FileContent: Equatable, Sendable {
     case loading
     case text(String)
+    case image(Data)
     case binary
     case tooLarge(Int)
     case error(String)
@@ -13,6 +15,8 @@ nonisolated enum FileContent: Equatable, Sendable {
             return "Loading file..."
         case .text(let text):
             return text
+        case .image:
+            return "Image preview is available in its file tab."
         case .binary:
             return "Binary file. Preview is unavailable."
         case .tooLarge(let bytes):
@@ -25,18 +29,28 @@ nonisolated enum FileContent: Equatable, Sendable {
 
 nonisolated enum FileLoader {
     static let defaultLimit = 2_000_000
+    static let defaultImageLimit = 50_000_000
 
-    static func load(url: URL, limit: Int = defaultLimit) -> FileContent {
+    static func load(
+        url: URL,
+        limit: Int = defaultLimit,
+        imageLimit: Int = defaultImageLimit
+    ) -> FileContent {
         do {
-            let values = try url.resourceValues(forKeys: [.fileSizeKey])
+            let values = try url.resourceValues(forKeys: [.contentTypeKey, .fileSizeKey])
             guard let size = values.fileSize else {
                 return .error("size is unavailable")
             }
-            guard size <= limit else {
+            let isImage = values.contentType?.conforms(to: .image) == true
+                || UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true
+            guard size <= (isImage ? imageLimit : limit) else {
                 return .tooLarge(size)
             }
 
             let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+            if isImage {
+                return .image(data)
+            }
             guard !data.prefix(8_192).contains(0) else {
                 return .binary
             }
@@ -49,9 +63,13 @@ nonisolated enum FileLoader {
         }
     }
 
-    static func loadAsync(url: URL, limit: Int = defaultLimit) async -> FileContent {
+    static func loadAsync(
+        url: URL,
+        limit: Int = defaultLimit,
+        imageLimit: Int = defaultImageLimit
+    ) async -> FileContent {
         await Task.detached(priority: .userInitiated) {
-            load(url: url, limit: limit)
+            load(url: url, limit: limit, imageLimit: imageLimit)
         }.value
     }
 }

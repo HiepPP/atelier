@@ -25,13 +25,20 @@ struct AtelierTests {
         let textURL = root.appendingPathComponent("text.txt")
         let binaryURL = root.appendingPathComponent("binary.bin")
         let largeURL = root.appendingPathComponent("large.txt")
+        let imageURL = root.appendingPathComponent("pixel.png")
+        let imageData = try #require(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        ))
         try Data("hello".utf8).write(to: textURL)
         try Data([0x41, 0x00, 0x42]).write(to: binaryURL)
         try Data(repeating: 0x41, count: 9).write(to: largeURL)
+        try imageData.write(to: imageURL)
 
         #expect(await FileLoader.loadAsync(url: textURL) == .text("hello"))
         #expect(FileLoader.load(url: binaryURL) == .binary)
         #expect(FileLoader.load(url: largeURL, limit: 8) == .tooLarge(9))
+        #expect(await FileLoader.loadAsync(url: imageURL) == .image(imageData))
+        #expect(FileLoader.load(url: imageURL, imageLimit: 8) == .tooLarge(imageData.count))
     }
 
     @Test("File tree filters ignored paths and sorts directories first")
