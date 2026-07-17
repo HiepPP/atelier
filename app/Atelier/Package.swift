@@ -23,6 +23,9 @@ let package = Package(
                 "STTextView",
                 "Luminare"
             ],
+            resources: [
+                .copy("Resources/Mermaid")
+            ],
             swiftSettings: [
                 .defaultIsolation(MainActor.self),
                 .enableUpcomingFeature("NonisolatedNonsendingByDefault")

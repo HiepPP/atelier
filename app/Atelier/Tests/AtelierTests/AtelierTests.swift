@@ -140,6 +140,97 @@ struct AtelierTests {
         #expect(environment["PATH"] == "/usr/bin")
     }
 
+    @Test("Terminal detects Mermaid only in Codex final answers")
+    func terminalCodexMermaidResponse() {
+        let transcript = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"cwd":"/tmp/project"}}
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"```mermaid\\ngraph TD\\nBad --> Output\\n```"}]}}
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Here is the chart.\\n```mermaid\\ngraph TD\\n  A --> B\\n```"}]}}
+        """
+
+        #expect(AgentTranscriptMermaidParser.extractLatest(
+            from: transcript,
+            workspacePath: "/tmp/project",
+            modifiedAfter: Date(timeIntervalSince1970: 0)
+        ) == "graph TD\n  A --> B")
+        #expect(AgentTranscriptMermaidParser.sessionStartedAt(transcript) ==
+            Date(timeIntervalSince1970: 1_784_275_200))
+    }
+
+    @Test("Terminal keeps every Mermaid chart in one assistant answer")
+    func terminalMultipleMermaidResponses() {
+        let transcript = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"cwd":"/tmp/project"}}
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"```mermaid\\nflowchart LR\\nA --> B\\n```\\nThen another.\\n```mermaid\\nsequenceDiagram\\nUser->>Agent: Ask\\n```"}]}}
+        """
+
+        let diagrams = AgentTranscriptMermaidParser.extractAll(
+            from: transcript,
+            workspacePath: "/tmp/project",
+            modifiedAfter: Date(timeIntervalSince1970: 0)
+        )
+        #expect(diagrams.map(\.source) == [
+            "flowchart LR\nA --> B",
+            "sequenceDiagram\nUser->>Agent: Ask"
+        ])
+        #expect(Set(diagrams.map(\.id)).count == 2)
+    }
+
+    @Test("Terminal locates rendered Mermaid source rows")
+    func terminalMermaidSourceRows() {
+        let rows = [
+            "Mermaid flowchart:",
+            "flowchart LR",
+            "  A[User Request] ->",
+            "  B{Valid?}",
+            "  B ->|Yes| C[Process Request]",
+            "  B ->|No| D[Return Error]",
+            "",
+            "## Recap"
+        ]
+        let source = """
+        flowchart LR
+          A[User Request] --> B{Valid?}
+          B -->|Yes| C[Process Request]
+          B -->|No| D[Return Error]
+        """
+
+        #expect(MermaidTerminalSourceLocator.ranges(
+            in: rows,
+            sources: [source]
+        ) == [1..<6])
+    }
+
+    @Test("Terminal detects Mermaid only in Claude final responses")
+    func terminalClaudeMermaidResponse() {
+        let transcript = """
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"assistant","cwd":"/tmp/project","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"text","text":"```mermaid\\ngraph TD\\nWrong --> Phase\\n```"}]}}
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"assistant","cwd":"/tmp/project","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"```mermaid\\nsequenceDiagram\\n  User->>Agent: Ask\\n```"}]}}
+        """
+
+        #expect(AgentTranscriptMermaidParser.extractLatest(
+            from: transcript,
+            workspacePath: "/tmp/project",
+            modifiedAfter: Date(timeIntervalSince1970: 0)
+        ) == "sequenceDiagram\n  User->>Agent: Ask")
+    }
+
+    @Test("Terminal ignores printed Mermaid and stale agent responses")
+    func terminalIgnoresPrintedMermaid() {
+        let printedOutput = "printf '```mermaid\\ngraph TD\\nA --> B\\n```'"
+        let staleTranscript = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"cwd":"/tmp/project"}}
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"```mermaid\\ngraph TD\\nA --> B\\n```"}]}}
+        """
+
+        #expect(MermaidMarkdownParser.extractLatest(from: printedOutput) == nil)
+        #expect(AgentTranscriptMermaidParser.extractLatest(
+            from: staleTranscript,
+            workspacePath: "/tmp/project",
+            modifiedAfter: Date(timeIntervalSince1970: 1_800_000_000)
+        ) == nil)
+    }
+
     private func temporaryDirectory(_ name: String) -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("atelier-tests-\(name)-\(UUID().uuidString)", isDirectory: true)

@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:">
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; margin: 0; overflow: hidden; background: transparent; }
+    body { padding: 10px; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+    #diagram {
+      width: 100%;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      border: 1px solid #D8D2C8;
+      border-radius: 10px;
+      background: #F7F5F0;
+    }
+    #diagram svg { display: block; width: 100%; height: auto; max-width: 1040px; }
+  </style>
+  <script src="mermaid.min.js"></script>
+</head>
+<body>
+  <main id="diagram" aria-label="Mermaid diagram"></main>
+  <script>
+    const target = document.getElementById('diagram');
+    let revision = 0;
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: 'base',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif',
+      themeVariables: {
+        background: '#F5F3EE',
+        primaryColor: '#E9E6DD',
+        primaryTextColor: '#4C4843',
+        primaryBorderColor: '#B07B56',
+        lineColor: '#8C877C',
+        secondaryColor: '#F5F3EE',
+        tertiaryColor: '#E5E0D3',
+        clusterBkg: '#F5F3EE',
+        clusterBorder: '#DEDACF',
+        edgeLabelBackground: '#F5F3EE',
+        noteBkgColor: '#E9E6DD',
+        noteBorderColor: '#B07B56',
+        noteTextColor: '#4C4843'
+      },
+      flowchart: { curve: 'basis', htmlLabels: true, useMaxWidth: true },
+      sequence: { useMaxWidth: true, mirrorActors: false }
+    });
+
+    async function renderMermaid(source) {
+      target.replaceChildren();
+      try {
+        const result = await mermaid.render(`atelier-mermaid-${++revision}`, source);
+        target.innerHTML = result.svg;
+        if (result.bindFunctions) result.bindFunctions(target);
+        window.webkit?.messageHandlers?.mermaid?.postMessage({ status: 'ready' });
+        return result.svg;
+      } catch (error) {
+        target.replaceChildren();
+        const message = error && error.message ? error.message : String(error);
+        window.webkit?.messageHandlers?.mermaid?.postMessage({ status: 'error', message });
+        throw error;
+      }
+    }
+
+    async function renderMermaidForSnapshot(source) {
+      await renderMermaid(source);
+      await document.fonts.ready;
+      const height = Math.ceil(target.getBoundingClientRect().height + 20);
+      return { height };
+    }
+  </script>
+</body>
+</html>

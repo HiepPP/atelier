@@ -91,6 +91,27 @@ enum SelfTest {
                 "large content uses plain native text"
             )
 
+            let mermaidResponse = """
+            {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"cwd":"/tmp/atelier-selftest"}}
+            {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"```mermaid\\nflowchart LR\\n  A --> B\\n```"}]}}
+            """
+            check(
+                "Terminal agent Mermaid parser",
+                AgentTranscriptMermaidParser.extractLatest(
+                    from: mermaidResponse,
+                    workspacePath: "/tmp/atelier-selftest",
+                    modifiedAfter: Date(timeIntervalSince1970: 0)
+                ) == "flowchart LR\n  A --> B",
+                "Codex final answer diagram extracted"
+            )
+            check(
+                "Terminal printed Mermaid ignored",
+                MermaidMarkdownParser.extractLatest(
+                    from: "printf '```mermaid graph TD A --> B ```'"
+                ) == nil,
+                "plain terminal output stays plain"
+            )
+
             verifyGitParsing(check: check)
             await verifyGitOperations(root: root, check: check)
         } catch {

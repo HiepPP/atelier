@@ -75,6 +75,7 @@ swift build --package-path "$ROOT_DIR" -c "$CONFIGURATION"
 BUILD_DIR="$(swift build --package-path "$ROOT_DIR" -c "$CONFIGURATION" --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$APP_NAME"
 RESOURCE_BUNDLES=(
+  "Atelier_Atelier.bundle"
   "SwiftTerm_SwiftTerm.bundle"
   "HighlightSwift_HighlightSwift.bundle"
   "KeyboardShortcuts_KeyboardShortcuts.bundle"
