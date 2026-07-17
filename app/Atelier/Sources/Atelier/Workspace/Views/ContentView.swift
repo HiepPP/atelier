@@ -180,6 +180,24 @@ struct WorkspaceView: View {
             .help("Change folder")
 
             Button {
+                session.openResponses()
+            } label: {
+                Image(systemName: "text.bubble")
+                    .overlay(alignment: .topTrailing) {
+                        if session.agentResponses.unreadCount > 0 {
+                            Circle()
+                                .fill(AtelierTheme.gitOrange)
+                                .frame(width: 5, height: 5)
+                                .offset(x: 3, y: -2)
+                        }
+                    }
+            }
+            .buttonStyle(AtelierLuminareIconButtonStyle())
+            .accessibilityLabel("Open agent responses")
+            .accessibilityValue("\(session.agentResponses.unreadCount) unread")
+            .help("Open agent responses")
+
+            Button {
                 session.openGemma()
             } label: {
                 Image(systemName: "sparkles")

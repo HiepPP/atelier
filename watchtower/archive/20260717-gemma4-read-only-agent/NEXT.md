@@ -4,7 +4,7 @@
 
 - Title: Gemma 4 Read-Only Agent
 - Slug: 20260717-gemma4-read-only-agent
-- Status: ACTIVE
+- Status: ARCHIVED
 - Updated: 2026-07-17
 
 ## Tracker
@@ -36,4 +36,5 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Archive
 
+- Archived: 2026-07-17 -> watchtower/archive/20260717-gemma4-read-only-agent/
 - None.

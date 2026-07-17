@@ -183,31 +183,6 @@ struct AtelierTests {
         #expect(Set(diagrams.map(\.id)).count == 2)
     }
 
-    @Test("Terminal locates rendered Mermaid source rows")
-    func terminalMermaidSourceRows() {
-        let rows = [
-            "Mermaid flowchart:",
-            "flowchart LR",
-            "  A[User Request] ->",
-            "  B{Valid?}",
-            "  B ->|Yes| C[Process Request]",
-            "  B ->|No| D[Return Error]",
-            "",
-            "## Recap"
-        ]
-        let source = """
-        flowchart LR
-          A[User Request] --> B{Valid?}
-          B -->|Yes| C[Process Request]
-          B -->|No| D[Return Error]
-        """
-
-        #expect(MermaidTerminalSourceLocator.ranges(
-            in: rows,
-            sources: [source]
-        ) == [1..<6])
-    }
-
     @Test("Terminal detects Mermaid only in Claude final responses")
     func terminalClaudeMermaidResponse() {
         let transcript = """

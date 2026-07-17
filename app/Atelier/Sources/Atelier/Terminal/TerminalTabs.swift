@@ -26,6 +26,7 @@ private enum CenterTabContent {
     case terminal(TerminalSession)
     case file(EditorSession)
     case gemma(GemmaAgentModel)
+    case responses(AgentResponsesModel)
 }
 
 private final class CenterTab: Identifiable {
@@ -48,6 +49,8 @@ private final class CenterTab: Identifiable {
             return file.document.displayName
         case .gemma:
             return "Gemma"
+        case .responses:
+            return "Responses"
         }
     }
 
@@ -59,6 +62,8 @@ private final class CenterTab: Identifiable {
             return "doc.text"
         case .gemma:
             return "sparkles"
+        case .responses:
+            return "text.bubble"
         }
     }
 
@@ -70,6 +75,8 @@ private final class CenterTab: Identifiable {
             return "Close file"
         case .gemma:
             return "Close Gemma"
+        case .responses:
+            return "Close agent responses"
         }
     }
 }
@@ -115,6 +122,12 @@ final class TerminalTabsModel {
         }
     }
 
+    var responsesTabCount: Int {
+        tabs.reduce(into: 0) { count, tab in
+            if case .responses = tab.content { count += 1 }
+        }
+    }
+
     func add() {
         let session = TerminalSession(number: nextNumber, workspacePath: workspacePath)
         let tab = CenterTab(content: .terminal(session))
@@ -132,6 +145,8 @@ final class TerminalTabsModel {
                 file.close()
             case .gemma(let model):
                 model.close()
+            case .responses:
+                break
             }
         }
         tabs.removeAll(keepingCapacity: false)
@@ -169,6 +184,26 @@ final class TerminalTabsModel {
         selectedID = tab.id
     }
 
+    func openResponses(_ model: AgentResponsesModel) {
+        if let tab = tabs.first(where: { tab in
+            guard case .responses(let existing) = tab.content else { return false }
+            return existing === model
+        }) {
+            select(tab)
+            return
+        }
+        let tab = CenterTab(content: .responses(model))
+        tabs.append(tab)
+        select(tab)
+    }
+
+    fileprivate func select(_ tab: CenterTab) {
+        selectedID = tab.id
+        if case .responses(let model) = tab.content {
+            model.markAllRead()
+        }
+    }
+
     fileprivate func close(_ tab: CenterTab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         switch tab.content {
@@ -178,6 +213,8 @@ final class TerminalTabsModel {
             file.close()
         case .gemma(let model):
             model.close()
+        case .responses:
+            break
         }
         tabs.remove(at: index)
         if selectedID == tab.id {
@@ -275,7 +312,7 @@ struct TerminalTabs: View {
                                             ? nil
                                             : .spring(response: 0.28, dampingFraction: 0.84)
                                     ) {
-                                        model.selectedID = tab.id
+                                        model.select(tab)
                                     }
                                 } label: {
                                     HStack(spacing: 7) {
@@ -436,6 +473,10 @@ struct TerminalTabs: View {
                     )
                     .id(tab.id)
                     .environment(\.atelierZoomScale, zoom.contentScale)
+                case .responses(let responses):
+                    AgentResponsesView(model: responses)
+                        .id(tab.id)
+                        .environment(\.atelierZoomScale, zoom.contentScale)
                 }
             } else {
                 VStack(spacing: 8) {

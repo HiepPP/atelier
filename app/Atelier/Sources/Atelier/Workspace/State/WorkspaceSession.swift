@@ -9,13 +9,19 @@ final class WorkspaceSession {
     let terminalTabs: TerminalTabsModel
     let gitModel: GitWorkspaceModel
     let gemmaAgent: GemmaAgentModel
+    let agentResponses: AgentResponsesModel
     private(set) var fileTreeRevision = 0
 
     private let fileTreeService = FileTreeService()
     private var fileWatcher: FileWatcher?
     private var isStarted = false
 
-    init(state: WorkspaceState, rootURL: URL, gemmaAgent: GemmaAgentModel? = nil) {
+    init(
+        state: WorkspaceState,
+        rootURL: URL,
+        gemmaAgent: GemmaAgentModel? = nil,
+        agentResponses: AgentResponsesModel? = nil
+    ) {
         self.state = state
         self.rootURL = rootURL
         terminalTabs = TerminalTabsModel(workspacePath: rootURL.path)
@@ -29,12 +35,16 @@ final class WorkspaceSession {
                 runtime: GemmaAgentRuntime(client: client, tools: toolExecutor)
             )
         }
+        self.agentResponses = agentResponses ?? AgentResponsesModel(
+            source: AgentTranscriptMonitor(workspacePath: rootURL.path)
+        )
     }
 
     func start() {
         guard !isStarted else { return }
         isStarted = true
         gitModel.refresh()
+        agentResponses.start()
 
         let watcher = FileWatcher(path: rootURL.path) { [weak self] in
             guard let self else { return }
@@ -53,6 +63,7 @@ final class WorkspaceSession {
         fileWatcher = nil
         gitModel.stop()
         gemmaAgent.close()
+        agentResponses.stop()
         terminalTabs.closeAll()
         AppLogger.workspace.info("Stopped workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
     }
@@ -72,6 +83,10 @@ final class WorkspaceSession {
 
     func openGemma() {
         terminalTabs.openGemma(gemmaAgent)
+    }
+
+    func openResponses() {
+        terminalTabs.openResponses(agentResponses)
     }
 
     isolated deinit {
