@@ -10,6 +10,144 @@ enum MermaidRenderingPolicy {
         let preferredWidth = max(minimumWidth, containerWidth * 0.9)
         return min(availableWidth, preferredWidth)
     }
+
+    static func widthBucket(containerWidth: CGFloat) -> CGFloat {
+        let width = targetWidth(containerWidth: containerWidth)
+        if width <= 480 { return 480 }
+        if width <= 720 { return 720 }
+        return 960
+    }
+}
+
+@MainActor
+protocol MermaidImageRendering: AnyObject {
+    func render(source: String, width: CGFloat) async throws -> Data
+}
+
+@MainActor
+final class MermaidImageCache {
+    struct Key: Hashable {
+        let source: String
+        let width: Int
+    }
+
+    static let shared = MermaidImageCache()
+
+    private(set) var entryCount = 0
+    private(set) var inFlightCount = 0
+    private let capacity: Int
+    private let maximumInFlight: Int
+    private let renderer: any MermaidImageRendering
+    private var images: [Key: NSImage] = [:]
+    private var accessOrder: [Key] = []
+    private var inFlight: [Key: InFlightRender] = [:]
+    private var inFlightOrder: [Key] = []
+    private var serialTail: Task<Void, Never>?
+
+    private struct InFlightRender {
+        let token: UUID
+        let task: Task<NSImage, any Error>
+    }
+
+    init(
+        capacity: Int = 16,
+        maximumInFlight: Int = 4,
+        renderer: (any MermaidImageRendering)? = nil
+    ) {
+        self.capacity = max(1, capacity)
+        self.maximumInFlight = max(1, maximumInFlight)
+        self.renderer = renderer ?? MermaidImageRenderer()
+    }
+
+    func image(source: String, width: CGFloat) async throws -> NSImage {
+        let key = Key(source: source, width: Int(width.rounded()))
+        if let image = images[key] {
+            touch(key)
+            return image
+        }
+        if let render = inFlight[key] {
+            return try await render.task.value
+        }
+
+        while inFlight.count >= maximumInFlight, let obsolete = inFlightOrder.first {
+            cancelInFlight(obsolete)
+        }
+
+        let token = UUID()
+        let predecessor = serialTail
+        let renderer = self.renderer
+        let task = Task { @MainActor in
+            if let predecessor {
+                await predecessor.value
+            }
+            try Task.checkCancellation()
+            let data = try await renderer.render(source: source, width: width)
+            try Task.checkCancellation()
+            guard let image = NSImage(data: data) else {
+                throw MermaidImageRendererError.imageEncodingFailed
+            }
+            return image
+        }
+        inFlight[key] = InFlightRender(token: token, task: task)
+        inFlightOrder.append(key)
+        inFlightCount = inFlight.count
+        serialTail = Task { @MainActor in
+            _ = await task.result
+        }
+        do {
+            let image = try await task.value
+            if inFlight[key]?.token == token {
+                removeInFlight(key)
+                insert(image, for: key)
+            }
+            return image
+        } catch {
+            if inFlight[key]?.token == token {
+                removeInFlight(key)
+            }
+            throw error
+        }
+    }
+
+    func removeAll() {
+        for render in inFlight.values {
+            render.task.cancel()
+        }
+        inFlight.removeAll(keepingCapacity: false)
+        inFlightOrder.removeAll(keepingCapacity: false)
+        inFlightCount = 0
+        serialTail?.cancel()
+        serialTail = nil
+        images.removeAll(keepingCapacity: false)
+        accessOrder.removeAll(keepingCapacity: false)
+        entryCount = 0
+    }
+
+    private func insert(_ image: NSImage, for key: Key) {
+        images[key] = image
+        touch(key)
+        while images.count > capacity, let oldest = accessOrder.first {
+            accessOrder.removeFirst()
+            images[oldest] = nil
+        }
+        entryCount = images.count
+    }
+
+    private func touch(_ key: Key) {
+        accessOrder.removeAll { $0 == key }
+        accessOrder.append(key)
+    }
+
+    private func cancelInFlight(_ key: Key) {
+        inFlight[key]?.task.cancel()
+        removeInFlight(key)
+    }
+
+    private func removeInFlight(_ key: Key) {
+        inFlight[key] = nil
+        inFlightOrder.removeAll { $0 == key }
+        inFlightCount = inFlight.count
+    }
 }
 
 enum MermaidImageRendererError: LocalizedError {
@@ -132,3 +270,5 @@ final class MermaidImageRenderer: NSObject, WKNavigationDelegate {
         subdirectory: "Mermaid"
     )
 }
+
+extension MermaidImageRenderer: MermaidImageRendering {}

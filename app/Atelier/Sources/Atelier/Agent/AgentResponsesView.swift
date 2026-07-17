@@ -1,7 +1,57 @@
 import SwiftUI
 
+nonisolated enum AgentPreviewLayout: Equatable, Sendable {
+    case docked
+    case overlay
+}
+
+nonisolated enum AgentPreviewLayoutPolicy {
+    static let dockedBreakpoint: CGFloat = 1_400
+    static let minimumDockedWidth: CGFloat = 360
+    static let maximumDockedWidth: CGFloat = 640
+
+    static func layout(containerWidth: CGFloat) -> AgentPreviewLayout {
+        containerWidth >= dockedBreakpoint ? .docked : .overlay
+    }
+
+    static func panelWidth(containerWidth: CGFloat, layout: AgentPreviewLayout) -> CGFloat {
+        switch layout {
+        case .docked:
+            min(500, max(380, containerWidth * 0.28)).rounded()
+        case .overlay:
+            min(480, max(320, containerWidth * 0.46)).rounded()
+        }
+    }
+
+    static func clampedDockedWidth(_ proposedWidth: CGFloat, containerWidth: CGFloat) -> CGFloat {
+        let workspaceMinimumWidth: CGFloat = 620
+        let availableMaximum = max(minimumDockedWidth, containerWidth - workspaceMinimumWidth)
+        return min(
+            min(maximumDockedWidth, availableMaximum),
+            max(minimumDockedWidth, proposedWidth)
+        )
+    }
+}
+
+nonisolated enum AgentResponseTimelinePolicy {
+    static func showsPendingResponse(
+        previousLastID: AgentResponseReadIdentity?,
+        newLastID: AgentResponseReadIdentity?,
+        isPinnedToBottom: Bool
+    ) -> Bool {
+        guard let previousLastID, let newLastID, previousLastID != newLastID else {
+            return false
+        }
+        return !isPinnedToBottom
+    }
+}
+
 struct AgentResponsesView: View {
     @Bindable var model: AgentResponsesModel
+    let onClose: () -> Void
+
+    @State private var isPinnedToBottom = true
+    @State private var showsPendingResponse = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -10,24 +60,23 @@ struct AgentResponsesView: View {
             transcript
         }
         .background(AtelierTheme.editor)
-        .onAppear { model.markAllRead() }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Agent response preview")
     }
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: "text.bubble")
+            Image(systemName: "doc.richtext")
                 .foregroundStyle(AtelierTheme.accent)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Agent Responses")
+                Text("Response Preview")
                     .atelierFont(size: 12, weight: .semibold)
-                Text("Codex and Claude - workspace transcript")
+                Text("Read-only - terminal stays interactive")
                     .atelierFont(size: 9.5, design: .monospaced)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Text("\(model.responses.count)")
-                .atelierFont(size: 10, weight: .semibold, design: .monospaced)
-                .foregroundStyle(.secondary)
+            sessionPicker
             Button {
                 Task { await model.refresh() }
             } label: {
@@ -36,10 +85,64 @@ struct AgentResponsesView: View {
             .buttonStyle(AtelierLuminareIconButtonStyle())
             .accessibilityLabel("Refresh agent responses")
             .help("Refresh agent responses")
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(AtelierLuminareIconButtonStyle())
+            .accessibilityLabel("Close agent preview")
+            .help("Close agent preview")
         }
         .padding(.horizontal, 14)
         .frame(height: 42)
         .background(AtelierTheme.chrome)
+    }
+
+    private var sessionPicker: some View {
+        Menu {
+            if model.sessionSummaries.isEmpty {
+                Text("No sessions")
+            } else {
+                ForEach(model.sessionSummaries) { summary in
+                    Button {
+                        model.selectSession(summary.session)
+                    } label: {
+                        Text(sessionPickerItem(summary))
+                    }
+                    .accessibilityLabel(sessionAccessibilityLabel(summary))
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                if let summary = selectedSummary {
+                    Text(summary.provider.rawValue)
+                    Text(shortSessionID(summary.sessionID))
+                        .foregroundStyle(.secondary)
+                    Text(summary.latestResponseTime, style: .time)
+                        .foregroundStyle(.secondary)
+                    if summary.unreadCount > 0 {
+                        Text("\(summary.unreadCount)")
+                            .foregroundStyle(AtelierTheme.gitOrange)
+                    }
+                } else {
+                    Text("Select session")
+                }
+                Image(systemName: "chevron.down")
+                    .atelierFont(size: 8, weight: .semibold)
+            }
+            .atelierFont(size: 9.5, weight: .semibold, design: .monospaced)
+            .lineLimit(1)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityLabel("Agent session picker")
+        .accessibilityValue(
+            selectedSummary.map { sessionAccessibilityLabel($0) } ?? "No session selected"
+        )
+    }
+
+    private var selectedSummary: AgentSessionSummary? {
+        guard let selected = model.selectedSession else { return nil }
+        return model.sessionSummaries.first { $0.session == selected }
     }
 
     private var transcript: some View {
@@ -48,32 +151,85 @@ struct AgentResponsesView: View {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     if model.responses.isEmpty {
                         emptyState
+                    } else if model.selectedSession == nil {
+                        noSelectionState
                     }
-                    ForEach(model.responses) { response in
+                    ForEach(model.selectedResponses) { response in
                         responseCard(response)
                             .id(response.id)
                     }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("agent-response-bottom")
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.editor)
-            .onChange(of: model.responses.last?.id) {
-                if let id = model.responses.last?.id {
-                    proxy.scrollTo(id, anchor: .bottom)
+            .overlay(alignment: .bottomTrailing) {
+                if showsPendingResponse {
+                    Button {
+                        proxy.scrollTo("agent-response-bottom", anchor: .bottom)
+                        showsPendingResponse = false
+                    } label: {
+                        Label("New response", systemImage: "arrow.down")
+                    }
+                    .buttonStyle(AtelierLuminarePrimaryButtonStyle())
+                    .padding(14)
+                    .accessibilityLabel("Show new agent response")
+                    .accessibilityHint("Scrolls to the latest response")
                 }
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.containerSize.height
+                    >= geometry.contentSize.height - 56
+            } action: { _, isPinned in
+                isPinnedToBottom = isPinned
+                if isPinned {
+                    showsPendingResponse = false
+                }
+            }
+            .onChange(of: model.selectedResponses.last?.readIdentity) { previous, current in
+                if AgentResponseTimelinePolicy.showsPendingResponse(
+                    previousLastID: previous,
+                    newLastID: current,
+                    isPinnedToBottom: isPinnedToBottom
+                ) {
+                    showsPendingResponse = true
+                }
+                if isPinnedToBottom {
+                    proxy.scrollTo("agent-response-bottom", anchor: .bottom)
+                    showsPendingResponse = false
+                }
+            }
+            .onChange(of: model.selectedSession) {
+                showsPendingResponse = false
+                proxy.scrollTo("agent-response-bottom", anchor: .bottom)
             }
         }
     }
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("No agent responses yet")
+            Label("Waiting for a final response", systemImage: "waveform.path")
                 .atelierFont(size: 20, weight: .semibold)
-            Text("Final Codex and Claude answers for this workspace will appear here.")
+            Text("Use Codex or Claude in the terminal. Markdown and Mermaid previews appear here.")
                 .atelierFont(size: 12)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: 520, alignment: .leading)
+        .padding(.vertical, 24)
+    }
+
+    private var noSelectionState: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Select a session", systemImage: "rectangle.stack")
+                .atelierFont(size: 20, weight: .semibold)
+            Text("Choose a Codex or Claude session to preview its final responses.")
+                .atelierFont(size: 12)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: 520, alignment: .leading)
         .padding(.vertical, 24)
@@ -85,6 +241,10 @@ struct AgentResponsesView: View {
                 Text(response.provider.rawValue.uppercased())
                     .atelierFont(size: 9, weight: .bold, design: .monospaced)
                     .foregroundStyle(providerColor(response.provider))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(providerColor(response.provider).opacity(0.1))
+                    .clipShape(Capsule())
                 Text(response.timestamp, style: .time)
                     .atelierFont(size: 9.5, design: .monospaced)
                     .foregroundStyle(.secondary)
@@ -99,13 +259,16 @@ struct AgentResponsesView: View {
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(AtelierTheme.editor)
+        .padding(16)
+        .background(AtelierTheme.panel)
         .overlay {
-            RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
+            RoundedRectangle(cornerRadius: 8)
                 .stroke(AtelierTheme.border, lineWidth: 0.75)
         }
-        .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .onAppear {
+            model.markRead(response)
+        }
     }
 
     private func providerColor(_ provider: AgentProvider) -> Color {
@@ -119,6 +282,17 @@ struct AgentResponsesView: View {
 
     private func shortSessionID(_ sessionID: String) -> String {
         let value = URL(fileURLWithPath: sessionID).lastPathComponent
-        return value.count > 20 ? String(value.prefix(20)) : value
+        return value.count > 12 ? String(value.prefix(12)) : value
+    }
+
+    private func sessionPickerItem(_ summary: AgentSessionSummary) -> String {
+        let time = summary.latestResponseTime.formatted(date: .omitted, time: .shortened)
+        let unread = summary.unreadCount > 0 ? " - \(summary.unreadCount) unread" : ""
+        return "\(summary.provider.rawValue) - \(shortSessionID(summary.sessionID)) - \(time)\(unread)"
+    }
+
+    private func sessionAccessibilityLabel(_ summary: AgentSessionSummary) -> String {
+        "\(summary.provider.rawValue) session \(shortSessionID(summary.sessionID)), "
+            + "\(summary.responseCount) responses, \(summary.unreadCount) unread"
     }
 }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ContentView: View {
@@ -83,6 +84,9 @@ struct WorkspaceView: View {
     @Environment(AtelierZoomModel.self) private var zoom
     @State private var fileTreeCreationRequest: FileTreeCreationRequest?
     @State private var fileTreeTargetDirectory: URL?
+    @State private var agentPreviewWidth: CGFloat = 448
+    @State private var agentPreviewDragStartWidth: CGFloat?
+    @State private var responderBeforeAgentPreview: NSResponder?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -90,23 +94,37 @@ struct WorkspaceView: View {
 
             Divider()
 
-            HSplitView {
-                if !zoom.isFocusMode {
-                    explorerColumn
-                        .frame(minWidth: 220, idealWidth: 300, maxWidth: 400)
+            GeometryReader { geometry in
+                let layout = AgentPreviewLayoutPolicy.layout(
+                    containerWidth: geometry.size.width
+                )
+                HStack(spacing: 0) {
+                    workspaceColumns
+
+                    if session.isAgentPreviewPresented, layout == .docked {
+                        agentPreviewResizeHandle(containerWidth: geometry.size.width)
+                        agentPreview
+                            .frame(
+                                width: AgentPreviewLayoutPolicy.clampedDockedWidth(
+                                    agentPreviewWidth,
+                                    containerWidth: geometry.size.width
+                                )
+                            )
+                    }
                 }
-
-                TerminalTabs(model: terminalTabs)
-                    .frame(minWidth: 420, idealWidth: 660)
-                    .layoutPriority(2)
-
-                if !zoom.isFocusMode {
-                    ChangesView(model: gitModel)
-                        .frame(minWidth: 320, idealWidth: 420, maxWidth: 540)
-                        .layoutPriority(1)
+                .overlay(alignment: .trailing) {
+                    if session.isAgentPreviewPresented, layout == .overlay {
+                        agentPreview
+                            .frame(
+                                width: AgentPreviewLayoutPolicy.panelWidth(
+                                    containerWidth: geometry.size.width,
+                                    layout: layout
+                                )
+                            )
+                            .shadow(color: .black.opacity(0.14), radius: 18, x: -6)
+                    }
                 }
             }
-            .atelierSplitViewChrome()
 
             statusBar
         }
@@ -124,6 +142,96 @@ struct WorkspaceView: View {
 
     private var workspaceURL: URL {
         URL(fileURLWithPath: state.path, isDirectory: true)
+    }
+
+    private var workspaceColumns: some View {
+        HSplitView {
+            if !zoom.isFocusMode {
+                explorerColumn
+                    .frame(minWidth: 220, idealWidth: 300, maxWidth: 400)
+            }
+
+            TerminalTabs(model: terminalTabs)
+                .frame(minWidth: 420, idealWidth: 660)
+                .layoutPriority(2)
+
+            if !zoom.isFocusMode {
+                ChangesView(
+                    model: gitModel,
+                    onOpenDiff: terminalTabs.openGitDiff
+                )
+                    .frame(minWidth: 320, idealWidth: 420, maxWidth: 540)
+                    .layoutPriority(1)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .atelierSplitViewChrome()
+    }
+
+    private var agentPreview: some View {
+        AgentResponsesView(
+            model: session.agentResponses,
+            onClose: closeAgentPreview
+        )
+        .frame(maxHeight: .infinity)
+        .environment(\.atelierZoomScale, zoom.contentScale)
+    }
+
+    private func agentPreviewResizeHandle(containerWidth: CGFloat) -> some View {
+        Rectangle()
+            .fill(AtelierTheme.border)
+            .frame(width: 5)
+            .contentShape(Rectangle())
+            .overlay {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.55))
+                    .frame(width: 2, height: 36)
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let start = agentPreviewDragStartWidth ?? agentPreviewWidth
+                        if agentPreviewDragStartWidth == nil {
+                            agentPreviewDragStartWidth = start
+                        }
+                        agentPreviewWidth = AgentPreviewLayoutPolicy.clampedDockedWidth(
+                            start - value.translation.width,
+                            containerWidth: containerWidth
+                        )
+                    }
+                    .onEnded { _ in
+                        agentPreviewDragStartWidth = nil
+                    }
+            )
+            .accessibilityElement()
+            .accessibilityLabel("Resize agent preview")
+            .accessibilityValue("\(Int(agentPreviewWidth.rounded())) points wide")
+            .accessibilityAdjustableAction { direction in
+                let delta: CGFloat = direction == .increment ? 24 : -24
+                agentPreviewWidth = AgentPreviewLayoutPolicy.clampedDockedWidth(
+                    agentPreviewWidth + delta,
+                    containerWidth: containerWidth
+                )
+            }
+    }
+
+    private func openAgentPreview() {
+        responderBeforeAgentPreview = app.windowController.currentFirstResponder()
+        session.openResponses()
+    }
+
+    private func closeAgentPreview() {
+        session.closeAgentPreview()
+        app.windowController.restoreFirstResponder(responderBeforeAgentPreview)
+        responderBeforeAgentPreview = nil
+    }
+
+    private func toggleAgentPreview() {
+        if session.isAgentPreviewPresented {
+            closeAgentPreview()
+        } else {
+            openAgentPreview()
+        }
     }
 
     private var commandBar: some View {
@@ -180,7 +288,7 @@ struct WorkspaceView: View {
             .help("Change folder")
 
             Button {
-                session.openResponses()
+                toggleAgentPreview()
             } label: {
                 Image(systemName: "text.bubble")
                     .overlay(alignment: .topTrailing) {
@@ -193,9 +301,13 @@ struct WorkspaceView: View {
                     }
             }
             .buttonStyle(AtelierLuminareIconButtonStyle())
-            .accessibilityLabel("Open agent responses")
+            .accessibilityLabel(
+                session.isAgentPreviewPresented
+                    ? "Close agent preview"
+                    : "Open agent preview"
+            )
             .accessibilityValue("\(session.agentResponses.unreadCount) unread")
-            .help("Open agent responses")
+            .help(session.isAgentPreviewPresented ? "Close agent preview" : "Open agent preview")
 
             Button {
                 session.openGemma()

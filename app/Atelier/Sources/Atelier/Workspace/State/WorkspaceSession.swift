@@ -11,6 +11,7 @@ final class WorkspaceSession {
     let gemmaAgent: GemmaAgentModel
     let agentResponses: AgentResponsesModel
     private(set) var fileTreeRevision = 0
+    private(set) var isAgentPreviewPresented = false
 
     private let fileTreeService = FileTreeService()
     private var fileWatcher: FileWatcher?
@@ -24,8 +25,12 @@ final class WorkspaceSession {
     ) {
         self.state = state
         self.rootURL = rootURL
-        terminalTabs = TerminalTabsModel(workspacePath: rootURL.path)
-        gitModel = GitWorkspaceModel(workspacePath: rootURL.path)
+        let tabs = TerminalTabsModel(workspacePath: rootURL.path)
+        terminalTabs = tabs
+        gitModel = GitWorkspaceModel(
+            workspacePath: rootURL.path,
+            onRepositoryChange: tabs.invalidateGitDiffs
+        )
         if let gemmaAgent {
             self.gemmaAgent = gemmaAgent
         } else {
@@ -86,7 +91,15 @@ final class WorkspaceSession {
     }
 
     func openResponses() {
-        terminalTabs.openResponses(agentResponses)
+        isAgentPreviewPresented = true
+    }
+
+    func toggleAgentPreview() {
+        isAgentPreviewPresented.toggle()
+    }
+
+    func closeAgentPreview() {
+        isAgentPreviewPresented = false
     }
 
     isolated deinit {

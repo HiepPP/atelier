@@ -42,4 +42,4 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 
 ## Learnings
 
-- None yet.
+- 2026-07-18: Keep Codex and Claude interaction in SwiftTerm. Native response UI observes transcripts and never replaces or mutates terminal state.

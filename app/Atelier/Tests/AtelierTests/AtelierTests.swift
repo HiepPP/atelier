@@ -116,6 +116,74 @@ struct AtelierTests {
         #expect(status.untracked.map(\.path) == ["new file.txt"])
     }
 
+    @Test("Unified diff parser tracks old and new line numbers")
+    func gitDiffParsing() throws {
+        let document = GitDiffDocument(text: """
+        diff --git a/main.swift b/main.swift
+        index 1111111..2222222 100644
+        --- a/main.swift
+        +++ b/main.swift
+        @@ -1,3 +1,4 @@
+         let first = 1
+        -let second = 2
+        +let second = 3
+        +let third = 4
+        """)
+
+        #expect(document.additions == 2)
+        #expect(document.deletions == 1)
+
+        let context = try #require(document.lines.first { $0.kind == .context })
+        let deletion = try #require(document.lines.first { $0.kind == .deletion })
+        let additions = document.lines.filter { $0.kind == .addition }
+
+        #expect(context.oldLineNumber == 1)
+        #expect(context.newLineNumber == 1)
+        #expect(deletion.oldLineNumber == 2)
+        #expect(deletion.newLineNumber == nil)
+        #expect(additions.map(\.newLineNumber) == [2, 3])
+        #expect(additions.allSatisfy { $0.oldLineNumber == nil })
+    }
+
+    @Test("Git diff tabs reuse identity and close without affecting file tabs")
+    @MainActor
+    func gitDiffTabLifecycle() throws {
+        let root = temporaryDirectory("git-diff-tabs")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let fileURL = root.appendingPathComponent("main.swift")
+        try Data("let value = 1\n".utf8).write(to: fileURL)
+        let selection = DiffSelection(
+            change: GitChange(
+                path: "main.swift",
+                originalPath: nil,
+                kind: .untracked,
+                isStaged: false,
+                isUnstaged: true
+            ),
+            staged: false
+        )
+        let tabs = TerminalTabsModel(workspacePath: root.path)
+        defer { tabs.closeAll() }
+
+        tabs.openFile(fileURL)
+        tabs.openFile(fileURL)
+        #expect(tabs.fileTabCount == 1)
+
+        tabs.openGitDiff(selection)
+        let firstDiffID = tabs.selectedID
+        tabs.openGitDiff(selection)
+
+        #expect(tabs.gitDiffTabCount == 1)
+        #expect(tabs.selectedID == firstDiffID)
+        #expect(tabs.selectedGitDiffSelection == selection)
+
+        tabs.closeSelectedTab()
+
+        #expect(tabs.gitDiffTabCount == 0)
+        #expect(tabs.fileTabCount == 1)
+        #expect(tabs.selectedGitDiffSelection == nil)
+    }
+
     @Test("Editor documents use standardized URL identity")
     func editorDocumentIdentity() {
         let root = temporaryDirectory("editor-document")

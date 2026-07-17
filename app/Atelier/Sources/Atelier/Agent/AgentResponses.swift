@@ -6,12 +6,47 @@ nonisolated enum AgentProvider: String, Sendable {
     case claude = "Claude"
 }
 
+nonisolated struct AgentSessionIdentity: Identifiable, Hashable, Sendable {
+    let provider: AgentProvider
+    let sessionID: String
+
+    var id: String {
+        "\(provider.rawValue.lowercased()):\(sessionID)"
+    }
+}
+
 nonisolated struct AgentResponse: Identifiable, Equatable, Sendable {
     let id: String
     let provider: AgentProvider
     let sessionID: String
     let timestamp: Date
     let markdown: String
+
+    var session: AgentSessionIdentity {
+        AgentSessionIdentity(provider: provider, sessionID: sessionID)
+    }
+
+    var readIdentity: AgentResponseReadIdentity {
+        AgentResponseReadIdentity(session: session, responseID: id)
+    }
+}
+
+nonisolated struct AgentResponseReadIdentity: Hashable, Sendable {
+    let session: AgentSessionIdentity
+    let responseID: String
+}
+
+nonisolated struct AgentSessionSummary: Identifiable, Equatable, Sendable {
+    let session: AgentSessionIdentity
+    let latestResponseTime: Date
+    let responseCount: Int
+    let unreadCount: Int
+
+    var id: String { session.id }
+
+    var provider: AgentProvider { session.provider }
+
+    var sessionID: String { session.sessionID }
 }
 
 nonisolated protocol AgentResponseSource: Sendable {
@@ -29,7 +64,6 @@ nonisolated enum AgentTranscriptParser {
         var codexWorkspace: String?
         var codexSessionID: String?
         var responses: [AgentResponse] = []
-        var recordOrder = 0
 
         for line in jsonLines.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let data = line.data(using: .utf8),
@@ -55,32 +89,42 @@ nonisolated enum AgentTranscriptParser {
             let response: AgentResponse?
             if codexWorkspace == expectedWorkspace,
                let markdown = codexAssistantText(from: object) {
+                let sessionID = codexSessionID ?? fallbackSessionID(
+                    provider: .codex,
+                    workspacePath: expectedWorkspace,
+                    sourceID: sourceID
+                )
                 response = AgentResponse(
                     id: stableID(
                         provider: .codex,
-                        sourceID: sourceID,
+                        sessionID: sessionID,
                         recordID: recordID(from: object),
                         timestamp: timestamp,
-                        order: recordOrder
+                        markdown: markdown
                     ),
                     provider: .codex,
-                    sessionID: codexSessionID ?? sourceID,
+                    sessionID: sessionID,
                     timestamp: date,
                     markdown: markdown
                 )
             } else if let cwd = object["cwd"] as? String,
                       standardizedPath(cwd) == expectedWorkspace,
                       let markdown = claudeAssistantText(from: object) {
+                let sessionID = object["sessionId"] as? String ?? fallbackSessionID(
+                    provider: .claude,
+                    workspacePath: expectedWorkspace,
+                    sourceID: sourceID
+                )
                 response = AgentResponse(
                     id: stableID(
                         provider: .claude,
-                        sourceID: sourceID,
+                        sessionID: sessionID,
                         recordID: recordID(from: object),
                         timestamp: timestamp,
-                        order: recordOrder
+                        markdown: markdown
                     ),
                     provider: .claude,
-                    sessionID: object["sessionId"] as? String ?? sourceID,
+                    sessionID: sessionID,
                     timestamp: date,
                     markdown: markdown
                 )
@@ -90,7 +134,6 @@ nonisolated enum AgentTranscriptParser {
 
             if let response, !response.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 responses.append(response)
-                recordOrder += 1
             }
         }
 
@@ -172,12 +215,40 @@ nonisolated enum AgentTranscriptParser {
 
     private static func stableID(
         provider: AgentProvider,
-        sourceID: String,
+        sessionID: String,
         recordID: String?,
         timestamp: String,
-        order: Int
+        markdown: String
     ) -> String {
-        "\(provider.rawValue):\(sourceID):\(recordID ?? timestamp):\(order)"
+        let recordComponent = recordID ?? deterministicDigest("\(timestamp)\u{1f}\(markdown)")
+        return "\(provider.rawValue.lowercased()):\(sessionID):\(recordComponent)"
+    }
+
+    static func fallbackSessionID(
+        provider: AgentProvider,
+        workspacePath: String,
+        sourceID: String
+    ) -> String {
+        let seed = [
+            provider.rawValue.lowercased(),
+            standardizedPath(workspacePath),
+            standardizedSourceID(sourceID)
+        ].joined(separator: "\u{1f}")
+        return "local-\(deterministicDigest(seed))"
+    }
+
+    private static func standardizedSourceID(_ sourceID: String) -> String {
+        guard sourceID.hasPrefix("/") else { return sourceID }
+        return standardizedPath(sourceID)
+    }
+
+    private static func deterministicDigest(_ value: String) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return String(hash, radix: 16)
     }
 
     private static func parseDate(_ value: String) -> Date? {
@@ -313,12 +384,52 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
 @Observable
 final class AgentResponsesModel {
     private(set) var responses: [AgentResponse] = []
-    private(set) var unreadCount = 0
     private(set) var isMonitoring = false
+    private(set) var selectedSession: AgentSessionIdentity?
 
     private let source: any AgentResponseSource
-    private var responseIDs: Set<String> = []
+    private var responseIDs: Set<AgentResponseReadIdentity> = []
+    private var readResponseIDs: Set<AgentResponseReadIdentity> = []
     private var monitorTask: Task<Void, Never>?
+
+    var unreadCount: Int {
+        responses.reduce(into: 0) { count, response in
+            if !readResponseIDs.contains(response.readIdentity) {
+                count += 1
+            }
+        }
+    }
+
+    var sessionSummaries: [AgentSessionSummary] {
+        let grouped = Dictionary(grouping: responses, by: \.session)
+        return grouped.compactMap { session, sessionResponses in
+            guard let latest = sessionResponses.map(\.timestamp).max() else { return nil }
+            return AgentSessionSummary(
+                session: session,
+                latestResponseTime: latest,
+                responseCount: sessionResponses.count,
+                unreadCount: sessionResponses.reduce(into: 0) { count, response in
+                    if !readResponseIDs.contains(response.readIdentity) {
+                        count += 1
+                    }
+                }
+            )
+        }.sorted {
+            if $0.latestResponseTime == $1.latestResponseTime {
+                return $0.id < $1.id
+            }
+            return $0.latestResponseTime > $1.latestResponseTime
+        }
+    }
+
+    var sessions: [AgentSessionIdentity] {
+        sessionSummaries.map(\.session)
+    }
+
+    var selectedResponses: [AgentResponse] {
+        guard let selectedSession else { return [] }
+        return responses.filter { $0.session == selectedSession }
+    }
 
     init(source: any AgentResponseSource) {
         self.source = source
@@ -344,17 +455,35 @@ final class AgentResponsesModel {
     func refresh() async {
         let loaded = await source.loadResponses()
         guard !Task.isCancelled else { return }
-        let newResponses = loaded.filter { responseIDs.insert($0.id).inserted }
+        let newResponses = loaded.filter { responseIDs.insert($0.readIdentity).inserted }
         guard !newResponses.isEmpty else { return }
         responses.append(contentsOf: newResponses)
         responses.sort {
             $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp
         }
-        unreadCount += newResponses.count
+        if selectedSession == nil {
+            selectedSession = sessionSummaries.first?.session
+        }
     }
 
-    func markAllRead() {
-        unreadCount = 0
+    func selectSession(_ session: AgentSessionIdentity?) {
+        guard let session else {
+            selectedSession = nil
+            return
+        }
+        guard sessionSummaries.contains(where: { $0.session == session }) else { return }
+        selectedSession = session
+    }
+
+    func markRead(_ response: AgentResponse) {
+        guard responseIDs.contains(response.readIdentity) else { return }
+        readResponseIDs.insert(response.readIdentity)
+    }
+
+    func markRead(_ visibleResponses: some Sequence<AgentResponse>) {
+        for response in visibleResponses {
+            markRead(response)
+        }
     }
 
     isolated deinit {

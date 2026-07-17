@@ -1,9 +1,17 @@
 import SwiftUI
 import Observation
 
-struct DiffSelection: Equatable {
+nonisolated struct DiffSelection: Equatable, Sendable {
     let change: GitChange
     let staged: Bool
+
+    var displayName: String {
+        URL(fileURLWithPath: change.path).lastPathComponent
+    }
+
+    var stateLabel: String {
+        staged ? "Staged" : "Working Tree"
+    }
 }
 
 @MainActor
@@ -14,21 +22,22 @@ final class GitWorkspaceModel {
         branch: "",
         branches: []
     )
-    private(set) var diffText = "Select a changed file to view its diff."
-    private(set) var selection: DiffSelection?
-    private(set) var diffNeedsReload = false
     private(set) var isLoading = false
     private(set) var errorMessage: String?
 
     let workspacePath: String
     private let service = GitService()
+    private let onRepositoryChange: () -> Void
     private var refreshTask: Task<Void, Never>?
-    private var diffTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
     private var refreshID = UUID()
 
-    init(workspacePath: String) {
+    init(
+        workspacePath: String,
+        onRepositoryChange: @escaping () -> Void = {}
+    ) {
         self.workspacePath = workspacePath
+        self.onRepositoryChange = onRepositoryChange
     }
 
     func refresh() {
@@ -57,48 +66,12 @@ final class GitWorkspaceModel {
     }
 
     func invalidate() {
-        if selection != nil { diffNeedsReload = true }
+        onRepositoryChange()
         refresh()
-    }
-
-    func select(_ change: GitChange, staged: Bool) {
-        selection = DiffSelection(change: change, staged: staged)
-        loadSelectedDiff()
-    }
-
-    func loadSelectedDiff() {
-        guard let selection else { return }
-        diffTask?.cancel()
-        diffNeedsReload = false
-        if selection.change.kind == .untracked {
-            diffText = "Untracked file. Stage it to view a unified diff."
-            return
-        }
-        diffTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let output = try await service.diff(
-                    path: selection.change.path,
-                    originalPath: selection.change.originalPath,
-                    staged: selection.staged,
-                    workspacePath: workspacePath
-                )
-                guard !Task.isCancelled, self.selection == selection else { return }
-                diffText = output
-                errorMessage = nil
-            } catch is CancellationError {
-                return
-            } catch {
-                guard !Task.isCancelled, self.selection == selection else { return }
-                diffText = "Could not load diff: \(error.localizedDescription)"
-                AppLogger.git.error("Git diff failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
     }
 
     func stop() {
         refreshTask?.cancel()
-        diffTask?.cancel()
         actionTask?.cancel()
     }
 
@@ -150,8 +123,7 @@ final class GitWorkspaceModel {
                 try await operation(service, workspacePath)
                 guard !Task.isCancelled else { return }
                 errorMessage = nil
-                selection = nil
-                diffText = "Select a changed file to view its diff."
+                onRepositoryChange()
                 onSuccess()
                 refresh()
             } catch is CancellationError {
@@ -167,42 +139,31 @@ final class GitWorkspaceModel {
 
 struct ChangesView: View {
     let model: GitWorkspaceModel
+    let onOpenDiff: (DiffSelection) -> Void
     @Environment(AtelierZoomModel.self) private var zoom
     @State private var commitMessage = ""
     @State private var discardCandidate: GitChange?
     @State private var hoveredChangeID: String?
 
     var body: some View {
-        Group {
-            if model.selection == nil {
-                sourceControlPanel
-            } else {
-                VSplitView {
-                    sourceControlPanel
-                        .frame(minHeight: 240, idealHeight: 400)
-                    diffPanel
-                        .frame(minHeight: 200, idealHeight: 280)
+        sourceControlPanel
+            .background(AtelierTheme.sidebar)
+            .confirmationDialog(
+                "Discard changes to \(discardCandidate?.path ?? "this file")?",
+                isPresented: Binding(
+                    get: { discardCandidate != nil },
+                    set: { if !$0 { discardCandidate = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Discard Changes", role: .destructive) {
+                    if let change = discardCandidate { model.discard(change) }
+                    discardCandidate = nil
                 }
-                .atelierSplitViewChrome()
+                Button("Cancel", role: .cancel) { discardCandidate = nil }
+            } message: {
+                Text("This restores the file from Git. This action cannot be undone in Atelier.")
             }
-        }
-        .background(AtelierTheme.sidebar)
-        .confirmationDialog(
-            "Discard changes to \(discardCandidate?.path ?? "this file")?",
-            isPresented: Binding(
-                get: { discardCandidate != nil },
-                set: { if !$0 { discardCandidate = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Discard Changes", role: .destructive) {
-                if let change = discardCandidate { model.discard(change) }
-                discardCandidate = nil
-            }
-            Button("Cancel", role: .cancel) { discardCandidate = nil }
-        } message: {
-            Text("This restores the file from Git. This action cannot be undone in Atelier.")
-        }
     }
 
     private var sourceControlPanel: some View {
@@ -348,43 +309,6 @@ struct ChangesView: View {
         .environment(\.atelierZoomScale, zoom.sidebarScale)
     }
 
-    private var diffPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "doc.text.magnifyingglass")
-                    .foregroundStyle(AtelierTheme.accent)
-                Text(model.selection?.change.path ?? "No diff selected")
-                    .atelierFont(size: AtelierTypography.uiSize)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
-                if model.diffNeedsReload {
-                    Button {
-                        model.loadSelectedDiff()
-                    } label: {
-                        Label("Reload", systemImage: "arrow.clockwise")
-                            .padding(.horizontal, 7)
-                    }
-                    .buttonStyle(AtelierLuminareIconButtonStyle())
-                }
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 36)
-            .background(AtelierTheme.chrome)
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(AtelierTheme.border)
-                    .frame(height: 0.5)
-            }
-            .environment(\.atelierZoomScale, zoom.sidebarScale)
-
-            DiffView(text: model.diffText)
-                .environment(\.atelierZoomScale, zoom.contentScale)
-        }
-        .background(AtelierTheme.editor)
-    }
-
     @ViewBuilder
     private func changeSection(_ title: String, changes: [GitChange], staged: Bool) -> some View {
         if !changes.isEmpty {
@@ -392,7 +316,7 @@ struct ChangesView: View {
                 ForEach(changes) { change in
                     HStack(spacing: 8) {
                         Button {
-                            model.select(change, staged: staged)
+                            onOpenDiff(DiffSelection(change: change, staged: staged))
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "doc")

@@ -25,8 +25,8 @@ final class TerminalSession: Identifiable {
 private enum CenterTabContent {
     case terminal(TerminalSession)
     case file(EditorSession)
+    case gitDiff(GitDiffSession)
     case gemma(GemmaAgentModel)
-    case responses(AgentResponsesModel)
 }
 
 private final class CenterTab: Identifiable {
@@ -47,10 +47,10 @@ private final class CenterTab: Identifiable {
             return session.title
         case .file(let file):
             return file.document.displayName
+        case .gitDiff(let diff):
+            return "\(diff.selection.displayName) [\(diff.selection.stateLabel)]"
         case .gemma:
             return "Gemma"
-        case .responses:
-            return "Responses"
         }
     }
 
@@ -60,10 +60,10 @@ private final class CenterTab: Identifiable {
             return "terminal"
         case .file:
             return "doc.text"
+        case .gitDiff:
+            return "doc.text.magnifyingglass"
         case .gemma:
             return "sparkles"
-        case .responses:
-            return "text.bubble"
         }
     }
 
@@ -73,10 +73,10 @@ private final class CenterTab: Identifiable {
             return "Close terminal"
         case .file:
             return "Close file"
+        case .gitDiff:
+            return "Close Git diff"
         case .gemma:
             return "Close Gemma"
-        case .responses:
-            return "Close agent responses"
         }
     }
 }
@@ -122,10 +122,22 @@ final class TerminalTabsModel {
         }
     }
 
-    var responsesTabCount: Int {
+    var fileTabCount: Int {
         tabs.reduce(into: 0) { count, tab in
-            if case .responses = tab.content { count += 1 }
+            if case .file = tab.content { count += 1 }
         }
+    }
+
+    var gitDiffTabCount: Int {
+        tabs.reduce(into: 0) { count, tab in
+            if case .gitDiff = tab.content { count += 1 }
+        }
+    }
+
+    var selectedGitDiffSelection: DiffSelection? {
+        guard let selectedTab,
+              case .gitDiff(let diff) = selectedTab.content else { return nil }
+        return diff.selection
     }
 
     func add() {
@@ -143,10 +155,10 @@ final class TerminalTabsModel {
                 session.close()
             case .file(let file):
                 file.close()
+            case .gitDiff(let diff):
+                diff.close()
             case .gemma(let model):
                 model.close()
-            case .responses:
-                break
             }
         }
         tabs.removeAll(keepingCapacity: false)
@@ -171,6 +183,35 @@ final class TerminalTabsModel {
         selectedID = tab.id
     }
 
+    func openGitDiff(_ selection: DiffSelection) {
+        if let tab = tabs.first(where: { tab in
+            guard case .gitDiff(let diff) = tab.content else { return false }
+            return diff.selection == selection
+        }) {
+            guard case .gitDiff(let diff) = tab.content else { return }
+            if diff.needsReload { diff.reload() }
+            selectedID = tab.id
+            return
+        }
+
+        let diff = GitDiffSession(selection: selection, workspacePath: workspacePath)
+        let tab = CenterTab(content: .gitDiff(diff))
+        tabs.append(tab)
+        selectedID = tab.id
+    }
+
+    func invalidateGitDiffs() {
+        for tab in tabs {
+            guard case .gitDiff(let diff) = tab.content else { continue }
+            diff.invalidate()
+        }
+    }
+
+    func closeSelectedTab() {
+        guard let selectedTab else { return }
+        close(selectedTab)
+    }
+
     func openGemma(_ model: GemmaAgentModel) {
         if let tab = tabs.first(where: { tab in
             guard case .gemma(let existing) = tab.content else { return false }
@@ -184,24 +225,8 @@ final class TerminalTabsModel {
         selectedID = tab.id
     }
 
-    func openResponses(_ model: AgentResponsesModel) {
-        if let tab = tabs.first(where: { tab in
-            guard case .responses(let existing) = tab.content else { return false }
-            return existing === model
-        }) {
-            select(tab)
-            return
-        }
-        let tab = CenterTab(content: .responses(model))
-        tabs.append(tab)
-        select(tab)
-    }
-
     fileprivate func select(_ tab: CenterTab) {
         selectedID = tab.id
-        if case .responses(let model) = tab.content {
-            model.markAllRead()
-        }
     }
 
     fileprivate func close(_ tab: CenterTab) {
@@ -211,10 +236,10 @@ final class TerminalTabsModel {
             session.close()
         case .file(let file):
             file.close()
+        case .gitDiff(let diff):
+            diff.close()
         case .gemma(let model):
             model.close()
-        case .responses:
-            break
         }
         tabs.remove(at: index)
         if selectedID == tab.id {
@@ -465,6 +490,10 @@ struct TerminalTabs: View {
                         .id(tab.id)
                         .background(AtelierTheme.editor)
                         .environment(\.atelierZoomScale, zoom.contentScale)
+                case .gitDiff(let diff):
+                    GitDiffTabView(session: diff)
+                        .id(tab.id)
+                        .environment(\.atelierZoomScale, zoom.contentScale)
                 case .gemma(let agent):
                     GemmaAgentView(
                         model: agent,
@@ -473,10 +502,6 @@ struct TerminalTabs: View {
                     )
                     .id(tab.id)
                     .environment(\.atelierZoomScale, zoom.contentScale)
-                case .responses(let responses):
-                    AgentResponsesView(model: responses)
-                        .id(tab.id)
-                        .environment(\.atelierZoomScale, zoom.contentScale)
                 }
             } else {
                 VStack(spacing: 8) {
