@@ -54,92 +54,90 @@ nonisolated protocol AgentResponseSource: Sendable {
 }
 
 nonisolated enum AgentTranscriptParser {
+    struct State: Sendable {
+        var codexWorkspace: String?
+        var codexSessionID: String?
+        var pendingData = Data()
+    }
+
+    struct ParseResult: Sendable {
+        let responses: [AgentResponse]
+        let state: State
+    }
+
     static func extractAll(
         from jsonLines: String,
         workspacePath: String,
         sourceID: String,
         modifiedAfter: Date
     ) -> [AgentResponse] {
-        let expectedWorkspace = standardizedPath(workspacePath)
-        var codexWorkspace: String?
-        var codexSessionID: String?
-        var responses: [AgentResponse] = []
-
-        for line in jsonLines.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard let data = line.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                continue
-            }
-
-            if object["type"] as? String == "session_meta",
-               let payload = object["payload"] as? [String: Any] {
-                if let cwd = payload["cwd"] as? String {
-                    codexWorkspace = standardizedPath(cwd)
-                }
-                codexSessionID = payload["id"] as? String
-                continue
-            }
-
-            guard let timestamp = object["timestamp"] as? String,
-                  let date = parseDate(timestamp),
-                  date >= modifiedAfter else {
-                continue
-            }
-
-            let response: AgentResponse?
-            if codexWorkspace == expectedWorkspace,
-               let markdown = codexAssistantText(from: object) {
-                let sessionID = codexSessionID ?? fallbackSessionID(
-                    provider: .codex,
-                    workspacePath: expectedWorkspace,
-                    sourceID: sourceID
-                )
-                response = AgentResponse(
-                    id: stableID(
-                        provider: .codex,
-                        sessionID: sessionID,
-                        recordID: recordID(from: object),
-                        timestamp: timestamp,
-                        markdown: markdown
-                    ),
-                    provider: .codex,
-                    sessionID: sessionID,
-                    timestamp: date,
-                    markdown: markdown
-                )
-            } else if let cwd = object["cwd"] as? String,
-                      standardizedPath(cwd) == expectedWorkspace,
-                      let markdown = claudeAssistantText(from: object) {
-                let sessionID = object["sessionId"] as? String ?? fallbackSessionID(
-                    provider: .claude,
-                    workspacePath: expectedWorkspace,
-                    sourceID: sourceID
-                )
-                response = AgentResponse(
-                    id: stableID(
-                        provider: .claude,
-                        sessionID: sessionID,
-                        recordID: recordID(from: object),
-                        timestamp: timestamp,
-                        markdown: markdown
-                    ),
-                    provider: .claude,
-                    sessionID: sessionID,
-                    timestamp: date,
-                    markdown: markdown
-                )
-            } else {
-                response = nil
-            }
-
-            if let response, !response.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                responses.append(response)
-            }
-        }
-
+        let data = Data(jsonLines.utf8)
+        let responses = parse(
+            data: data,
+            workspacePath: workspacePath,
+            sourceID: sourceID,
+            modifiedAfter: modifiedAfter,
+            state: State()
+        )?.responses ?? []
         return responses.sorted {
             $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp
         }
+    }
+
+    static func parse(
+        data: Data,
+        workspacePath: String,
+        sourceID: String,
+        modifiedAfter: Date,
+        state initialState: State
+    ) -> ParseResult? {
+        let expectedWorkspace = standardizedPath(workspacePath)
+        let timestampParser = TimestampParser()
+        var state = initialState
+        var buffer = state.pendingData
+        buffer.append(data)
+        state.pendingData.removeAll(keepingCapacity: false)
+        var responses: [AgentResponse] = []
+        var lineStart = buffer.startIndex
+        var lineCount = 0
+
+        for index in buffer.indices where buffer[index] == 0x0A {
+            lineCount &+= 1
+            if lineCount.isMultiple(of: 256), isCurrentTaskCancelled { return nil }
+            if index > lineStart,
+               let object = decodeObject(Data(buffer[lineStart..<index])) {
+                consume(
+                    object,
+                    expectedWorkspace: expectedWorkspace,
+                    sourceID: sourceID,
+                    modifiedAfter: modifiedAfter,
+                    timestampParser: timestampParser,
+                    state: &state,
+                    responses: &responses
+                )
+            }
+            lineStart = buffer.index(after: index)
+        }
+
+        if lineStart < buffer.endIndex {
+            let trailing = Data(buffer[lineStart...])
+            if let object = decodeObject(trailing) {
+                consume(
+                    object,
+                    expectedWorkspace: expectedWorkspace,
+                    sourceID: sourceID,
+                    modifiedAfter: modifiedAfter,
+                    timestampParser: timestampParser,
+                    state: &state,
+                    responses: &responses
+                )
+            } else {
+                state.pendingData = trailing
+            }
+        }
+
+        guard !isCurrentTaskCancelled else { return nil }
+        return ParseResult(responses: responses, state: state)
     }
 
     static func belongsToWorkspace(_ jsonLines: String, workspacePath: String) -> Bool {
@@ -162,16 +160,87 @@ nonisolated enum AgentTranscriptParser {
     }
 
     static func sessionStartedAt(_ jsonLines: String) -> Date? {
+        let timestampParser = TimestampParser()
         for line in jsonLines.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let data = line.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let timestamp = object["timestamp"] as? String,
-                  let date = parseDate(timestamp) else {
+                  let date = timestampParser.date(from: timestamp) else {
                 continue
             }
             return date
         }
         return nil
+    }
+
+    private static func consume(
+        _ object: [String: Any],
+        expectedWorkspace: String,
+        sourceID: String,
+        modifiedAfter: Date,
+        timestampParser: TimestampParser,
+        state: inout State,
+        responses: inout [AgentResponse]
+    ) {
+        if object["type"] as? String == "session_meta",
+           let payload = object["payload"] as? [String: Any] {
+            if let cwd = payload["cwd"] as? String {
+                state.codexWorkspace = standardizedPath(cwd)
+            }
+            state.codexSessionID = payload["id"] as? String
+            return
+        }
+
+        let provider: AgentProvider
+        let sessionID: String
+        let markdown: String
+
+        if state.codexWorkspace == expectedWorkspace,
+           let content = codexAssistantText(from: object) {
+            provider = .codex
+            sessionID = state.codexSessionID ?? fallbackSessionID(
+                provider: .codex,
+                workspacePath: expectedWorkspace,
+                sourceID: sourceID
+            )
+            markdown = content
+        } else if let content = claudeAssistantText(from: object),
+                  let cwd = object["cwd"] as? String,
+                  standardizedPath(cwd) == expectedWorkspace {
+            provider = .claude
+            sessionID = object["sessionId"] as? String ?? fallbackSessionID(
+                provider: .claude,
+                workspacePath: expectedWorkspace,
+                sourceID: sourceID
+            )
+            markdown = content
+        } else {
+            return
+        }
+
+        guard !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let timestamp = object["timestamp"] as? String,
+              let date = timestampParser.date(from: timestamp),
+              date >= modifiedAfter else {
+            return
+        }
+        responses.append(AgentResponse(
+            id: stableID(
+                provider: provider,
+                sessionID: sessionID,
+                recordID: recordID(from: object),
+                timestamp: timestamp,
+                markdown: markdown
+            ),
+            provider: provider,
+            sessionID: sessionID,
+            timestamp: date,
+            markdown: markdown
+        ))
+    }
+
+    private static func decodeObject(_ data: Data) -> [String: Any]? {
+        try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
     private static func codexAssistantText(from object: [String: Any]) -> String? {
@@ -251,11 +320,24 @@ nonisolated enum AgentTranscriptParser {
         return String(hash, radix: 16)
     }
 
-    private static func parseDate(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: value)
-            ?? ISO8601DateFormatter().date(from: value)
+    private final class TimestampParser {
+        private let fractional: ISO8601DateFormatter
+        private let standard = ISO8601DateFormatter()
+
+        init() {
+            fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        }
+
+        func date(from value: String) -> Date? {
+            fractional.date(from: value) ?? standard.date(from: value)
+        }
+    }
+
+    private static var isCurrentTaskCancelled: Bool {
+        withUnsafeCurrentTask { task in
+            task?.isCancelled == true
+        }
     }
 
     private static func standardizedPath(_ path: String) -> String {
@@ -269,6 +351,8 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     private struct CachedTranscript {
         let modificationDate: Date
         let size: Int
+        let fileID: UInt64
+        let parserState: AgentTranscriptParser.State
         let responses: [AgentResponse]
     }
 
@@ -278,6 +362,7 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     private var discoveredURLs: [URL] = []
     private var cache: [URL: CachedTranscript] = [:]
     private var nextDiscoveryDate = Date.distantPast
+    private(set) var parsedByteCount = 0
 
     init(
         workspacePath: String,
@@ -308,33 +393,58 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
         var responses: [AgentResponse] = []
 
         for url in discoveredURLs {
+            guard !isCurrentTaskCancelled else { return [] }
             guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
                   let modificationDate = attributes[.modificationDate] as? Date,
-                  let size = (attributes[.size] as? NSNumber)?.intValue else {
+                  let size = (attributes[.size] as? NSNumber)?.intValue,
+                  size <= Self.maximumTranscriptBytes,
+                  let fileNumber = attributes[.systemFileNumber] as? NSNumber else {
                 continue
             }
+            let fileID = fileNumber.uint64Value
             if let cached = cache[url],
-               cached.modificationDate == modificationDate,
-               cached.size == size {
+               cached.size == size,
+               cached.fileID == fileID {
+                if cached.modificationDate != modificationDate {
+                    cache[url] = CachedTranscript(
+                        modificationDate: modificationDate,
+                        size: cached.size,
+                        fileID: cached.fileID,
+                        parserState: cached.parserState,
+                        responses: cached.responses
+                    )
+                }
                 responses.append(contentsOf: cached.responses)
                 continue
             }
-            guard let jsonLines = try? String(contentsOf: url, encoding: .utf8),
-                  AgentTranscriptParser.belongsToWorkspace(
-                    jsonLines,
-                    workspacePath: workspacePath
-                  ) else {
+
+            let previous = cache[url]
+            let canReadAppend = previous?.fileID == fileID && size > (previous?.size ?? size)
+            let offset = canReadAppend ? previous?.size ?? 0 : 0
+            guard let data = readData(from: url, offset: offset) else {
                 continue
             }
-            let parsed = AgentTranscriptParser.extractAll(
-                from: jsonLines,
+            parsedByteCount &+= data.count
+            let initialState = canReadAppend
+                ? previous?.parserState ?? AgentTranscriptParser.State()
+                : AgentTranscriptParser.State()
+            guard let result = AgentTranscriptParser.parse(
+                data: data,
                 workspacePath: workspacePath,
                 sourceID: url.path,
-                modifiedAfter: modifiedAfter
-            )
+                modifiedAfter: modifiedAfter,
+                state: initialState
+            ) else { return [] }
+            var parsed = canReadAppend ? previous?.responses ?? [] : []
+            parsed.append(contentsOf: result.responses)
+            parsed.sort {
+                $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp
+            }
             cache[url] = CachedTranscript(
                 modificationDate: modificationDate,
-                size: size,
+                size: offset + data.count,
+                fileID: fileID,
+                parserState: result.state,
                 responses: parsed
             )
             responses.append(contentsOf: parsed)
@@ -346,6 +456,24 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
         }
         return unique.values.sorted {
             $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp
+        }
+    }
+
+    private func readData(from url: URL, offset: Int) -> Data? {
+        guard offset > 0 else { return try? Data(contentsOf: url) }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        do {
+            try handle.seek(toOffset: UInt64(offset))
+            return try handle.readToEnd() ?? Data()
+        } catch {
+            return nil
+        }
+    }
+
+    private var isCurrentTaskCancelled: Bool {
+        withUnsafeCurrentTask { task in
+            task?.isCancelled == true
         }
     }
 

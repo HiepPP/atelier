@@ -137,6 +137,57 @@ struct AgentResponsesTests {
         #expect(Array(third.prefix(2)).map(\.id) == first.map(\.id))
     }
 
+    @Test("Monitor parses only appended transcript bytes")
+    func incrementalTranscriptMonitor() async throws {
+        let root = temporaryDirectory("incremental-monitor")
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let transcriptURL = root.appendingPathComponent("session.jsonl")
+        let initial = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"one","cwd":"\(workspace.path)"}}
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"id":"first","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"One"}]}}
+        """
+        try initial.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            modifiedAfter: .distantPast,
+            roots: [root]
+        )
+
+        let first = await monitor.loadResponses()
+        let initialParsedBytes = await monitor.parsedByteCount
+        #expect(first.map(\.markdown) == ["One"])
+
+        let appended = Data("""
+
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"response_item","payload":{"id":"second","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Two"}]}}
+        """.utf8)
+        let midpoint = appended.count / 2
+        let handle = try FileHandle(forWritingTo: transcriptURL)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: appended.prefix(midpoint))
+
+        let partial = await monitor.loadResponses()
+        #expect(partial.map(\.markdown) == ["One"])
+
+        try handle.write(contentsOf: appended.suffix(from: midpoint))
+        let complete = await monitor.loadResponses()
+        let parsedBytesAfterAppend = await monitor.parsedByteCount
+        #expect(complete.map(\.markdown) == ["One", "Two"])
+        #expect(parsedBytesAfterAppend - initialParsedBytes == appended.count)
+
+        _ = await monitor.loadResponses()
+        #expect(await monitor.parsedByteCount == parsedBytesAfterAppend)
+
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: 10)],
+            ofItemAtPath: transcriptURL.path
+        )
+        _ = await monitor.loadResponses()
+        #expect(await monitor.parsedByteCount == parsedBytesAfterAppend)
+    }
+
     @Test("Model deduplicates refreshes and exposes stable sessions")
     func modelAndSessionIdentity() async {
         let response = AgentResponse(
