@@ -122,7 +122,7 @@ struct GemmaAgentView: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(message.role == .user ? "YOU" : "GEMMA")
                 .atelierFont(size: 9, weight: .bold, design: .monospaced)
-                .foregroundStyle(message.role == .user ? AtelierTheme.gitOrange : AtelierTheme.accent)
+                .foregroundStyle(message.role == .user ? Color.secondary : AtelierTheme.accent)
             if message.content.isEmpty && model.isRunning {
                 Text("Thinking...")
                     .italic()
@@ -138,13 +138,16 @@ struct GemmaAgentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(message.role == .user ? AtelierTheme.panel : AtelierTheme.editor)
-        .overlay {
-            RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                .stroke(AtelierTheme.border, lineWidth: 0.75)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
+        .padding(.horizontal, message.role == .user ? 12 : 0)
+        .padding(.vertical, 10)
+        .background(
+            message.role == .user
+                ? AtelierTheme.accent.opacity(0.07)
+                : Color.clear
+        )
+        .clipShape(
+            RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+        )
     }
 
     private func toolView(_ activity: GemmaToolActivity) -> some View {

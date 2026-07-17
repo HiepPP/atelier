@@ -4,7 +4,7 @@ import SwiftUI
 
 enum AtelierTheme {
     static let accent = Color(nsColor: AppKitThemeAdapter.accent)
-    static let accentInk = Color(nsColor: AppKitThemeAdapter.editor)
+    static let accentInk = Color(nsColor: AppKitThemeAdapter.accentInk)
     static let chrome = Color(nsColor: AppKitThemeAdapter.chrome)
     static let canvas = Color(nsColor: AppKitThemeAdapter.canvas)
     static let sidebar = Color(nsColor: AppKitThemeAdapter.sidebar)
@@ -19,8 +19,18 @@ enum AtelierTheme {
     static let gitAdded = Color(nsColor: AppKitThemeAdapter.gitAdded)
     static let gitDeleted = Color(nsColor: AppKitThemeAdapter.gitDeleted)
     static let gitUntracked = Color(nsColor: AppKitThemeAdapter.gitUntracked)
-    static let panelRadius: CGFloat = 0
-    static let controlRadius: CGFloat = 5
+    static let panelRadius: CGFloat = 8
+    static let controlRadius: CGFloat = 6
+    static let rowRadius: CGFloat = 5
+}
+
+enum AtelierMetrics {
+    static let grid: CGFloat = 8
+    static let commandBarHeight: CGFloat = 44
+    static let sectionHeaderHeight: CGFloat = 36
+    static let tabBarHeight: CGFloat = 38
+    static let statusBarHeight: CGFloat = 22
+    static let iconButtonSize: CGFloat = 28
 }
 
 enum AtelierTypography {
@@ -119,6 +129,7 @@ extension View {
             tableView.enclosingScrollView?.drawsBackground = true
             tableView.enclosingScrollView?.backgroundColor = AppKitThemeAdapter.sidebar
             tableView.enclosingScrollView?.scrollerStyle = .overlay
+            tableView.enclosingScrollView?.verticalScrollElasticity = .none
         }
     }
 

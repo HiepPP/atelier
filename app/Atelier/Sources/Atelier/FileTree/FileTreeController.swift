@@ -139,9 +139,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             ?? makeCell(identifier: identifier)
         cell.textField?.stringValue = node.name
         cell.textField?.font = font
-        cell.textField?.textColor = node.isDirectory
-            ? AppKitThemeAdapter.accent
-            : AppKitThemeAdapter.foreground
+        cell.textField?.textColor = AppKitThemeAdapter.foreground
         cell.imageView?.image = icon(for: node)
         cell.imageView?.contentTintColor = iconColor(for: node)
         return cell
@@ -321,7 +319,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     private func icon(for node: FileTreeNode) -> NSImage? {
         let symbol: String
         if node.isDirectory {
-            symbol = "folder.fill"
+            symbol = "folder"
         } else {
             switch node.url.pathExtension.lowercased() {
             case "swift": symbol = "swift"
@@ -337,11 +335,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     }
 
     private func iconColor(for node: FileTreeNode) -> NSColor {
-        if node.isDirectory { return AppKitThemeAdapter.accent }
-        switch node.url.pathExtension.lowercased() {
-        case "sh", "zsh", "bash", "swift": return .systemOrange
-        default: return AppKitThemeAdapter.accent
-        }
+        node.isDirectory ? AppKitThemeAdapter.accent : AppKitThemeAdapter.secondary
     }
 }
 
@@ -365,8 +359,8 @@ private final class FileTreeRowView: NSTableRowView {
         AppKitThemeAdapter.selection.setFill()
         NSBezierPath(
             roundedRect: bounds.insetBy(dx: 5, dy: 1),
-            xRadius: 7,
-            yRadius: 7
+            xRadius: AtelierTheme.rowRadius,
+            yRadius: AtelierTheme.rowRadius
         ).fill()
     }
 }

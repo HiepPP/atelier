@@ -240,11 +240,7 @@ struct AgentResponsesView: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(response.provider.rawValue.uppercased())
                     .atelierFont(size: 9, weight: .bold, design: .monospaced)
-                    .foregroundStyle(providerColor(response.provider))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(providerColor(response.provider).opacity(0.1))
-                    .clipShape(Capsule())
+                    .foregroundStyle(AtelierTheme.accent)
                 Text(response.timestamp, style: .time)
                     .atelierFont(size: 9.5, design: .monospaced)
                     .foregroundStyle(.secondary)
@@ -259,24 +255,14 @@ struct AgentResponsesView: View {
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(AtelierTheme.panel)
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(AtelierTheme.border, lineWidth: 0.75)
+        .padding(.vertical, 12)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(AtelierTheme.border)
+                .frame(height: 0.5)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
         .onAppear {
             model.markRead(response)
-        }
-    }
-
-    private func providerColor(_ provider: AgentProvider) -> Color {
-        switch provider {
-        case .codex:
-            AtelierTheme.accent
-        case .claude:
-            AtelierTheme.gitOrange
         }
     }
 

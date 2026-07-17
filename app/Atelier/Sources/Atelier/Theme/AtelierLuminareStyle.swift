@@ -30,13 +30,16 @@ struct AtelierLuminareIconButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button(action: configuration.trigger) {
             configuration.label
-                .atelierFont(size: 11, weight: .medium)
-                .frame(minWidth: 24, minHeight: 24)
+                .atelierFont(size: 12, weight: .medium)
+                .frame(
+                    minWidth: AtelierMetrics.iconButtonSize,
+                    minHeight: AtelierMetrics.iconButtonSize
+                )
         }
         .buttonStyle(.luminareCompact)
         .foregroundStyle(Color.primary)
         .luminareTint(overridingWith: AtelierTheme.accent)
-        .luminareMinHeight(24)
+        .luminareMinHeight(AtelierMetrics.iconButtonSize)
         .luminareHorizontalPadding(0)
         .luminareAspectRatio(1, contentMode: .fit)
         .luminareCompactButtonCornerRadius(AtelierTheme.controlRadius)
@@ -68,7 +71,7 @@ private struct AtelierLuminarePrimaryButtonBodyStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .frame(height: 28)
+            .frame(height: 30)
             .modifier(LuminareFilledModifier(
                 isHovering: isHovering,
                 isPressed: configuration.isPressed,

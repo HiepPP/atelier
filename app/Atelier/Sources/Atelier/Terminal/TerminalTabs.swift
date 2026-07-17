@@ -323,6 +323,7 @@ struct TerminalTabs: View {
     @State private var tabFrames: [UUID: CGRect] = [:]
     @State private var draggedTabID: UUID?
     @State private var lastReorderTargetID: UUID?
+    @State private var hoveredTabID: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -330,7 +331,7 @@ struct TerminalTabs: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
                         ForEach(model.visibleTabs) { tab in
-                            ZStack(alignment: .leading) {
+                            ZStack(alignment: .trailing) {
                                 Button {
                                     withAnimation(
                                         reduceMotion
@@ -341,16 +342,15 @@ struct TerminalTabs: View {
                                     }
                                 } label: {
                                     HStack(spacing: 7) {
-                                        Color.clear
-                                            .frame(width: 9, height: 9)
                                         Image(systemName: tab.systemImage)
                                             .atelierFont(size: 10)
                                         Text(tab.title)
                                             .atelierFont(size: 11.5, weight: .medium)
                                             .lineLimit(1)
                                     }
-                                    .padding(.horizontal, 12)
-                                    .frame(height: 42)
+                                    .padding(.leading, 12)
+                                    .padding(.trailing, 34)
+                                    .frame(height: AtelierMetrics.tabBarHeight)
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -363,10 +363,16 @@ struct TerminalTabs: View {
                                 } label: {
                                     Image(systemName: "xmark")
                                         .atelierFont(size: 8, weight: .medium)
-                                        .frame(width: 28, height: 42)
+                                        .frame(width: 28, height: AtelierMetrics.tabBarHeight)
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.borderless)
+                                .opacity(
+                                    model.selectedID == tab.id || hoveredTabID == tab.id
+                                        ? 1
+                                        : 0
+                                )
+                                .accessibilityLabel(tab.closeHelp)
                                 .help(tab.closeHelp)
                             }
                             .foregroundStyle(
@@ -380,8 +386,8 @@ struct TerminalTabs: View {
                             .overlay(alignment: .top) {
                                 if model.selectedID == tab.id {
                                     Rectangle()
-                                        .fill(AtelierTheme.gitOrange)
-                                        .frame(height: 1.5)
+                                        .fill(AtelierTheme.accent)
+                                        .frame(height: 2)
                                 }
                             }
                             .overlay(alignment: .trailing) {
@@ -394,13 +400,8 @@ struct TerminalTabs: View {
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
                             .contentShape(Rectangle())
-                            .onContinuousHover { phase in
-                                switch phase {
-                                case .active:
-                                    NSCursor.pointingHand.set()
-                                case .ended:
-                                    NSCursor.arrow.set()
-                                }
+                            .onHover { isHovering in
+                                hoveredTabID = isHovering ? tab.id : nil
                             }
                             .background {
                                 GeometryReader { proxy in
@@ -442,6 +443,7 @@ struct TerminalTabs: View {
                 }
                 .buttonStyle(AtelierLuminareIconButtonStyle())
                 .atelierNewTerminalEffect(sessionCount: model.terminalCount)
+                .accessibilityLabel("New terminal")
                 .help("New terminal")
 
                 if let editor = model.selectedEditor {
@@ -460,15 +462,9 @@ struct TerminalTabs: View {
                         editor.isWordWrapEnabled ? "Disable Word Wrap" : "Enable Word Wrap"
                     )
                 }
-
-                Image(systemName: "ellipsis")
-                    .atelierFont(size: 11, weight: .medium)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 40)
-                    .accessibilityHidden(true)
             }
             .padding(.trailing, 5)
-            .frame(height: 42)
+            .frame(height: AtelierMetrics.tabBarHeight)
             .background(AtelierTheme.chrome)
             .overlay(alignment: .bottom) {
                 Rectangle()

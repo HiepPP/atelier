@@ -17,23 +17,12 @@ final class TerminalController {
     private let terminal = AtelierTerminalNativeView(frame: .zero)
     private var isClosed = false
 
-    private static let lightAnsiPalette: [SwiftTerm.Color] = [
-        terminalColor(0x4b, 0x49, 0x44), terminalColor(0xb8, 0x3a, 0x32),
-        terminalColor(0x4f, 0x7b, 0x55), terminalColor(0x8a, 0x6c, 0x24),
-        terminalColor(0x3c, 0x68, 0x96), terminalColor(0x86, 0x4f, 0x78),
-        terminalColor(0x00, 0x7a, 0x91), terminalColor(0xc9, 0xc5, 0xbc),
-        terminalColor(0x72, 0x6f, 0x68), terminalColor(0xd1, 0x53, 0x45),
-        terminalColor(0x5f, 0x8f, 0x66), terminalColor(0xa0, 0x7e, 0x2d),
-        terminalColor(0x4e, 0x7c, 0xb0), terminalColor(0x9b, 0x62, 0x8e),
-        terminalColor(0x00, 0x8d, 0xa5), terminalColor(0xf1, 0xee, 0xe7)
-    ]
-
     init(workspacePath: String, processService: TerminalProcessService = TerminalProcessService()) {
         self.processService = processService
         terminal.nativeBackgroundColor = AppKitThemeAdapter.terminalBackground
         terminal.nativeForegroundColor = AppKitThemeAdapter.terminalForeground
         terminal.font = AtelierTypography.codeFont(size: AtelierTypography.terminalSize)
-        terminal.installColors(Self.lightAnsiPalette)
+        terminal.applyAtelierAppearance()
         processService.start(in: terminal, workspacePath: workspacePath)
         AppLogger.terminal.info("Started terminal session")
     }
@@ -72,14 +61,6 @@ final class TerminalController {
     isolated deinit {
         close()
     }
-
-    private static func terminalColor(
-        _ red: UInt16,
-        _ green: UInt16,
-        _ blue: UInt16
-    ) -> SwiftTerm.Color {
-        SwiftTerm.Color(red: red * 257, green: green * 257, blue: blue * 257)
-    }
 }
 
 final class AtelierTerminalNativeView: LocalProcessTerminalView {
@@ -102,6 +83,11 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         updateRendererForDisplay()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyAtelierAppearance()
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -192,5 +178,47 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
             guard let self, let window else { return }
             window.makeFirstResponder(self)
         }
+    }
+
+    func applyAtelierAppearance() {
+        let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        nativeBackgroundColor = AppKitThemeAdapter.editor(usesDarkAppearance: isDark)
+        nativeForegroundColor = AppKitThemeAdapter.terminalForeground(
+            usesDarkAppearance: isDark
+        )
+        installColors(isDark ? TerminalPalette.dark : TerminalPalette.light)
+        setNeedsDisplay(bounds)
+    }
+}
+
+private enum TerminalPalette {
+    static let light: [SwiftTerm.Color] = [
+        color(0x4B, 0x49, 0x44), color(0xB8, 0x3A, 0x32),
+        color(0x4F, 0x7B, 0x55), color(0x8A, 0x6C, 0x24),
+        color(0x3C, 0x68, 0x96), color(0x86, 0x4F, 0x78),
+        color(0x00, 0x7A, 0x91), color(0xC9, 0xC5, 0xBC),
+        color(0x72, 0x6F, 0x68), color(0xD1, 0x53, 0x45),
+        color(0x5F, 0x8F, 0x66), color(0xA0, 0x7E, 0x2D),
+        color(0x4E, 0x7C, 0xB0), color(0x9B, 0x62, 0x8E),
+        color(0x00, 0x8D, 0xA5), color(0xF1, 0xEE, 0xE7)
+    ]
+
+    static let dark: [SwiftTerm.Color] = [
+        color(0x2C, 0x31, 0x2F), color(0xD9, 0x70, 0x67),
+        color(0x7F, 0xBC, 0x89), color(0xD0, 0xA7, 0x5C),
+        color(0x72, 0xA8, 0xD4), color(0xB8, 0x8A, 0xC5),
+        color(0x65, 0xB9, 0xB2), color(0xD8, 0xDD, 0xDA),
+        color(0x6E, 0x75, 0x72), color(0xEB, 0x8A, 0x82),
+        color(0x98, 0xD0, 0xA0), color(0xE1, 0xBD, 0x75),
+        color(0x8B, 0xBB, 0xE0), color(0xCA, 0xA0, 0xD4),
+        color(0x7A, 0xCE, 0xC6), color(0xF0, 0xF3, 0xF1)
+    ]
+
+    private static func color(
+        _ red: UInt16,
+        _ green: UInt16,
+        _ blue: UInt16
+    ) -> SwiftTerm.Color {
+        SwiftTerm.Color(red: red * 257, green: green * 257, blue: blue * 257)
     }
 }

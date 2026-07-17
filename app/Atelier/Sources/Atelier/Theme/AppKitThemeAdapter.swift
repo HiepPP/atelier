@@ -1,25 +1,41 @@
 import AppKit
 
 nonisolated enum AppKitThemeAdapter {
-    static let chrome = color(0xE9E6DD)
-    static let canvas = color(0xF5F3EE)
-    static let sidebar = color(0xEEEBE3)
-    static let panel = color(0xF5F3EE)
-    static let raised = color(0xE5E0D3)
-    static let editor = color(0xF5F3EE)
+    static let chrome = dynamic(light: 0xF1F3F2, dark: 0x202322)
+    static let canvas = dynamic(light: 0xF7F8F7, dark: 0x181B1A)
+    static let sidebar = dynamic(light: 0xEEF1EF, dark: 0x1E2120)
+    static let panel = dynamic(light: 0xFFFFFF, dark: 0x242827)
+    static let raised = dynamic(light: 0xE7EBE9, dark: 0x2C312F)
+    static let editor = dynamic(light: 0xFAFBFA, dark: 0x181B1A)
     static let code = editor
-    static let tabInactive = color(0xE9E6DD)
-    static let border = color(0xDEDACF)
-    static let selection = color(0xE5E0D3)
-    static let accent = color(0xB07B56)
-    static let foreground = color(0x4C4843)
-    static let secondary = color(0x8C877C)
-    static let gitAdded = color(0x6E7A3D)
-    static let gitModified = color(0xA07842)
-    static let gitDeleted = color(0xB0593F)
-    static let gitUntracked = color(0x4D8A7F)
+    static let tabInactive = dynamic(light: 0xECEFED, dark: 0x202322)
+    static let border = dynamic(light: 0xD9DEDC, dark: 0x353A38)
+    static let selection = dynamic(light: 0xF0E4DA, dark: 0x49362A)
+    static let accent = dynamic(light: 0xB07B56, dark: 0xD9A17C)
+    static let accentInk = dynamic(light: 0x1F1712, dark: 0x1F1712)
+    static let foreground = NSColor.labelColor
+    static let secondary = NSColor.secondaryLabelColor
+    static let gitAdded = dynamic(light: 0x397A48, dark: 0x7FC58C)
+    static let gitModified = dynamic(light: 0x9A651F, dark: 0xD4A45D)
+    static let gitDeleted = dynamic(light: 0xB0443A, dark: 0xE17B70)
+    static let gitUntracked = dynamic(light: 0x287A73, dark: 0x63C3B8)
     static let terminalBackground = editor
     static let terminalForeground = foreground
+
+    static func editor(usesDarkAppearance: Bool) -> NSColor {
+        color(usesDarkAppearance ? 0x181B1A : 0xFAFBFA)
+    }
+
+    static func terminalForeground(usesDarkAppearance: Bool) -> NSColor {
+        color(usesDarkAppearance ? 0xD8DDDA : 0x303432)
+    }
+
+    private static func dynamic(light: UInt32, dark: UInt32) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let match = appearance.bestMatch(from: [.aqua, .darkAqua])
+            return color(match == .darkAqua ? dark : light)
+        }
+    }
 
     private static func color(_ value: UInt32) -> NSColor {
         NSColor(

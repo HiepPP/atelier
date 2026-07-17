@@ -14,6 +14,7 @@ enum FileHighlightPolicy {
 struct FileViewer: NSViewRepresentable {
     @Environment(\.atelierZoomScale) private var scale
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var colorScheme
 
     let content: FileContent
     let fileURL: URL?
@@ -74,12 +75,21 @@ struct FileViewer: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        let usesDarkAppearance = colorScheme == .dark
+        let background = AppKitThemeAdapter.editor(
+            usesDarkAppearance: usesDarkAppearance
+        )
+        scrollView.backgroundColor = background
+        if let textView = scrollView.documentView as? STTextView {
+            textView.backgroundColor = background
+        }
         context.coordinator.update(
             content: content,
             fileURL: fileURL,
             language: language,
             scale: scale,
             displayScale: displayScale,
+            usesDarkAppearance: usesDarkAppearance,
             isWordWrapEnabled: isWordWrapEnabled
         )
     }
@@ -113,6 +123,7 @@ struct FileViewer: NSViewRepresentable {
         private var renderedLanguage: String?
         private var renderedScale: CGFloat = 0
         private var renderedDisplayScale: CGFloat = 0
+        private var usesDarkAppearance = false
         private var renderedWordWrapEnabled: Bool?
         private var highlightGeneration = 0
         private var highlightTask: Task<Void, Never>?
@@ -135,10 +146,12 @@ struct FileViewer: NSViewRepresentable {
             language: HighlightLanguage?,
             scale: CGFloat,
             displayScale: CGFloat,
+            usesDarkAppearance: Bool,
             isWordWrapEnabled: Bool
         ) {
             let contentChanged = renderedContent != content
                 || renderedLanguage != language?.rawValue
+                || self.usesDarkAppearance != usesDarkAppearance
             let scaleChanged = renderedScale != scale || renderedDisplayScale != displayScale
             let wordWrapChanged = renderedWordWrapEnabled != isWordWrapEnabled
             self.fileURL = fileURL
@@ -150,6 +163,7 @@ struct FileViewer: NSViewRepresentable {
             self.language = language
             renderedScale = scale
             renderedDisplayScale = displayScale
+            self.usesDarkAppearance = usesDarkAppearance
             renderedWordWrapEnabled = isWordWrapEnabled
             textView?.isEditable = fileURL != nil && content.isEditableText
             textView?.allowsUndo = textView?.isEditable == true
@@ -296,7 +310,8 @@ struct FileViewer: NSViewRepresentable {
                     guard !Task.isCancelled else { return }
                     let highlightedText = try await Self.highlightService.highlight(
                         text,
-                        languageName: languageName
+                        languageName: languageName,
+                        usesDarkAppearance: self?.usesDarkAppearance == true
                     )
                     guard !Task.isCancelled else { return }
                     self?.apply(

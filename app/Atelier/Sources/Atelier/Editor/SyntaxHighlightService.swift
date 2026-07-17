@@ -4,7 +4,11 @@ import HighlightSwift
 actor SyntaxHighlightService {
     private let highlighter = Highlight()
 
-    func highlight(_ text: String, languageName: String?) async throws -> AttributedString {
+    func highlight(
+        _ text: String,
+        languageName: String?,
+        usesDarkAppearance: Bool
+    ) async throws -> AttributedString {
         let mode: HighlightMode
         if let languageName, let language = HighlightLanguage(rawValue: languageName) {
             mode = .language(language)
@@ -14,7 +18,7 @@ actor SyntaxHighlightService {
         return try await highlighter.request(
             text,
             mode: mode,
-            colors: .light(.xcode)
+            colors: usesDarkAppearance ? .dark(.xcode) : .light(.xcode)
         ).attributedText
     }
 }

@@ -50,7 +50,9 @@ final class GitWorkspaceModel {
             do {
                 let result = try await service.snapshot(workspacePath: workspacePath)
                 guard !Task.isCancelled, refreshID == requestID else { return }
-                snapshot = result
+                if snapshot != result {
+                    snapshot = result
+                }
                 errorMessage = nil
             } catch is CancellationError {
                 return
@@ -143,7 +145,6 @@ struct ChangesView: View {
     @Environment(AtelierZoomModel.self) private var zoom
     @State private var commitMessage = ""
     @State private var discardCandidate: GitChange?
-    @State private var hoveredChangeID: String?
 
     var body: some View {
         sourceControlPanel
@@ -184,7 +185,18 @@ struct ChangesView: View {
             }
 
             if model.snapshot.status.changes.isEmpty {
-                Spacer(minLength: 0)
+                VStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle")
+                        .atelierFont(size: 24, weight: .light)
+                        .foregroundStyle(AtelierTheme.accent)
+                    Text("Working tree clean")
+                        .atelierFont(size: 12, weight: .semibold)
+                    Text("No staged or unstaged changes")
+                        .atelierFont(size: 10.5)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityElement(children: .combine)
             } else {
                 List {
                     changeSection("Staged Changes", changes: model.snapshot.status.staged, staged: true)
@@ -202,40 +214,10 @@ struct ChangesView: View {
     }
 
     private var sourceControlHeader: some View {
-        HStack(spacing: 10) {
-            Text("SOURCE CONTROL")
-                .atelierFont(size: AtelierTypography.uiSize)
-            Spacer()
-            Image(systemName: "ellipsis")
-            Image(systemName: "arrow.up.left.and.arrow.down.right")
-        }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 12)
-        .frame(height: 36)
-        .environment(\.atelierZoomScale, zoom.sidebarScale)
-    }
-
-    private var repositoryHeader: some View {
         HStack(spacing: 8) {
-            Image(systemName: "chevron.down")
-                .atelierFont(size: 10, weight: .medium)
-            Image(systemName: "desktopcomputer")
-            Text(repositoryName)
-                .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            BranchControl(
-                current: model.snapshot.branch,
-                branches: model.snapshot.branches,
-                onSwitch: model.switchBranch
-            )
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .help("Synchronize changes")
-            Button(action: commit) {
-                Image(systemName: "checkmark")
-            }
-            .buttonStyle(.plain)
-            .disabled(!canCommit)
+            Text("Source Control")
+                .atelierFont(size: 12, weight: .semibold)
+            Spacer()
             Button {
                 model.refresh()
             } label: {
@@ -245,10 +227,35 @@ struct ChangesView: View {
                     Image(systemName: "arrow.clockwise")
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(AtelierLuminareIconButtonStyle())
             .atelierRefreshCompletionEffect(isLoading: model.isLoading)
-            .help("Refresh git status")
-            Image(systemName: "ellipsis")
+            .accessibilityLabel("Refresh Git status")
+            .help("Refresh Git status")
+        }
+        .padding(.horizontal, 12)
+        .frame(height: AtelierMetrics.commandBarHeight)
+        .background(AtelierTheme.chrome)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(AtelierTheme.border)
+                .frame(height: 0.5)
+        }
+        .environment(\.atelierZoomScale, zoom.sidebarScale)
+    }
+
+    private var repositoryHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "externaldrive")
+                .foregroundStyle(.secondary)
+            Text(repositoryName)
+                .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            BranchControl(
+                current: model.snapshot.branch,
+                branches: model.snapshot.branches,
+                onSwitch: model.switchBranch
+            )
         }
         .atelierFont(size: AtelierTypography.uiSize)
         .padding(.horizontal, 11)
@@ -274,34 +281,16 @@ struct ChangesView: View {
     }
 
     private var commitButton: some View {
-        HStack(spacing: 0) {
-            Button(action: commit) {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark")
-                    Text("Commit")
-                }
+        Button(action: commit) {
+            Text("Commit")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .buttonStyle(.plain)
-
-            Rectangle()
-                .fill(AtelierTheme.editor.opacity(0.55))
-                .frame(width: 1)
-
-            Menu {
-                Button("Commit", action: commit)
-            } label: {
-                Image(systemName: "chevron.down")
-                    .frame(width: 30, height: 28)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
         }
+        .buttonStyle(.plain)
         .atelierFont(size: AtelierTypography.uiSize)
-        .foregroundStyle(AtelierTheme.editor)
-        .frame(height: 29)
+        .foregroundStyle(AtelierTheme.accentInk)
+        .frame(height: 30)
         .background(AtelierTheme.accent.opacity(canCommit ? 1 : 0.42))
-        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous))
         .disabled(!canCommit)
         .padding(.horizontal, 11)
         .padding(.top, 10)
@@ -314,87 +303,23 @@ struct ChangesView: View {
         if !changes.isEmpty {
             Section {
                 ForEach(changes) { change in
-                    HStack(spacing: 8) {
-                        Button {
+                    GitChangeRow(
+                        change: change,
+                        staged: staged,
+                        onOpen: {
                             onOpenDiff(DiffSelection(change: change, staged: staged))
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "doc")
-                                    .foregroundStyle(color(for: change.kind))
-                                Text(change.path)
-                                    .atelierFont(size: AtelierTypography.uiSize)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Spacer()
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .atelierPointerCursor()
-
-                        if hoveredChangeID == change.id {
-                            if staged {
-                                Button {
-                                    model.unstage(change)
-                                } label: {
-                                    Image(systemName: "minus")
-                                }
-                                .buttonStyle(.plain)
-                                .help("Unstage")
-                            } else {
-                                Button {
-                                    model.stage(change)
-                                } label: {
-                                    Image(systemName: "plus")
-                                }
-                                .buttonStyle(.plain)
-                                .help("Stage")
-                                if change.kind != .untracked {
-                                    Button {
-                                        discardCandidate = change
-                                    } label: {
-                                        Image(systemName: "arrow.uturn.backward")
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Discard changes")
-                                }
-                            }
-                        } else {
-                            Text(statusLabel(for: change.kind))
-                                .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
-                                .foregroundStyle(color(for: change.kind))
-                        }
-                    }
-                    .frame(height: 24)
+                        },
+                        onStage: { model.stage(change) },
+                        onUnstage: { model.unstage(change) },
+                        onDiscard: { discardCandidate = change }
+                    )
                     .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 10))
-                    .onHover { hoveredChangeID = $0 ? change.id : nil }
                 }
             } header: {
                 Text(title.uppercased())
                     .atelierFont(size: 11, weight: .semibold)
                     .foregroundStyle(.secondary)
             }
-        }
-    }
-
-    private func color(for kind: GitChangeKind) -> Color {
-        switch kind {
-        case .added: AtelierTheme.gitAdded
-        case .untracked: AtelierTheme.gitUntracked
-        case .deleted, .conflicted: AtelierTheme.gitDeleted
-        case .renamed, .copied, .modified, .other: AtelierTheme.gitOrange
-        }
-    }
-
-    private func statusLabel(for kind: GitChangeKind) -> String {
-        switch kind {
-        case .modified: "M"
-        case .added: "A"
-        case .deleted: "D"
-        case .renamed: "R"
-        case .copied: "C"
-        case .untracked: "U"
-        case .conflicted: "!"
-        case .other: "?"
         }
     }
 
@@ -415,6 +340,121 @@ struct ChangesView: View {
     private func commit() {
         model.commit(message: commitMessage) {
             commitMessage = ""
+        }
+    }
+}
+
+private struct GitChangeRow: View {
+    let change: GitChange
+    let staged: Bool
+    let onOpen: () -> Void
+    let onStage: () -> Void
+    let onUnstage: () -> Void
+    let onDiscard: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onOpen) {
+                HStack(spacing: 6) {
+                    Text(change.path)
+                        .atelierFont(size: AtelierTypography.uiSize)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+            .atelierPointerCursor()
+
+            ZStack(alignment: .trailing) {
+                Text(statusLabel)
+                    .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
+                    .foregroundStyle(statusColor)
+                    .opacity(isHovering ? 0 : 1)
+
+                actionButtons
+                    .opacity(isHovering ? 1 : 0)
+                    .allowsHitTesting(isHovering)
+                    .accessibilityHidden(!isHovering)
+            }
+            .frame(width: actionWidth, alignment: .trailing)
+        }
+        .frame(height: 28)
+        .onHover { hovering in
+            guard isHovering != hovering else { return }
+            isHovering = hovering
+        }
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        HStack(spacing: 0) {
+            if staged {
+                actionButton(
+                    systemImage: "minus",
+                    label: "Unstage \(change.path)",
+                    help: "Unstage",
+                    action: onUnstage
+                )
+            } else {
+                actionButton(
+                    systemImage: "plus",
+                    label: "Stage \(change.path)",
+                    help: "Stage",
+                    action: onStage
+                )
+                if change.kind != .untracked {
+                    actionButton(
+                        systemImage: "arrow.uturn.backward",
+                        label: "Discard changes to \(change.path)",
+                        help: "Discard changes",
+                        action: onDiscard
+                    )
+                }
+            }
+        }
+    }
+
+    private func actionButton(
+        systemImage: String,
+        label: String,
+        help: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .help(help)
+    }
+
+    private var actionWidth: CGFloat {
+        staged || change.kind == .untracked ? 24 : 48
+    }
+
+    private var statusColor: Color {
+        switch change.kind {
+        case .added: AtelierTheme.gitAdded
+        case .untracked: AtelierTheme.gitUntracked
+        case .deleted, .conflicted: AtelierTheme.gitDeleted
+        case .renamed, .copied, .modified, .other: AtelierTheme.gitOrange
+        }
+    }
+
+    private var statusLabel: String {
+        switch change.kind {
+        case .modified: "M"
+        case .added: "A"
+        case .deleted: "D"
+        case .renamed: "R"
+        case .copied: "C"
+        case .untracked: "U"
+        case .conflicted: "!"
+        case .other: "?"
         }
     }
 }
