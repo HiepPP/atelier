@@ -63,6 +63,9 @@ final class TerminalController {
 
 final class AtelierTerminalNativeView: LocalProcessTerminalView {
     private var shouldFocusWhenAttached = false
+    private var didAttemptMetalSetup = false
+    private var preciseScrollRemainder: CGFloat = 0
+    private var scrollWheelMonitor: Any?
 
     func requestFocusWhenAttached() {
         shouldFocusWhenAttached = true
@@ -71,7 +74,86 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        installScrollWheelMonitor()
+        enableMetalIfAvailable()
         focusIfPossible()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow !== window, let scrollWheelMonitor {
+            NSEvent.removeMonitor(scrollWheelMonitor)
+            self.scrollWheelMonitor = nil
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    private func handlePreciseScroll(_ event: NSEvent) -> Bool {
+        let terminal = getTerminal()
+        let shiftBypassesMouseReporting = event.modifierFlags.contains(.shift)
+            && !terminal.mouseShiftCapture
+        let scrollsTerminalBuffer = !allowMouseReporting
+            || terminal.mouseMode == .off
+            || shiftBypassesMouseReporting
+
+        guard event.hasPreciseScrollingDeltas, scrollsTerminalBuffer, canScroll else {
+            preciseScrollRemainder = 0
+            return false
+        }
+
+        if event.phase.contains(.began) || event.momentumPhase.contains(.began) {
+            preciseScrollRemainder = 0
+        }
+
+        preciseScrollRemainder += event.scrollingDeltaY
+        let lineHeight = max(1, font.ascender - font.descender + font.leading)
+        let lines = Int(abs(preciseScrollRemainder) / lineHeight)
+        if lines > 0 {
+            if preciseScrollRemainder > 0 {
+                scrollUp(lines: lines)
+                preciseScrollRemainder -= CGFloat(lines) * lineHeight
+            } else {
+                scrollDown(lines: lines)
+                preciseScrollRemainder += CGFloat(lines) * lineHeight
+            }
+        }
+
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled)
+            || event.momentumPhase.contains(.ended)
+            || event.momentumPhase.contains(.cancelled) {
+            preciseScrollRemainder = 0
+        }
+
+        return true
+    }
+
+    private func installScrollWheelMonitor() {
+        if let scrollWheelMonitor {
+            NSEvent.removeMonitor(scrollWheelMonitor)
+            self.scrollWheelMonitor = nil
+        }
+        guard let window else { return }
+        scrollWheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
+            [weak self, weak window] event in
+            guard let self,
+                  let window,
+                  event.window === window,
+                  self.bounds.contains(self.convert(event.locationInWindow, from: nil)) else {
+                return event
+            }
+            return self.handlePreciseScroll(event) ? nil : event
+        }
+    }
+
+    private func enableMetalIfAvailable() {
+        guard window != nil, !didAttemptMetalSetup else { return }
+        didAttemptMetalSetup = true
+        do {
+            try setUseMetal(true)
+        } catch {
+            AppLogger.terminal.warning(
+                "Metal renderer unavailable: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 
     private func focusIfPossible() {

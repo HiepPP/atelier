@@ -25,6 +25,7 @@ final class TerminalSession: Identifiable {
 private enum CenterTabContent {
     case terminal(TerminalSession)
     case file(EditorSession)
+    case gemma(GemmaAgentModel)
 }
 
 private final class CenterTab: Identifiable {
@@ -45,6 +46,8 @@ private final class CenterTab: Identifiable {
             return session.title
         case .file(let file):
             return file.document.displayName
+        case .gemma:
+            return "Gemma"
         }
     }
 
@@ -54,6 +57,8 @@ private final class CenterTab: Identifiable {
             return "terminal"
         case .file:
             return "doc.text"
+        case .gemma:
+            return "sparkles"
         }
     }
 
@@ -63,6 +68,8 @@ private final class CenterTab: Identifiable {
             return "Close terminal"
         case .file:
             return "Close file"
+        case .gemma:
+            return "Close Gemma"
         }
     }
 }
@@ -72,7 +79,7 @@ final class TerminalTabsModel {
     private var tabs: [CenterTab] = []
     var selectedID: UUID?
 
-    private let workspacePath: String
+    fileprivate let workspacePath: String
     private var nextNumber = 1
 
     init(workspacePath: String) {
@@ -102,6 +109,12 @@ final class TerminalTabsModel {
         }
     }
 
+    var gemmaTabCount: Int {
+        tabs.reduce(into: 0) { count, tab in
+            if case .gemma = tab.content { count += 1 }
+        }
+    }
+
     func add() {
         let session = TerminalSession(number: nextNumber, workspacePath: workspacePath)
         let tab = CenterTab(content: .terminal(session))
@@ -117,6 +130,8 @@ final class TerminalTabsModel {
                 session.close()
             case .file(let file):
                 file.close()
+            case .gemma(let model):
+                model.close()
             }
         }
         tabs.removeAll(keepingCapacity: false)
@@ -141,6 +156,19 @@ final class TerminalTabsModel {
         selectedID = tab.id
     }
 
+    func openGemma(_ model: GemmaAgentModel) {
+        if let tab = tabs.first(where: { tab in
+            guard case .gemma(let existing) = tab.content else { return false }
+            return existing === model
+        }) {
+            selectedID = tab.id
+            return
+        }
+        let tab = CenterTab(content: .gemma(model))
+        tabs.append(tab)
+        selectedID = tab.id
+    }
+
     fileprivate func close(_ tab: CenterTab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         switch tab.content {
@@ -148,6 +176,8 @@ final class TerminalTabsModel {
             session.close()
         case .file(let file):
             file.close()
+        case .gemma(let model):
+            model.close()
         }
         tabs.remove(at: index)
         if selectedID == tab.id {
@@ -398,6 +428,14 @@ struct TerminalTabs: View {
                         .id(tab.id)
                         .background(AtelierTheme.editor)
                         .environment(\.atelierZoomScale, zoom.contentScale)
+                case .gemma(let agent):
+                    GemmaAgentView(
+                        model: agent,
+                        workspaceRoot: URL(fileURLWithPath: model.workspacePath, isDirectory: true),
+                        onOpenFile: model.openFile
+                    )
+                    .id(tab.id)
+                    .environment(\.atelierZoomScale, zoom.contentScale)
                 }
             } else {
                 VStack(spacing: 8) {

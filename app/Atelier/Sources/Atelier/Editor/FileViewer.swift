@@ -36,7 +36,7 @@ struct FileViewer: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = STTextView.scrollableTextView()
+        let scrollView = ResponsiveFileTextView.scrollableTextView()
         guard let textView = scrollView.documentView as? STTextView else {
             return scrollView
         }
@@ -397,6 +397,12 @@ struct FileViewer: NSViewRepresentable {
         private var font: NSFont {
             .monospacedSystemFont(ofSize: 12.5 * renderedScale, weight: .regular)
         }
+    }
+}
+
+private final class ResponsiveFileTextView: STTextView {
+    override class var isCompatibleWithResponsiveScrolling: Bool {
+        true
     }
 }
 

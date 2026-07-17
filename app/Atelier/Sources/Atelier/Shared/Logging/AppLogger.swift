@@ -11,4 +11,5 @@ nonisolated enum AppLogger {
     static let window = Logger(subsystem: subsystem, category: "Window")
     static let commands = Logger(subsystem: subsystem, category: "Commands")
     static let editor = Logger(subsystem: subsystem, category: "Editor")
+    static let agent = Logger(subsystem: subsystem, category: "Agent")
 }

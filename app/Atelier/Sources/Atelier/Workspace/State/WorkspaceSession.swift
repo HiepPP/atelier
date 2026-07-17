@@ -8,17 +8,27 @@ final class WorkspaceSession {
     let rootURL: URL
     let terminalTabs: TerminalTabsModel
     let gitModel: GitWorkspaceModel
+    let gemmaAgent: GemmaAgentModel
     private(set) var fileTreeRevision = 0
 
     private let fileTreeService = FileTreeService()
     private var fileWatcher: FileWatcher?
     private var isStarted = false
 
-    init(state: WorkspaceState, rootURL: URL) {
+    init(state: WorkspaceState, rootURL: URL, gemmaAgent: GemmaAgentModel? = nil) {
         self.state = state
         self.rootURL = rootURL
         terminalTabs = TerminalTabsModel(workspacePath: rootURL.path)
         gitModel = GitWorkspaceModel(workspacePath: rootURL.path)
+        if let gemmaAgent {
+            self.gemmaAgent = gemmaAgent
+        } else {
+            let client = OllamaCloudClient()
+            let toolExecutor = WorkspaceToolExecutor(workspaceRoot: rootURL)
+            self.gemmaAgent = GemmaAgentModel(
+                runtime: GemmaAgentRuntime(client: client, tools: toolExecutor)
+            )
+        }
     }
 
     func start() {
@@ -42,6 +52,7 @@ final class WorkspaceSession {
         fileWatcher?.stop()
         fileWatcher = nil
         gitModel.stop()
+        gemmaAgent.close()
         terminalTabs.closeAll()
         AppLogger.workspace.info("Stopped workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
     }
@@ -57,6 +68,10 @@ final class WorkspaceSession {
         let url = try await fileTreeService.createFolder(named: name, in: directory)
         fileTreeRevision &+= 1
         AppLogger.fileTree.info("Created folder: \(url.lastPathComponent, privacy: .public)")
+    }
+
+    func openGemma() {
+        terminalTabs.openGemma(gemmaAgent)
     }
 
     isolated deinit {

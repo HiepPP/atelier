@@ -180,6 +180,15 @@ struct WorkspaceView: View {
             .help("Change folder")
 
             Button {
+                session.openGemma()
+            } label: {
+                Image(systemName: "sparkles")
+            }
+            .buttonStyle(AtelierLuminareIconButtonStyle())
+            .accessibilityLabel("Open Gemma workspace assistant")
+            .help("Open Gemma workspace assistant")
+
+            Button {
                 zoom.toggleFocusMode()
             } label: {
                 Image(
