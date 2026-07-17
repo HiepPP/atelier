@@ -52,16 +52,22 @@ struct FileViewer: NSViewRepresentable {
         textView.isHorizontallyResizable = true
         textView.isVerticallyResizable = true
         textView.showsLineNumbers = true
-        textView.gutterView?.drawSeparator = true
-        textView.gutterView?.minimumThickness = 46
-        textView.gutterView?.textColor = AppKitThemeAdapter.secondary
-        textView.gutterView?.separatorColor = AppKitThemeAdapter.border
+        if let gutterView = textView.gutterView {
+            gutterView.drawSeparator = true
+            gutterView.minimumThickness = 46
+            gutterView.frame.size.width = max(gutterView.frame.width, gutterView.minimumThickness)
+            gutterView.textColor = AppKitThemeAdapter.secondary
+            gutterView.separatorColor = AppKitThemeAdapter.border
+            textView.setFrameSize(textView.frame.size)
+        }
 
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
         scrollView.backgroundColor = AppKitThemeAdapter.code
         scrollView.scrollerStyle = .overlay
+        scrollView.clipsToBounds = true
+        scrollView.contentView.clipsToBounds = true
         context.coordinator.attach(scrollView)
         return scrollView
     }
@@ -73,6 +79,17 @@ struct FileViewer: NSViewRepresentable {
             language: language,
             scale: scale,
             isWordWrapEnabled: isWordWrapEnabled
+        )
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView: NSScrollView,
+        context: Context
+    ) -> CGSize? {
+        CGSize(
+            width: proposal.width ?? nsView.frame.width,
+            height: proposal.height ?? nsView.frame.height
         )
     }
 
