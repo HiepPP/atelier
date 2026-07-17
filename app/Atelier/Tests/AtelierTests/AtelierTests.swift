@@ -119,6 +119,20 @@ struct AtelierTests {
         #expect(first.displayName == "main.swift")
     }
 
+    @Test("Terminal advertises ANSI and true-color support")
+    func terminalEnvironment() {
+        let environment = TerminalProcessService.configuredEnvironment(from: [
+            "TERM": "dumb",
+            "PATH": "/usr/bin"
+        ])
+
+        #expect(environment["TERM"] == "xterm-256color")
+        #expect(environment["COLORTERM"] == "truecolor")
+        #expect(environment["CLICOLOR"] == "1")
+        #expect(environment["TERM_PROGRAM"] == "Atelier")
+        #expect(environment["PATH"] == "/usr/bin")
+    }
+
     private func temporaryDirectory(_ name: String) -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("atelier-tests-\(name)-\(UUID().uuidString)", isDirectory: true)
