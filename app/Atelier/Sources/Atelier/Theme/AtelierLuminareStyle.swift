@@ -30,7 +30,7 @@ struct AtelierLuminareIconButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button(action: configuration.trigger) {
             configuration.label
-                .atelierFont(size: 12, weight: .medium)
+                .atelierFont(size: AtelierTypography.label, weight: .medium)
                 .frame(
                     minWidth: AtelierMetrics.iconButtonSize,
                     minHeight: AtelierMetrics.iconButtonSize
@@ -53,9 +53,9 @@ struct AtelierLuminarePrimaryButtonStyle: PrimitiveButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         Button(action: configuration.trigger) {
             configuration.label
-                .atelierFont(size: 11, weight: .semibold)
+                .atelierFont(size: AtelierTypography.label, weight: .semibold)
                 .foregroundStyle(AtelierTheme.accentInk)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, AtelierMetrics.spaceM)
         }
         .buttonStyle(AtelierLuminarePrimaryButtonBodyStyle())
         .fixedSize(horizontal: true, vertical: false)
@@ -67,11 +67,12 @@ struct AtelierLuminarePrimaryButtonStyle: PrimitiveButtonStyle {
 private struct AtelierLuminarePrimaryButtonBodyStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.luminareAnimationFast) private var animationFast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .frame(height: 30)
+            .frame(height: AtelierMetrics.fieldHeight)
             .modifier(LuminareFilledModifier(
                 isHovering: isHovering,
                 isPressed: configuration.isPressed,
@@ -79,13 +80,17 @@ private struct AtelierLuminarePrimaryButtonBodyStyle: ButtonStyle {
                 hovering: AtelierTheme.accentInk.opacity(0.06),
                 pressed: AtelierTheme.accentInk.opacity(0.12)
             ))
-            .background(AtelierTheme.accent.opacity(isEnabled ? 1 : 0.42))
+            .background(
+                AtelierTheme.accent.opacity(
+                    AtelierTheme.controlOpacity(for: isEnabled ? .normal : .disabled)
+                )
+            )
             .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
             .opacity(isEnabled ? 1 : 0.7)
             .onHover { isHovering in
                 self.isHovering = isHovering
             }
-            .animation(animationFast, value: isHovering)
+            .animation(reduceMotion ? nil : animationFast, value: isHovering)
     }
 }
 
@@ -117,14 +122,14 @@ struct AtelierStatusCard<Content: View>: View {
     var body: some View {
         AtelierLuminareSection {
             content()
-                .padding(12)
+                .padding(AtelierMetrics.spaceM)
                 .frame(maxWidth: .infinity)
         }
         .background(AtelierTheme.panel)
         .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
         .overlay {
             RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                .stroke(AtelierTheme.border, lineWidth: 0.75)
+                .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
         }
     }
 }
@@ -132,12 +137,12 @@ struct AtelierStatusCard<Content: View>: View {
 private struct AtelierLuminarePopoverContentModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .padding(8)
+            .padding(AtelierMetrics.spaceS)
             .background(AtelierTheme.panel)
             .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
             .overlay {
                 RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                    .stroke(AtelierTheme.border, lineWidth: 0.75)
+                    .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
             }
             .luminareSectionMaterial(nil)
             .luminareButtonMaterial(nil)

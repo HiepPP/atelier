@@ -2,6 +2,15 @@ import AppKit
 import SwiftUI
 @_spi(Advanced) import SwiftUIIntrospect
 
+enum AtelierInteractionState: Equatable, Sendable {
+    case normal
+    case hovered
+    case pressed
+    case selected
+    case focused
+    case disabled
+}
+
 enum AtelierTheme {
     static let accent = Color(nsColor: AppKitThemeAdapter.accent)
     static let accentInk = Color(nsColor: AppKitThemeAdapter.accentInk)
@@ -19,22 +28,107 @@ enum AtelierTheme {
     static let gitAdded = Color(nsColor: AppKitThemeAdapter.gitAdded)
     static let gitDeleted = Color(nsColor: AppKitThemeAdapter.gitDeleted)
     static let gitUntracked = Color(nsColor: AppKitThemeAdapter.gitUntracked)
+    static let selection = Color(nsColor: AppKitThemeAdapter.selection)
+    static let danger = gitDeleted
     static let panelRadius: CGFloat = 8
     static let controlRadius: CGFloat = 6
     static let rowRadius: CGFloat = 5
+    static let hoverFill = Color(nsColor: AppKitThemeAdapter.hover)
+    static let pressedFill = Color(nsColor: AppKitThemeAdapter.pressed)
+    static let accentHoverFill = accent.opacity(0.10)
+    static let focusFill = accent.opacity(0.12)
+    static let disabledOpacity: Double = 0.45
+    static let inactiveOpacity: Double = 0.72
+    static let strokeHairline: CGFloat = 0.5
+    static let strokeControl: CGFloat = 0.75
+    static let strokeFocus: CGFloat = 1.5
+    static let shadowSoft = Color.black.opacity(0.05)
+    static let shadowFloating = Color.black.opacity(0.16)
+
+    static func controlFill(for state: AtelierInteractionState) -> Color {
+        switch state {
+        case .normal, .disabled:
+            Color.clear
+        case .hovered:
+            hoverFill
+        case .pressed:
+            pressedFill
+        case .selected:
+            selection
+        case .focused:
+            focusFill
+        }
+    }
+
+    static func controlStroke(for state: AtelierInteractionState) -> Color {
+        switch state {
+        case .focused:
+            accent
+        case .selected:
+            accent.opacity(0.72)
+        case .normal, .hovered, .pressed, .disabled:
+            border
+        }
+    }
+
+    static func controlOpacity(for state: AtelierInteractionState) -> Double {
+        state == .disabled ? disabledOpacity : 1
+    }
 }
 
 enum AtelierMetrics {
     static let grid: CGFloat = 8
+    // Spacing scale: 8pt grid with a 4pt half step.
+    static let spaceXS: CGFloat = 4
+    static let spaceS: CGFloat = 8
+    static let spaceM: CGFloat = 12
+    static let spaceL: CGFloat = 16
+    static let spaceXL: CGFloat = 24
+    static let space2XL: CGFloat = 32
     static let commandBarHeight: CGFloat = 44
+    static let panelHeaderHeight: CGFloat = 44
     static let sectionHeaderHeight: CGFloat = 36
-    static let tabBarHeight: CGFloat = 38
-    static let statusBarHeight: CGFloat = 22
+    static let tabBarHeight: CGFloat = 40
+    static let statusBarHeight: CGFloat = 24
     static let iconButtonSize: CGFloat = 28
+    static let smallIconSize: CGFloat = 8
+    static let regularIconSize: CGFloat = 16
+    static let emptyStateIconSize: CGFloat = 30
+    static let compactControlHeight: CGFloat = 24
+    static let controlHeight: CGFloat = 28
+    static let fieldHeight: CGFloat = 32
+    static let rowHeight: CGFloat = 28
+    static let transcriptMaxWidth: CGFloat = 680
+    static let emptyStateMaxWidth: CGFloat = 420
+    static let projectMenuWidth: CGFloat = 280
+    static let dialogWidth: CGFloat = 340
+    static let settingsWidth: CGFloat = 460
+    static let settingsMinHeight: CGFloat = 400
+    static let codeGutterWidth: CGFloat = 48
+    static let explorerMinWidth: CGFloat = 220
+    static let explorerIdealWidth: CGFloat = 300
+    static let explorerMaxWidth: CGFloat = 400
+    static let centerMinWidth: CGFloat = 420
+    static let centerIdealWidth: CGFloat = 660
+    static let sourceControlMinWidth: CGFloat = 320
+    static let sourceControlIdealWidth: CGFloat = 420
+    static let sourceControlMaxWidth: CGFloat = 540
+    static let tabMinWidth: CGFloat = 112
+    static let tabIdealWidth: CGFloat = 152
+    static let tabMaxWidth: CGFloat = 220
+    static let trafficLightReserve: CGFloat = 66
+    static let zoomLabelMinWidth: CGFloat = 42
 }
 
 enum AtelierTypography {
+    // Typographic scale: micro < caption < label < body < uiSize < headline < display.
+    static let micro: CGFloat = 9.5
+    static let caption: CGFloat = 10.5
+    static let label: CGFloat = 11.5
+    static let body: CGFloat = 12.5
     static let uiSize: CGFloat = 13
+    static let headline: CGFloat = 15
+    static let display: CGFloat = 20
     static let editorSize: CGFloat = 16
     static let terminalSize: CGFloat = 20
 
@@ -93,7 +187,50 @@ struct AtelierPanelModifier: ViewModifier {
             .background(AtelierTheme.panel)
             .overlay {
                 Rectangle()
-                    .stroke(AtelierTheme.border, lineWidth: 0.5)
+                    .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeHairline)
+            }
+    }
+}
+
+/// Raised card chrome: panel fill, continuous rounded corners, control-weight border.
+struct AtelierCardModifier: ViewModifier {
+    var radius: CGFloat = AtelierTheme.controlRadius
+    var fill: Color = AtelierTheme.panel
+
+    func body(content: Content) -> some View {
+        content
+            .background(fill)
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
+            }
+    }
+}
+
+/// Text-input chrome with a visible accent focus ring.
+struct AtelierFieldModifier: ViewModifier {
+    let isFocused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                ZStack {
+                    AtelierTheme.editor
+                    if isFocused {
+                        AtelierTheme.controlFill(for: .focused)
+                    }
+                }
+            }
+            .clipShape(
+                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+                    .stroke(
+                        AtelierTheme.controlStroke(for: isFocused ? .focused : .normal),
+                        lineWidth: isFocused ? AtelierTheme.strokeFocus : 1
+                    )
             }
     }
 }
@@ -101,6 +238,17 @@ struct AtelierPanelModifier: ViewModifier {
 extension View {
     func atelierPanel() -> some View {
         modifier(AtelierPanelModifier())
+    }
+
+    func atelierCard(
+        radius: CGFloat = AtelierTheme.controlRadius,
+        fill: Color = AtelierTheme.panel
+    ) -> some View {
+        modifier(AtelierCardModifier(radius: radius, fill: fill))
+    }
+
+    func atelierField(isFocused: Bool) -> some View {
+        modifier(AtelierFieldModifier(isFocused: isFocused))
     }
 
     func atelierSplitViewChrome() -> some View {

@@ -348,15 +348,28 @@ struct TerminalTabs: View {
                                         model.select(tab)
                                     }
                                 } label: {
-                                    HStack(spacing: 7) {
+                                    HStack(spacing: AtelierMetrics.spaceS) {
                                         Image(systemName: tab.systemImage)
-                                            .atelierFont(size: 10)
+                                            .atelierFont(size: AtelierTypography.caption)
                                         Text(tab.title)
-                                            .atelierFont(size: 11.5, weight: .medium)
+                                            .atelierFont(
+                                                size: AtelierTypography.label,
+                                                weight: .medium
+                                            )
                                             .lineLimit(1)
                                     }
-                                    .padding(.leading, model.canClose(tab) ? 34 : 12)
-                                    .padding(.trailing, 12)
+                                    .padding(
+                                        .leading,
+                                        model.canClose(tab)
+                                            ? AtelierMetrics.space2XL
+                                            : AtelierMetrics.spaceM
+                                    )
+                                    .padding(.trailing, AtelierMetrics.spaceM)
+                                    .frame(
+                                        minWidth: AtelierMetrics.tabMinWidth,
+                                        idealWidth: AtelierMetrics.tabIdealWidth,
+                                        maxWidth: AtelierMetrics.tabMaxWidth
+                                    )
                                     .frame(height: AtelierMetrics.tabBarHeight)
                                     .contentShape(Rectangle())
                                 }
@@ -366,32 +379,20 @@ struct TerminalTabs: View {
                                 )
 
                                 if model.canClose(tab) {
-                                    Button {
+                                    TabCloseButton(help: tab.closeHelp) {
                                         model.close(tab)
-                                    } label: {
-                                        Image(systemName: "xmark")
-                                            .atelierFont(size: 8, weight: .medium)
-                                            .frame(width: 28, height: AtelierMetrics.tabBarHeight)
-                                            .contentShape(Rectangle())
                                     }
-                                    .buttonStyle(.borderless)
                                     .opacity(
                                         model.selectedID == tab.id || hoveredTabID == tab.id
                                             ? 1
                                             : 0
                                     )
-                                    .accessibilityLabel(tab.closeHelp)
-                                    .help(tab.closeHelp)
                                 }
                             }
                             .foregroundStyle(
                                 model.selectedID == tab.id ? Color.primary : Color.secondary
                             )
-                            .background(
-                                model.selectedID == tab.id
-                                    ? AtelierTheme.editor
-                                    : AtelierTheme.tabInactive
-                            )
+                            .background(tabBackground(tab))
                             .overlay(alignment: .top) {
                                 if model.selectedID == tab.id {
                                     Rectangle()
@@ -402,7 +403,7 @@ struct TerminalTabs: View {
                             .overlay(alignment: .trailing) {
                                 Rectangle()
                                     .fill(AtelierTheme.border)
-                                    .frame(width: 0.5)
+                                    .frame(width: AtelierTheme.strokeHairline)
                             }
                             .overlay {
                                 PointingHandCursorRegion()
@@ -472,13 +473,13 @@ struct TerminalTabs: View {
                     )
                 }
             }
-            .padding(.trailing, 5)
+            .padding(.trailing, AtelierMetrics.spaceXS)
             .frame(height: AtelierMetrics.tabBarHeight)
             .background(AtelierTheme.chrome)
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(AtelierTheme.border)
-                    .frame(height: 0.5)
+                    .frame(height: AtelierTheme.strokeHairline)
             }
 
             if let tab = model.selectedTab {
@@ -509,17 +510,11 @@ struct TerminalTabs: View {
                     .environment(\.atelierZoomScale, zoom.contentScale)
                 }
             } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "rectangle.stack")
-                        .atelierFont(size: 42, weight: .ultraLight)
-                        .foregroundStyle(AtelierTheme.accent)
-                    Text("No Open Tabs")
-                        .atelierFont(size: 22, weight: .semibold)
-                        .tracking(-0.5)
-                    Text("Open a file or add a terminal tab.")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                AtelierEmptyState(
+                    systemImage: "rectangle.stack",
+                    title: "No Open Tabs",
+                    message: "Open a file or add a terminal tab."
+                )
             }
         }
         .focusedSceneValue(\.renameActiveTab) {
@@ -560,6 +555,19 @@ struct TerminalTabs: View {
         return tab.title
     }
 
+    private func tabBackground(_ tab: CenterTab) -> Color {
+        if draggedTabID == tab.id {
+            return AtelierTheme.controlFill(for: .pressed)
+        }
+        if model.selectedID == tab.id {
+            return AtelierTheme.controlFill(for: .selected)
+        }
+        if hoveredTabID == tab.id {
+            return AtelierTheme.controlFill(for: .hovered)
+        }
+        return AtelierTheme.tabInactive
+    }
+
     private func beginRename(_ id: UUID) {
         guard model.visibleTabs.contains(where: { $0.id == id }) else { return }
         renameTargetID = id
@@ -578,6 +586,36 @@ struct TerminalTabs: View {
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
             model.moveTab(id: id, over: targetID)
         }
+    }
+}
+
+private struct TabCloseButton: View {
+    let help: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .atelierFont(size: AtelierMetrics.smallIconSize, weight: .semibold)
+                .frame(
+                    width: AtelierMetrics.regularIconSize,
+                    height: AtelierMetrics.regularIconSize
+                )
+                .background {
+                    RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+                        .fill(
+                            AtelierTheme.controlFill(for: isHovering ? .hovered : .normal)
+                        )
+                }
+                .frame(width: AtelierMetrics.iconButtonSize, height: AtelierMetrics.tabBarHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel(help)
+        .help(help)
     }
 }
 
@@ -607,28 +645,33 @@ private struct TabRenameSheet: View {
     @FocusState private var isTitleFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceL) {
             Text("Rename Tab")
-                .atelierFont(size: 15, weight: .semibold)
+                .atelierFont(size: AtelierTypography.headline, weight: .semibold)
 
             TextField("Tab name", text: $title, prompt: Text(currentTitle))
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .atelierFont(size: AtelierTypography.body)
                 .focused($isTitleFocused)
+                .padding(.horizontal, AtelierMetrics.spaceS)
+                .frame(height: AtelierMetrics.fieldHeight)
+                .atelierField(isFocused: isTitleFocused)
                 .onSubmit(submit)
 
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                    .atelierPointerCursor()
+                    .buttonStyle(AtelierGhostButtonStyle())
                 Button("Rename", action: submit)
                     .keyboardShortcut(.defaultAction)
                     .disabled(cleanTitle.isEmpty)
-                    .atelierPointerCursor()
+                    .buttonStyle(AtelierLuminarePrimaryButtonStyle())
             }
         }
-        .padding(20)
-        .frame(width: 340)
+        .padding(AtelierMetrics.spaceXL)
+        .frame(width: AtelierMetrics.dialogWidth)
+        .background(AtelierTheme.canvas)
         .onAppear {
             Task { @MainActor in
                 isTitleFocused = true

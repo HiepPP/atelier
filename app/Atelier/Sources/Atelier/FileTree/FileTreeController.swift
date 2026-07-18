@@ -291,19 +291,34 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     }
 
     private var rowHeight: CGFloat {
-        ceil(font.ascender - font.descender + font.leading + 4)
+        max(
+            AtelierMetrics.rowHeight * scale,
+            ceil(font.ascender - font.descender + font.leading + AtelierMetrics.spaceXS)
+        )
     }
 
     private func makeCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
         let cell = NSTableCellView()
         cell.identifier = identifier
 
-        let icon = NSImageView(frame: NSRect(x: 3, y: 2, width: 14, height: 14))
+        let icon = NSImageView(
+            frame: NSRect(
+                x: AtelierMetrics.spaceXS,
+                y: AtelierMetrics.spaceXS,
+                width: AtelierMetrics.spaceL,
+                height: AtelierMetrics.spaceL
+            )
+        )
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.autoresizingMask = [.maxXMargin]
 
         let label = NSTextField(labelWithString: "")
-        label.frame = NSRect(x: 21, y: 0, width: 240, height: rowHeight)
+        label.frame = NSRect(
+            x: AtelierMetrics.spaceXL,
+            y: 0,
+            width: 240,
+            height: rowHeight
+        )
         label.controlSize = .regular
         label.font = font
         label.lineBreakMode = .byTruncatingMiddle
@@ -349,18 +364,56 @@ private final class FileTreeOutlineView: NSOutlineView {
 }
 
 private final class FileTreeRowView: NSTableRowView {
+    private var hoverTrackingArea: NSTrackingArea?
+    private var isHovering = false
+
     override func resetCursorRects() {
         super.resetCursorRects()
         addCursorRect(bounds, cursor: .pointingHand)
     }
 
+    override func updateTrackingAreas() {
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        needsDisplay = true
+    }
+
+    override func drawBackground(in dirtyRect: NSRect) {
+        guard isHovering, !isSelected else { return }
+        AppKitThemeAdapter.hover.setFill()
+        rowShape.fill()
+    }
+
     override func drawSelection(in dirtyRect: NSRect) {
         guard selectionHighlightStyle != .none else { return }
         AppKitThemeAdapter.selection.setFill()
+        rowShape.fill()
+    }
+
+    private var rowShape: NSBezierPath {
         NSBezierPath(
-            roundedRect: bounds.insetBy(dx: 5, dy: 1),
+            roundedRect: bounds.insetBy(dx: AtelierMetrics.spaceXS, dy: 2),
             xRadius: AtelierTheme.rowRadius,
             yRadius: AtelierTheme.rowRadius
-        ).fill()
+        )
     }
 }

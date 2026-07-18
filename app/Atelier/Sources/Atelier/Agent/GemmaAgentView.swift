@@ -16,7 +16,6 @@ struct GemmaAgentView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             transcript
             Divider()
             composer
@@ -38,38 +37,31 @@ struct GemmaAgentView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "sparkles")
-                .foregroundStyle(AtelierTheme.accent)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Gemma Workspace Assistant")
-                    .atelierFont(size: 12, weight: .semibold)
-                Text("gemma4:cloud - read-only")
-                    .atelierFont(size: 9.5, design: .monospaced)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if model.isRunning {
-                ProgressView()
-                    .controlSize(.small)
-                Button("Stop") { model.stop() }
-                    .buttonStyle(.borderless)
-                    .help("Stop Gemma")
-            } else if !model.messages.isEmpty {
-                Button("Clear") { model.clear() }
-                    .buttonStyle(.borderless)
-                    .help("Clear Gemma session")
+        AtelierPanelHeader(
+            title: "Gemma Workspace Assistant",
+            subtitle: "gemma4:cloud - read-only",
+            systemImage: "sparkles"
+        ) {
+            HStack(spacing: AtelierMetrics.spaceXS) {
+                if model.isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                    Button("Stop") { model.stop() }
+                        .buttonStyle(AtelierGhostButtonStyle())
+                        .help("Stop Gemma")
+                } else if !model.messages.isEmpty {
+                    Button("Clear") { model.clear() }
+                        .buttonStyle(AtelierGhostButtonStyle())
+                        .help("Clear Gemma session")
+                }
             }
         }
-        .padding(.horizontal, 14)
-        .frame(height: 42)
-        .background(AtelierTheme.chrome)
     }
 
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: AtelierMetrics.spaceL) {
                     if model.messages.isEmpty {
                         emptyState
                     }
@@ -88,7 +80,8 @@ struct GemmaAgentView: View {
                         .frame(height: 1)
                         .id("gemma-transcript-bottom")
                 }
-                .padding(18)
+                .padding(AtelierMetrics.spaceL)
+                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.editor)
@@ -106,22 +99,22 @@ struct GemmaAgentView: View {
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
             Text("Ask about this workspace")
-                .atelierFont(size: 20, weight: .semibold)
+                .atelierFont(size: AtelierTypography.display, weight: .semibold)
             Text("Gemma can search files, read bounded line ranges, and inspect Git diffs. It cannot edit files or run commands.")
-                .atelierFont(size: 12)
+                .atelierFont(size: AtelierTypography.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: 520, alignment: .leading)
-        .padding(.vertical, 24)
+        .frame(maxWidth: AtelierMetrics.emptyStateMaxWidth, alignment: .leading)
+        .padding(.vertical, AtelierMetrics.spaceXL)
     }
 
     private func messageView(_ message: GemmaTranscriptMessage) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
             Text(message.role == .user ? "YOU" : "GEMMA")
-                .atelierFont(size: 9, weight: .bold, design: .monospaced)
+                .atelierFont(size: AtelierTypography.micro, weight: .bold, design: .monospaced)
                 .foregroundStyle(message.role == .user ? Color.secondary : AtelierTheme.accent)
             if message.content.isEmpty && model.isRunning {
                 Text("Thinking...")
@@ -132,14 +125,14 @@ struct GemmaAgentView: View {
                     .textSelection(.enabled)
             } else {
                 Text(message.content)
-                    .atelierFont(size: 12.5)
+                    .atelierFont(size: AtelierTypography.body)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, message.role == .user ? 12 : 0)
-        .padding(.vertical, 10)
+        .padding(.horizontal, message.role == .user ? AtelierMetrics.spaceM : 0)
+        .padding(.vertical, AtelierMetrics.spaceS)
         .background(
             message.role == .user
                 ? AtelierTheme.accent.opacity(0.07)
@@ -151,68 +144,82 @@ struct GemmaAgentView: View {
     }
 
     private func toolView(_ activity: GemmaToolActivity) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: AtelierMetrics.spaceS) {
             Image(systemName: activity.isComplete ? "checkmark.circle" : "ellipsis.circle")
                 .foregroundStyle(activity.isComplete ? AtelierTheme.accent : Color.secondary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(activity.name)
-                    .atelierFont(size: 9.5, weight: .semibold, design: .monospaced)
+                    .atelierFont(size: AtelierTypography.micro, weight: .semibold, design: .monospaced)
                 Text(activity.detail)
-                    .atelierFont(size: 10.5)
+                    .atelierFont(size: AtelierTypography.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
             Spacer()
             if let path = activity.referencedFiles.first {
                 Button("Open") { open(path) }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(AtelierGhostButtonStyle(tint: AtelierTheme.accent))
+                    .accessibilityLabel("Open \(path)")
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(AtelierTheme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
+        .padding(.horizontal, AtelierMetrics.spaceS)
+        .padding(.vertical, AtelierMetrics.spaceS)
+        .atelierCard()
     }
 
     private func errorView(_ error: String, recoverySuggestion: String?) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
             Text("Gemma could not finish")
-                .atelierFont(size: 11, weight: .semibold)
-                .foregroundStyle(.red)
+                .atelierFont(size: AtelierTypography.label, weight: .semibold)
+                .foregroundStyle(AtelierTheme.danger)
             Text(error)
-                .atelierFont(size: 10.5)
+                .atelierFont(size: AtelierTypography.caption)
             if let recoverySuggestion {
                 Text(recoverySuggestion)
-                    .atelierFont(size: 10, design: .monospaced)
+                    .atelierFont(size: AtelierTypography.caption, design: .monospaced)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(10)
+        .padding(AtelierMetrics.spaceS)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.red.opacity(0.06))
+        .background(AtelierTheme.danger.opacity(0.07))
+        .clipShape(
+            RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+        )
+        .overlay(alignment: .leading) {
+            UnevenRoundedRectangle(
+                topLeadingRadius: AtelierTheme.controlRadius,
+                bottomLeadingRadius: AtelierTheme.controlRadius
+            )
+            .fill(AtelierTheme.danger)
+            .frame(width: 2)
+        }
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        HStack(alignment: .bottom, spacing: AtelierMetrics.spaceS) {
             TextField("Ask Gemma about this workspace", text: $model.prompt, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...6)
                 .focused($isComposerFocused)
                 .onSubmit(model.send)
                 .disabled(model.isRunning)
+                .padding(.horizontal, AtelierMetrics.spaceS)
+                .padding(.vertical, AtelierMetrics.spaceS)
+                .atelierField(isFocused: isComposerFocused)
             Button {
                 model.send()
                 isComposerFocused = true
             } label: {
                 Image(systemName: "arrow.up")
-                    .frame(width: 18, height: 18)
+                    .frame(width: AtelierMetrics.spaceL, height: AtelierMetrics.spaceL)
             }
             .buttonStyle(AtelierLuminareIconButtonStyle())
             .disabled(model.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isRunning)
             .accessibilityLabel("Send to Gemma")
             .help("Send to Gemma")
         }
-        .padding(12)
+        .padding(AtelierMetrics.spaceM)
         .background(AtelierTheme.chrome)
     }
 

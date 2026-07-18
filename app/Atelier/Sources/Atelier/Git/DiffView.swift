@@ -226,11 +226,11 @@ struct GitDiffTabView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: AtelierMetrics.spaceS) {
             Image(systemName: "doc.text.magnifyingglass")
                 .foregroundStyle(AtelierTheme.accent)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
                 Text(session.selection.change.path)
                     .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
                     .lineLimit(1)
@@ -238,7 +238,7 @@ struct GitDiffTabView: View {
 
                 if let originalPath = session.selection.change.originalPath {
                     Text("Renamed from \(originalPath)")
-                        .atelierFont(size: 10.5)
+                        .atelierFont(size: AtelierTypography.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -246,14 +246,16 @@ struct GitDiffTabView: View {
             }
 
             Text(session.selection.stateLabel.uppercased())
-                .atelierFont(size: 9.5, weight: .semibold)
+                .atelierFont(size: AtelierTypography.micro, weight: .semibold)
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
+                .padding(.horizontal, AtelierMetrics.spaceS)
+                .padding(.vertical, AtelierMetrics.spaceXS)
                 .background(AtelierTheme.raised)
-                .clipShape(Capsule())
+                .clipShape(
+                    RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+                )
 
-            Spacer(minLength: 8)
+            Spacer(minLength: AtelierMetrics.spaceS)
 
             if case .loaded(let document) = session.state {
                 changeCount("+\(document.additions)", color: AtelierTheme.gitAdded)
@@ -270,13 +272,13 @@ struct GitDiffTabView: View {
             .help(session.needsReload ? "Reload changed diff" : "Reload diff")
             .accessibilityLabel(session.needsReload ? "Reload changed diff" : "Reload diff")
         }
-        .padding(.horizontal, 12)
-        .frame(height: 46)
+        .padding(.horizontal, AtelierMetrics.spaceM)
+        .frame(height: AtelierMetrics.panelHeaderHeight)
         .background(AtelierTheme.chrome)
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(AtelierTheme.border)
-                .frame(height: 0.5)
+                .frame(height: AtelierTheme.strokeHairline)
         }
         .environment(\.atelierZoomScale, zoom.contentScale)
     }
@@ -311,14 +313,14 @@ struct GitDiffTabView: View {
                 Button("Try Again") {
                     session.reload()
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(AtelierLuminarePrimaryButtonStyle())
             }
         }
     }
 
     private func changeCount(_ text: String, color: Color) -> some View {
         Text(text)
-            .atelierFont(size: 11, weight: .semibold, design: .monospaced)
+            .atelierFont(size: AtelierTypography.label, weight: .semibold, design: .monospaced)
             .foregroundStyle(color)
             .accessibilityLabel(text.first == "+" ? "\(text.dropFirst()) additions" : "\(text.dropFirst()) deletions")
     }
@@ -327,23 +329,14 @@ struct GitDiffTabView: View {
         title: String,
         message: String,
         systemImage: String,
-        @ViewBuilder accessory: () -> Accessory
+        @ViewBuilder accessory: @escaping () -> Accessory
     ) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .atelierFont(size: 30, weight: .ultraLight)
-                .foregroundStyle(AtelierTheme.accent)
-            Text(title)
-                .atelierFont(size: 16, weight: .semibold)
-            Text(message)
-                .atelierFont(size: AtelierTypography.uiSize)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .textSelection(.enabled)
-            accessory()
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        AtelierEmptyState(
+            systemImage: systemImage,
+            title: title,
+            message: message,
+            accessory: accessory
+        )
         .environment(\.atelierZoomScale, zoom.contentScale)
     }
 
@@ -391,29 +384,38 @@ private struct DiffLineView: View {
             lineNumber(line.newLineNumber, label: "New line")
 
             Text(line.marker)
-                .atelierFont(size: 12.5, weight: .semibold, design: .monospaced)
+                .atelierFont(
+                    size: AtelierTypography.body,
+                    weight: .semibold,
+                    design: .monospaced
+                )
                 .foregroundStyle(markerColor)
-                .frame(width: 24)
+                .frame(width: AtelierMetrics.compactControlHeight)
                 .accessibilityHidden(true)
 
             Text(line.text.isEmpty ? " " : line.text)
                 .atelierFont(
-                    size: 12.5,
+                    size: AtelierTypography.body,
                     weight: line.kind == .hunk ? .semibold : .regular,
                     design: .monospaced
                 )
                 .foregroundStyle(textColor)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: true, vertical: false)
-                .padding(.trailing, 18)
+                .padding(.trailing, AtelierMetrics.spaceL)
         }
-        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 22 * scale, alignment: .leading)
+        .frame(
+            minWidth: 0,
+            maxWidth: .infinity,
+            minHeight: AtelierMetrics.compactControlHeight * scale,
+            alignment: .leading
+        )
         .background(backgroundColor)
         .overlay(alignment: .bottom) {
             if line.kind == .hunk {
                 Rectangle()
                     .fill(AtelierTheme.border.opacity(0.65))
-                    .frame(height: 0.5)
+                    .frame(height: AtelierTheme.strokeHairline)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -422,15 +424,19 @@ private struct DiffLineView: View {
 
     private func lineNumber(_ number: Int?, label: String) -> some View {
         Text(number.map(String.init) ?? "")
-            .atelierFont(size: 11, design: .monospaced)
+            .atelierFont(size: AtelierTypography.label, design: .monospaced)
             .foregroundStyle(.secondary)
-            .frame(width: 46, height: 22 * scale, alignment: .trailing)
-            .padding(.trailing, 8)
+            .frame(
+                width: AtelierMetrics.codeGutterWidth,
+                height: AtelierMetrics.compactControlHeight * scale,
+                alignment: .trailing
+            )
+            .padding(.trailing, AtelierMetrics.spaceS)
             .background(AtelierTheme.chrome.opacity(0.55))
             .overlay(alignment: .trailing) {
                 Rectangle()
                     .fill(AtelierTheme.border)
-                    .frame(width: 0.5)
+                    .frame(width: AtelierTheme.strokeHairline)
             }
             .accessibilityLabel(label)
             .accessibilityValue(number.map(String.init) ?? "None")

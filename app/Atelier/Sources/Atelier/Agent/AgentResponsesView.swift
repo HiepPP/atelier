@@ -56,7 +56,6 @@ struct AgentResponsesView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             transcript
         }
         .background(AtelierTheme.editor)
@@ -65,36 +64,29 @@ struct AgentResponsesView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "doc.richtext")
-                .foregroundStyle(AtelierTheme.accent)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Response Preview")
-                    .atelierFont(size: 12, weight: .semibold)
-                Text("Read-only - terminal stays interactive")
-                    .atelierFont(size: 9.5, design: .monospaced)
-                    .foregroundStyle(.secondary)
+        AtelierPanelHeader(
+            title: "Response Preview",
+            subtitle: "Read-only - terminal stays interactive",
+            systemImage: "doc.richtext"
+        ) {
+            HStack(spacing: AtelierMetrics.spaceXS) {
+                sessionPicker
+                Button {
+                    Task { await model.refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(AtelierLuminareIconButtonStyle())
+                .accessibilityLabel("Refresh agent responses")
+                .help("Refresh agent responses")
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                }
+                .buttonStyle(AtelierLuminareIconButtonStyle())
+                .accessibilityLabel("Close agent preview")
+                .help("Close agent preview")
             }
-            Spacer()
-            sessionPicker
-            Button {
-                Task { await model.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(AtelierLuminareIconButtonStyle())
-            .accessibilityLabel("Refresh agent responses")
-            .help("Refresh agent responses")
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-            }
-            .buttonStyle(AtelierLuminareIconButtonStyle())
-            .accessibilityLabel("Close agent preview")
-            .help("Close agent preview")
         }
-        .padding(.horizontal, 14)
-        .frame(height: 42)
-        .background(AtelierTheme.chrome)
     }
 
     private var sessionPicker: some View {
@@ -127,9 +119,13 @@ struct AgentResponsesView: View {
                     Text("Select session")
                 }
                 Image(systemName: "chevron.down")
-                    .atelierFont(size: 8, weight: .semibold)
+                    .atelierFont(size: AtelierMetrics.smallIconSize, weight: .semibold)
             }
-            .atelierFont(size: 9.5, weight: .semibold, design: .monospaced)
+            .atelierFont(
+                size: AtelierTypography.micro,
+                weight: .semibold,
+                design: .monospaced
+            )
             .lineLimit(1)
         }
         .menuStyle(.borderlessButton)
@@ -148,7 +144,7 @@ struct AgentResponsesView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: AtelierMetrics.spaceL) {
                     if model.responses.isEmpty {
                         emptyState
                     } else if model.selectedSession == nil {
@@ -163,7 +159,7 @@ struct AgentResponsesView: View {
                         .frame(height: 1)
                         .id("agent-response-bottom")
                 }
-                .padding(18)
+                .padding(AtelierMetrics.spaceL)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.editor)
@@ -176,7 +172,7 @@ struct AgentResponsesView: View {
                         Label("New response", systemImage: "arrow.down")
                     }
                     .buttonStyle(AtelierLuminarePrimaryButtonStyle())
-                    .padding(14)
+                    .padding(AtelierMetrics.spaceL)
                     .accessibilityLabel("Show new agent response")
                     .accessibilityHint("Scrolls to the latest response")
                 }
@@ -211,42 +207,46 @@ struct AgentResponsesView: View {
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
             Label("Waiting for a final response", systemImage: "waveform.path")
-                .atelierFont(size: 20, weight: .semibold)
+                .atelierFont(size: AtelierTypography.headline, weight: .semibold)
             Text("Use Codex or Claude in the terminal. Markdown and Mermaid previews appear here.")
-                .atelierFont(size: 12)
+                .atelierFont(size: AtelierTypography.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: 520, alignment: .leading)
-        .padding(.vertical, 24)
+        .frame(maxWidth: AtelierMetrics.emptyStateMaxWidth, alignment: .leading)
+        .padding(.vertical, AtelierMetrics.spaceXL)
     }
 
     private var noSelectionState: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
             Label("Select a session", systemImage: "rectangle.stack")
-                .atelierFont(size: 20, weight: .semibold)
+                .atelierFont(size: AtelierTypography.headline, weight: .semibold)
             Text("Choose a Codex or Claude session to preview its final responses.")
-                .atelierFont(size: 12)
+                .atelierFont(size: AtelierTypography.body)
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: 520, alignment: .leading)
-        .padding(.vertical, 24)
+        .frame(maxWidth: AtelierMetrics.emptyStateMaxWidth, alignment: .leading)
+        .padding(.vertical, AtelierMetrics.spaceXL)
     }
 
     private func responseCard(_ response: AgentResponse) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+            HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceS) {
                 Text(response.provider.rawValue.uppercased())
-                    .atelierFont(size: 9, weight: .bold, design: .monospaced)
+                    .atelierFont(
+                        size: AtelierTypography.micro,
+                        weight: .bold,
+                        design: .monospaced
+                    )
                     .foregroundStyle(AtelierTheme.accent)
                 Text(response.timestamp, style: .time)
-                    .atelierFont(size: 9.5, design: .monospaced)
+                    .atelierFont(size: AtelierTypography.micro, design: .monospaced)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text(shortSessionID(response.sessionID))
-                    .atelierFont(size: 9, design: .monospaced)
+                    .atelierFont(size: AtelierTypography.micro, design: .monospaced)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -255,11 +255,11 @@ struct AgentResponsesView: View {
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 12)
+        .padding(.vertical, AtelierMetrics.spaceM)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(AtelierTheme.border)
-                .frame(height: 0.5)
+                .frame(height: AtelierTheme.strokeHairline)
         }
         .onAppear {
             model.markRead(response)

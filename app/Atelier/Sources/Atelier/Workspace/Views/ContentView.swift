@@ -54,6 +54,8 @@ struct WorkspaceView: View {
     @State private var responderBeforeAgentPreview: NSResponder?
     @State private var responderBeforeProjectMenu: NSResponder?
     @State private var isProjectMenuPresented = false
+    @State private var isProjectButtonHovered = false
+    @State private var isAgentResizeHandleHovered = false
     @FocusState private var isProjectMenuFocused: Bool
 
     var body: some View {
@@ -90,7 +92,11 @@ struct WorkspaceView: View {
                                         layout: layout
                                     )
                                 )
-                                .shadow(color: .black.opacity(0.14), radius: 18, x: -6)
+                                .shadow(
+                                    color: AtelierTheme.shadowFloating,
+                                    radius: AtelierMetrics.spaceL,
+                                    x: -AtelierMetrics.spaceS
+                                )
                         }
                     }
                 }
@@ -141,11 +147,18 @@ struct WorkspaceView: View {
         HSplitView {
             if !zoom.isFocusMode {
                 explorerColumn
-                    .frame(minWidth: 220, idealWidth: 300, maxWidth: 400)
+                    .frame(
+                        minWidth: AtelierMetrics.explorerMinWidth,
+                        idealWidth: AtelierMetrics.explorerIdealWidth,
+                        maxWidth: AtelierMetrics.explorerMaxWidth
+                    )
             }
 
             TerminalTabs(model: terminalTabs)
-                .frame(minWidth: 420, idealWidth: 660)
+                .frame(
+                    minWidth: AtelierMetrics.centerMinWidth,
+                    idealWidth: AtelierMetrics.centerIdealWidth
+                )
                 .layoutPriority(2)
 
             if !zoom.isFocusMode {
@@ -153,7 +166,11 @@ struct WorkspaceView: View {
                     model: gitModel,
                     onOpenDiff: terminalTabs.openGitDiff
                 )
-                    .frame(minWidth: 320, idealWidth: 420, maxWidth: 540)
+                    .frame(
+                        minWidth: AtelierMetrics.sourceControlMinWidth,
+                        idealWidth: AtelierMetrics.sourceControlIdealWidth,
+                        maxWidth: AtelierMetrics.sourceControlMaxWidth
+                    )
                     .layoutPriority(1)
             }
         }
@@ -172,14 +189,24 @@ struct WorkspaceView: View {
 
     private func agentPreviewResizeHandle(containerWidth: CGFloat) -> some View {
         Rectangle()
-            .fill(AtelierTheme.border)
-            .frame(width: 5)
+            .fill(
+                isAgentResizeHandleHovered
+                    ? AtelierTheme.controlFill(for: .hovered)
+                    : AtelierTheme.border
+            )
+            .frame(width: AtelierMetrics.spaceS)
             .contentShape(Rectangle())
             .overlay {
                 Capsule()
-                    .fill(Color.secondary.opacity(0.55))
+                    .fill(
+                        isAgentResizeHandleHovered
+                            ? AtelierTheme.accent
+                            : Color.secondary.opacity(0.55)
+                    )
                     .frame(width: 2, height: 36)
             }
+            .onHover { isAgentResizeHandleHovered = $0 }
+            .help("Drag to resize agent preview")
             .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { value in
@@ -235,16 +262,20 @@ struct WorkspaceView: View {
                     app.windowController.zoomWorkspaceWindow()
                 }
 
-            HStack(spacing: 8) {
+            HStack(spacing: AtelierMetrics.spaceS) {
                 Color.clear
-                    .frame(width: 66, height: 1)
+                    .frame(width: AtelierMetrics.trafficLightReserve, height: 1)
 
-                Spacer(minLength: 12)
+                Spacer(minLength: AtelierMetrics.spaceM)
 
                 Text("\(Int((zoom.scale * 100).rounded()))%")
-                    .atelierFont(size: 10.5, weight: .medium, design: .monospaced)
+                    .atelierFont(
+                        size: AtelierTypography.caption,
+                        weight: .medium,
+                        design: .monospaced
+                    )
                     .foregroundStyle(.secondary)
-                    .frame(minWidth: 42)
+                    .frame(minWidth: AtelierMetrics.zoomLabelMinWidth)
                     .accessibilityLabel("Zoom level")
                     .accessibilityValue("\(Int((zoom.scale * 100).rounded())) percent")
                     .help("Zoom level")
@@ -294,32 +325,49 @@ struct WorkspaceView: View {
             Button {
                 toggleProjectMenu()
             } label: {
-                HStack(spacing: 7) {
+                HStack(spacing: AtelierMetrics.spaceS) {
                     Image(systemName: "folder")
-                        .atelierFont(size: 11, weight: .medium)
+                        .atelierFont(size: AtelierTypography.label, weight: .medium)
                         .foregroundStyle(AtelierTheme.accent)
 
                     Text(folderName)
-                        .atelierFont(size: 11.5, weight: .semibold)
+                        .atelierFont(size: AtelierTypography.label, weight: .semibold)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
-                .frame(width: 320, height: 28)
+                .padding(.horizontal, AtelierMetrics.spaceM)
+                .frame(
+                    minWidth: 240,
+                    idealWidth: 320,
+                    maxWidth: 360,
+                    minHeight: AtelierMetrics.controlHeight,
+                    maxHeight: AtelierMetrics.controlHeight
+                )
                 .contentShape(
                     RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
                 )
             }
             .buttonStyle(.plain)
-            .background(AtelierTheme.panel)
+            .background(
+                isProjectMenuPresented
+                    ? AtelierTheme.controlFill(for: .selected)
+                    : (isProjectButtonHovered
+                        ? AtelierTheme.controlFill(for: .hovered)
+                        : AtelierTheme.panel)
+            )
             .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
             .overlay {
                 RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
                     .stroke(
-                        isProjectMenuPresented ? AtelierTheme.accent : AtelierTheme.border,
-                        lineWidth: isProjectMenuPresented ? 1 : 0.75
+                        AtelierTheme.controlStroke(
+                            for: isProjectMenuPresented ? .selected : .normal
+                        ),
+                        lineWidth: isProjectMenuPresented
+                            ? AtelierTheme.strokeFocus
+                            : AtelierTheme.strokeControl
                     )
             }
-            .shadow(color: .black.opacity(0.04), radius: 1.5, y: 1)
+            .shadow(color: AtelierTheme.shadowSoft, radius: 2, y: 1)
             .scaleEffect(
                 reduceMotion ? 1 : (isProjectMenuPresented ? 1.012 : 1)
             )
@@ -339,9 +387,10 @@ struct WorkspaceView: View {
                 ].joined(separator: ", ")
             )
             .help("Project commands")
+            .onHover { isProjectButtonHovered = $0 }
             .atelierPointerCursor()
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, AtelierMetrics.spaceM)
         .frame(height: AtelierMetrics.commandBarHeight)
         .background(AtelierTheme.chrome)
         .atelierPointerCursor()
@@ -367,7 +416,7 @@ struct WorkspaceView: View {
             }
 
             Divider()
-                .padding(.vertical, 4)
+                .padding(.vertical, AtelierMetrics.spaceXS)
 
             ProjectMenuSectionLabel(title: "Open")
 
@@ -387,7 +436,7 @@ struct WorkspaceView: View {
             }
 
             Divider()
-                .padding(.vertical, 4)
+                .padding(.vertical, AtelierMetrics.spaceXS)
 
             ProjectMenuSectionLabel(title: "View")
 
@@ -429,15 +478,19 @@ struct WorkspaceView: View {
                 }
             }
         }
-        .padding(8)
-        .frame(width: 280)
+        .padding(AtelierMetrics.spaceS)
+        .frame(width: AtelierMetrics.projectMenuWidth)
         .background(AtelierTheme.panel)
         .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.panelRadius))
         .overlay {
             RoundedRectangle(cornerRadius: AtelierTheme.panelRadius)
-                .stroke(AtelierTheme.border, lineWidth: 0.75)
+                .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
         }
-        .shadow(color: .black.opacity(0.14), radius: 14, y: 6)
+        .shadow(
+            color: AtelierTheme.shadowFloating,
+            radius: AtelierMetrics.spaceL,
+            y: AtelierMetrics.spaceS
+        )
     }
 
     private func toggleProjectMenu() {
@@ -477,47 +530,32 @@ struct WorkspaceView: View {
 
     private var explorerColumn: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Explorer")
-                        .atelierFont(size: 12, weight: .semibold)
-                    Text(folderName)
-                        .atelierFont(size: 9.5, design: .monospaced)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button {
-                    fileTreeCreationRequest = FileTreeCreationRequest(
-                        kind: .file,
-                        parentURL: fileTreeTargetDirectory ?? workspaceURL
-                    )
-                } label: {
-                    Image(systemName: "doc.badge.plus")
-                }
-                .buttonStyle(AtelierLuminareIconButtonStyle())
-                .accessibilityLabel("New file")
-                .help("New file")
+            AtelierPanelHeader(title: "Explorer", subtitle: folderName) {
+                HStack(spacing: AtelierMetrics.spaceXS) {
+                    Button {
+                        fileTreeCreationRequest = FileTreeCreationRequest(
+                            kind: .file,
+                            parentURL: fileTreeTargetDirectory ?? workspaceURL
+                        )
+                    } label: {
+                        Image(systemName: "doc.badge.plus")
+                    }
+                    .buttonStyle(AtelierLuminareIconButtonStyle())
+                    .accessibilityLabel("New file")
+                    .help("New file")
 
-                Button {
-                    fileTreeCreationRequest = FileTreeCreationRequest(
-                        kind: .folder,
-                        parentURL: fileTreeTargetDirectory ?? workspaceURL
-                    )
-                } label: {
-                    Image(systemName: "folder.badge.plus")
+                    Button {
+                        fileTreeCreationRequest = FileTreeCreationRequest(
+                            kind: .folder,
+                            parentURL: fileTreeTargetDirectory ?? workspaceURL
+                        )
+                    } label: {
+                        Image(systemName: "folder.badge.plus")
+                    }
+                    .buttonStyle(AtelierLuminareIconButtonStyle())
+                    .accessibilityLabel("New folder")
+                    .help("New folder")
                 }
-                .buttonStyle(AtelierLuminareIconButtonStyle())
-                .accessibilityLabel("New folder")
-                .help("New folder")
-            }
-            .padding(.horizontal, 12)
-            .frame(height: AtelierMetrics.commandBarHeight)
-            .background(AtelierTheme.chrome)
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(AtelierTheme.border)
-                    .frame(height: 0.5)
             }
             .environment(\.atelierZoomScale, zoom.sidebarScale)
 
@@ -558,7 +596,7 @@ struct WorkspaceView: View {
     }
 
     private var statusBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: AtelierMetrics.spaceM) {
             Label(
                 gitModel.snapshot.branch.isEmpty ? "detached" : gitModel.snapshot.branch,
                 systemImage: "arrow.triangle.branch"
@@ -569,15 +607,15 @@ struct WorkspaceView: View {
             }
             Text("\(Int((zoom.scale * 100).rounded()))%")
         }
-        .atelierFont(size: 10.5, weight: .medium)
+        .atelierFont(size: AtelierTypography.caption, weight: .medium)
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, AtelierMetrics.spaceM)
         .frame(height: AtelierMetrics.statusBarHeight)
         .background(AtelierTheme.chrome)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(AtelierTheme.border)
-                .frame(height: 0.5)
+                .frame(height: AtelierTheme.strokeHairline)
         }
     }
 }
@@ -587,11 +625,11 @@ private struct ProjectMenuSectionLabel: View {
 
     var body: some View {
         Text(title)
-            .atelierFont(size: 9.5, weight: .semibold)
+            .atelierFont(size: AtelierTypography.micro, weight: .semibold)
             .foregroundStyle(.secondary)
             .textCase(.uppercase)
-            .padding(.horizontal, 8)
-            .padding(.bottom, 2)
+            .padding(.horizontal, AtelierMetrics.spaceS)
+            .padding(.bottom, AtelierMetrics.spaceXS)
             .accessibilityAddTraits(.isHeader)
     }
 }
@@ -602,39 +640,52 @@ private struct ProjectMenuRow: View {
     var isEnabled = true
     let action: () -> Void
 
-    @State private var isHovering = false
-
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: AtelierMetrics.spaceS) {
                 Image(systemName: systemImage)
-                    .atelierFont(size: 11, weight: .medium)
+                    .atelierFont(size: AtelierTypography.label, weight: .medium)
                     .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
-                    .frame(width: 16)
+                    .frame(width: AtelierMetrics.spaceL)
 
                 Text(title)
-                    .atelierFont(size: 11.5)
+                    .atelierFont(size: AtelierTypography.label)
 
-                Spacer(minLength: 12)
+                Spacer(minLength: AtelierMetrics.spaceM)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, AtelierMetrics.spaceS)
             .frame(maxWidth: .infinity)
-            .frame(height: 28)
+            .frame(height: AtelierMetrics.controlHeight)
             .contentShape(Rectangle())
-            .background {
-                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius)
-                    .fill(
-                        isHovering && isEnabled
-                            ? AtelierTheme.accent.opacity(0.10)
-                            : Color.clear
-                    )
-            }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(AtelierMenuRowButtonStyle())
         .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.45)
-        .onHover { isHovering = $0 }
         .accessibilityLabel(title)
+    }
+}
+
+private struct AtelierMenuRowButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+                    .fill(AtelierTheme.controlFill(for: interactionState(configuration)))
+            }
+            .opacity(AtelierTheme.controlOpacity(for: interactionState(configuration)))
+            .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : 0.99)
+            .onHover { isHovering = $0 }
+            .atelierPointerCursor()
+    }
+
+    private func interactionState(_ configuration: Configuration) -> AtelierInteractionState {
+        if !isEnabled { return .disabled }
+        if configuration.isPressed { return .pressed }
+        if isHovering { return .hovered }
+        return .normal
     }
 }
 
@@ -651,16 +702,16 @@ private struct ExplorerInlineCreationRow: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
+            HStack(spacing: AtelierMetrics.spaceS) {
                 Image(systemName: request.kind.systemImage)
-                    .atelierFont(size: 11, weight: .medium)
+                    .atelierFont(size: AtelierTypography.label, weight: .medium)
                     .foregroundStyle(AtelierTheme.accent)
-                    .frame(width: 14)
+                    .frame(width: AtelierMetrics.spaceL)
 
                 TextField(request.kind.placeholder, text: $name)
                     .textFieldStyle(.plain)
-                    .atelierFont(size: 12)
+                    .atelierFont(size: AtelierTypography.body)
                     .focused($isFocused)
                     .disabled(creationTask != nil)
                     .onSubmit(submit)
@@ -672,17 +723,17 @@ private struct ExplorerInlineCreationRow: View {
             }
 
             Text(errorMessage ?? "in \(targetLabel)")
-                .atelierFont(size: 9.5)
-                .foregroundStyle(errorMessage == nil ? Color.secondary : Color.red)
+                .atelierFont(size: AtelierTypography.micro)
+                .foregroundStyle(errorMessage == nil ? Color.secondary : AtelierTheme.danger)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, AtelierMetrics.spaceS)
+        .padding(.vertical, AtelierMetrics.spaceS)
         .background(AtelierTheme.accent.opacity(0.08))
         .overlay(alignment: .leading) {
             Rectangle()
-                .fill(errorMessage == nil ? AtelierTheme.accent : Color.red)
+                .fill(errorMessage == nil ? AtelierTheme.accent : AtelierTheme.danger)
                 .frame(width: 2)
         }
         .onAppear { isFocused = true }

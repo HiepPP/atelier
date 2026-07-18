@@ -25,7 +25,7 @@ struct AgentMarkdownView: View {
 
     var body: some View {
         let blocks = AgentMarkdownBlock.parse(source)
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
             ForEach(blocks.indices, id: \.self) { index in
                 blockView(blocks[index])
             }
@@ -39,24 +39,24 @@ struct AgentMarkdownView: View {
         case .heading(let level, let content):
             inlineText(content)
                 .atelierFont(size: headingSize(level), weight: .semibold)
-                .padding(.top, level <= 2 ? 3 : 1)
+                .padding(.top, level <= 2 ? AtelierMetrics.spaceXS : 0)
         case .paragraph(let content):
             inlineText(content)
-                .atelierFont(size: 12.5)
-                .lineSpacing(2)
+                .atelierFont(size: AtelierTypography.body)
+                .lineSpacing(AtelierMetrics.spaceXS)
         case .unorderedItem(let content):
             listRow(marker: "-", content: content)
         case .orderedItem(let number, let content):
             listRow(marker: "\(number).", content: content)
         case .quote(let content):
             inlineText(content)
-                .atelierFont(size: 12.5)
+                .atelierFont(size: AtelierTypography.body)
                 .foregroundStyle(.secondary)
-                .padding(.leading, 10)
+                .padding(.leading, AtelierMetrics.spaceM)
                 .overlay(alignment: .leading) {
                     Rectangle()
-                        .fill(AtelierTheme.border)
-                        .frame(width: 2)
+                        .fill(AtelierTheme.accent.opacity(0.72))
+                        .frame(width: AtelierTheme.strokeFocus)
                 }
         case .code(let language, let content):
             codeBlock(language: language, content: content)
@@ -74,7 +74,11 @@ struct AgentMarkdownView: View {
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(language?.uppercased() ?? "CODE")
-                    .atelierFont(size: 9, weight: .semibold, design: .monospaced)
+                    .atelierFont(
+                        size: AtelierTypography.micro,
+                        weight: .semibold,
+                        design: .monospaced
+                    )
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button {
@@ -82,29 +86,23 @@ struct AgentMarkdownView: View {
                 } label: {
                     Label("Copy", systemImage: "doc.on.doc")
                 }
-                .buttonStyle(.borderless)
-                .atelierFont(size: 9.5)
+                .buttonStyle(AtelierGhostButtonStyle())
                 .accessibilityLabel("Copy code")
             }
-            .padding(.horizontal, 10)
-            .frame(height: 30)
+            .padding(.horizontal, AtelierMetrics.spaceS)
+            .frame(height: AtelierMetrics.fieldHeight)
             .background(AtelierTheme.raised)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(bounded)
-                    .atelierFont(size: 11.5, design: .monospaced)
+                    .atelierFont(size: AtelierTypography.label, design: .monospaced)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: true, vertical: false)
-                    .padding(10)
+                    .padding(AtelierMetrics.spaceS)
             }
             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.panel)
         }
-        .background(AtelierTheme.panel)
-        .overlay {
-            RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                .stroke(AtelierTheme.border, lineWidth: 0.75)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
+        .atelierCard()
     }
 
     private func table(headers: [String], rows: [[String]]) -> some View {
@@ -113,9 +111,9 @@ struct AgentMarkdownView: View {
                 GridRow {
                     ForEach(headers.indices, id: \.self) { index in
                         inlineText(headers[index])
-                            .atelierFont(size: 11.5, weight: .semibold)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
+                            .atelierFont(size: AtelierTypography.label, weight: .semibold)
+                            .padding(.horizontal, AtelierMetrics.spaceM)
+                            .padding(.vertical, AtelierMetrics.spaceS)
                             .frame(minWidth: 100, maxWidth: 240, alignment: .leading)
                             .background(AtelierTheme.raised)
                     }
@@ -129,9 +127,9 @@ struct AgentMarkdownView: View {
                                 ? rows[rowIndex][columnIndex]
                                 : ""
                             inlineText(value)
-                                .atelierFont(size: 11.5)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
+                                .atelierFont(size: AtelierTypography.label)
+                                .padding(.horizontal, AtelierMetrics.spaceM)
+                                .padding(.vertical, AtelierMetrics.spaceS)
                                 .frame(minWidth: 100, maxWidth: 240, alignment: .leading)
                         }
                     }
@@ -139,7 +137,7 @@ struct AgentMarkdownView: View {
             }
             .overlay {
                 RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                    .stroke(AtelierTheme.border, lineWidth: 0.75)
+                    .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
             }
             .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
         }
@@ -152,14 +150,14 @@ struct AgentMarkdownView: View {
     }
 
     private func listRow(marker: String, content: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
+        HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceS) {
             Text(marker)
-                .atelierFont(size: 12, design: .monospaced)
+                .atelierFont(size: AtelierTypography.body, design: .monospaced)
                 .foregroundStyle(.secondary)
-                .frame(minWidth: 18, alignment: .trailing)
+                .frame(minWidth: AtelierMetrics.spaceL, alignment: .trailing)
             inlineText(content)
-                .atelierFont(size: 12.5)
-                .lineSpacing(2)
+                .atelierFont(size: AtelierTypography.body)
+                .lineSpacing(AtelierMetrics.spaceXS)
         }
     }
 
@@ -175,10 +173,10 @@ struct AgentMarkdownView: View {
 
     private func headingSize(_ level: Int) -> CGFloat {
         switch level {
-        case 1: 18
-        case 2: 16
-        case 3: 14
-        default: 12.5
+        case 1: AtelierTypography.display
+        case 2: AtelierTypography.headline
+        case 3: AtelierTypography.uiSize
+        default: AtelierTypography.body
         }
     }
 }
@@ -198,17 +196,20 @@ struct MermaidResponseCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+            HStack(spacing: AtelierMetrics.spaceS) {
                 Label("Mermaid", systemImage: "point.3.connected.trianglepath.dotted")
-                    .atelierFont(size: 10, weight: .semibold, design: .monospaced)
+                    .atelierFont(
+                        size: AtelierTypography.caption,
+                        weight: .semibold,
+                        design: .monospaced
+                    )
                     .foregroundStyle(AtelierTheme.accent)
                 Spacer()
                 Button(showsSource ? "Hide source" : "View source") {
                     showsSource.toggle()
                 }
-                .buttonStyle(.borderless)
-                .atelierFont(size: 10)
+                .buttonStyle(AtelierGhostButtonStyle())
                 .accessibilityLabel(showsSource ? "Hide Mermaid source" : "View Mermaid source")
             }
 
@@ -222,14 +223,14 @@ struct MermaidResponseCard: View {
                     if isRendering {
                         ProgressView()
                             .controlSize(.small)
-                            .padding(7)
+                            .padding(AtelierMetrics.spaceS)
                             .background(.regularMaterial)
                             .clipShape(Circle())
                     }
                 }
             } else if let renderError {
                 Label(renderError, systemImage: "exclamationmark.triangle")
-                    .atelierFont(size: 10.5)
+                    .atelierFont(size: AtelierTypography.caption)
                     .foregroundStyle(.secondary)
             } else {
                 ProgressView()
@@ -244,7 +245,11 @@ struct MermaidResponseCard: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         Text("MERMAID SOURCE")
-                            .atelierFont(size: 9, weight: .semibold, design: .monospaced)
+                            .atelierFont(
+                                size: AtelierTypography.micro,
+                                weight: .semibold,
+                                design: .monospaced
+                            )
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button {
@@ -253,30 +258,25 @@ struct MermaidResponseCard: View {
                         } label: {
                             Label("Copy", systemImage: "doc.on.doc")
                         }
-                        .buttonStyle(.borderless)
-                        .atelierFont(size: 9.5)
+                        .buttonStyle(AtelierGhostButtonStyle())
+                        .accessibilityLabel("Copy Mermaid source")
                     }
-                    .padding(.horizontal, 10)
-                    .frame(height: 30)
+                    .padding(.horizontal, AtelierMetrics.spaceS)
+                    .frame(height: AtelierMetrics.fieldHeight)
                     .background(AtelierTheme.raised)
 
                     Text(source)
-                        .atelierFont(size: 11, design: .monospaced)
+                        .atelierFont(size: AtelierTypography.label, design: .monospaced)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
+                        .padding(AtelierMetrics.spaceM)
                 }
                 .background(AtelierTheme.editor)
                 .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
             }
         }
-        .padding(12)
-        .background(AtelierTheme.panel)
-        .overlay {
-            RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                .stroke(AtelierTheme.border, lineWidth: 0.75)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
+        .padding(AtelierMetrics.spaceM)
+        .atelierCard()
         .background {
             GeometryReader { geometry in
                 Color.clear

@@ -11,6 +11,8 @@ nonisolated enum AppKitThemeAdapter {
     static let tabInactive = dynamic(light: 0xECEFED, dark: 0x202322)
     static let border = dynamic(light: 0xD9DEDC, dark: 0x353A38)
     static let selection = dynamic(light: 0xF0E4DA, dark: 0x49362A)
+    static let hover = dynamic(light: 0xE5E9E7, dark: 0x2D3230)
+    static let pressed = dynamic(light: 0xDCE2DF, dark: 0x353B38)
     static let accent = dynamic(light: 0xB07B56, dark: 0xD9A17C)
     static let accentInk = dynamic(light: 0x1F1712, dark: 0x1F1712)
     static let foreground = NSColor.labelColor

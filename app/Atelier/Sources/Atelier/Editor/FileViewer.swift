@@ -51,12 +51,14 @@ struct FileViewer: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isContinuousSpellCheckingEnabled = false
         textView.backgroundColor = AppKitThemeAdapter.code
+        textView.insertionPointColor = AppKitThemeAdapter.accent
+        textView.textContainer.lineFragmentPadding = AtelierMetrics.spaceM
         textView.isHorizontallyResizable = true
         textView.isVerticallyResizable = true
         textView.showsLineNumbers = true
         if let gutterView = textView.gutterView {
             gutterView.drawSeparator = true
-            gutterView.minimumThickness = 46
+            gutterView.minimumThickness = AtelierMetrics.codeGutterWidth
             gutterView.frame.size.width = max(gutterView.frame.width, gutterView.minimumThickness)
             gutterView.textColor = AppKitThemeAdapter.secondary
             gutterView.separatorColor = AppKitThemeAdapter.border
@@ -68,6 +70,12 @@ struct FileViewer: NSViewRepresentable {
         scrollView.drawsBackground = true
         scrollView.backgroundColor = AppKitThemeAdapter.code
         scrollView.scrollerStyle = .overlay
+        scrollView.contentInsets = NSEdgeInsets(
+            top: AtelierMetrics.spaceM,
+            left: 0,
+            bottom: AtelierMetrics.spaceM,
+            right: 0
+        )
         scrollView.clipsToBounds = true
         scrollView.contentView.clipsToBounds = true
         context.coordinator.attach(scrollView)

@@ -25,8 +25,8 @@ struct BranchControl: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .padding(.horizontal, 6)
-                .frame(height: 26)
+                .padding(.horizontal, AtelierMetrics.spaceS)
+                .frame(height: AtelierMetrics.controlHeight)
                 .frame(maxWidth: 170, alignment: .leading)
         }
         .menuStyle(.borderlessButton)

@@ -11,9 +11,10 @@ struct ImageViewer: View {
                 .resizable()
                 .interpolation(.high)
                 .scaledToFit()
-                .padding(24)
+                .shadow(color: AtelierTheme.shadowSoft, radius: AtelierMetrics.spaceS)
+                .padding(AtelierMetrics.space2XL)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(AtelierTheme.editor)
+                .background(AtelierTheme.canvas)
                 .accessibilityLabel(name)
         } else {
             ContentUnavailableView(
