@@ -229,8 +229,15 @@ final class TerminalTabsModel {
         selectedID = tab.id
     }
 
+    fileprivate func canClose(_ tab: CenterTab) -> Bool {
+        // The last terminal must always stay open.
+        if case .terminal = tab.content, terminalCount == 1 { return false }
+        return true
+    }
+
     fileprivate func close(_ tab: CenterTab) {
-        guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        guard canClose(tab),
+              let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         switch tab.content {
         case .terminal(let session):
             session.close()
@@ -331,7 +338,7 @@ struct TerminalTabs: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
                         ForEach(model.visibleTabs) { tab in
-                            ZStack(alignment: .trailing) {
+                            ZStack(alignment: .leading) {
                                 Button {
                                     withAnimation(
                                         reduceMotion
@@ -348,8 +355,8 @@ struct TerminalTabs: View {
                                             .atelierFont(size: 11.5, weight: .medium)
                                             .lineLimit(1)
                                     }
-                                    .padding(.leading, 12)
-                                    .padding(.trailing, 34)
+                                    .padding(.leading, model.canClose(tab) ? 34 : 12)
+                                    .padding(.trailing, 12)
                                     .frame(height: AtelierMetrics.tabBarHeight)
                                     .contentShape(Rectangle())
                                 }
@@ -358,22 +365,24 @@ struct TerminalTabs: View {
                                     model.selectedID == tab.id ? "Selected" : "Not selected"
                                 )
 
-                                Button {
-                                    model.close(tab)
-                                } label: {
-                                    Image(systemName: "xmark")
-                                        .atelierFont(size: 8, weight: .medium)
-                                        .frame(width: 28, height: AtelierMetrics.tabBarHeight)
-                                        .contentShape(Rectangle())
+                                if model.canClose(tab) {
+                                    Button {
+                                        model.close(tab)
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .atelierFont(size: 8, weight: .medium)
+                                            .frame(width: 28, height: AtelierMetrics.tabBarHeight)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .opacity(
+                                        model.selectedID == tab.id || hoveredTabID == tab.id
+                                            ? 1
+                                            : 0
+                                    )
+                                    .accessibilityLabel(tab.closeHelp)
+                                    .help(tab.closeHelp)
                                 }
-                                .buttonStyle(.borderless)
-                                .opacity(
-                                    model.selectedID == tab.id || hoveredTabID == tab.id
-                                        ? 1
-                                        : 0
-                                )
-                                .accessibilityLabel(tab.closeHelp)
-                                .help(tab.closeHelp)
                             }
                             .foregroundStyle(
                                 model.selectedID == tab.id ? Color.primary : Color.secondary
