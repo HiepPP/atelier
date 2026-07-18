@@ -57,8 +57,23 @@ final class WindowController {
         Task { @MainActor [weak workspaceWindow, weak responder] in
             await Task.yield()
             guard let workspaceWindow, let responder else { return }
+            guard Self.responder(responder, belongsTo: workspaceWindow) else { return }
             workspaceWindow.makeFirstResponder(responder)
         }
+    }
+
+    private static func responder(_ responder: NSResponder, belongsTo window: NSWindow) -> Bool {
+        var current: NSResponder? = responder
+        var visited: Set<ObjectIdentifier> = []
+
+        while let candidate = current {
+            let identifier = ObjectIdentifier(candidate)
+            guard visited.insert(identifier).inserted else { return false }
+            if candidate === window { return true }
+            if let view = candidate as? NSView, view.window === window { return true }
+            current = candidate.nextResponder
+        }
+        return false
     }
 
     private func configure(_ window: NSWindow) {

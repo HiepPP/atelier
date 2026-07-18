@@ -5,7 +5,8 @@ struct FileTreeView: View {
     let revision: Int
     let onTargetDirectoryChange: (URL) -> Void
     let onCreateItem: (FileTreeCreationKind, URL) -> Void
-    let onSelect: (URL) -> Void
+    let onPreview: (URL) -> Void
+    let onOpen: (URL) -> Void
 
     var body: some View {
         FileTreeRepresentable(
@@ -13,7 +14,8 @@ struct FileTreeView: View {
             revision: revision,
             onTargetDirectoryChange: onTargetDirectoryChange,
             onCreateItem: onCreateItem,
-            onSelect: onSelect
+            onPreview: onPreview,
+            onOpen: onOpen
         )
     }
 }

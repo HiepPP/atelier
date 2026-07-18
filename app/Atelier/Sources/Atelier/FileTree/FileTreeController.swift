@@ -6,7 +6,8 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     private var root: FileTreeNode
     private var onTargetDirectoryChange: (URL) -> Void
     private var onCreateItem: (FileTreeCreationKind, URL) -> Void
-    private var onSelect: (URL) -> Void
+    private var onPreview: (URL) -> Void
+    private var onOpen: (URL) -> Void
     private var scale: CGFloat = 1
     private var displayScale: CGFloat = 2
     private var revision = 0
@@ -18,12 +19,14 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         rootURL: URL,
         onTargetDirectoryChange: @escaping (URL) -> Void,
         onCreateItem: @escaping (FileTreeCreationKind, URL) -> Void,
-        onSelect: @escaping (URL) -> Void
+        onPreview: @escaping (URL) -> Void,
+        onOpen: @escaping (URL) -> Void
     ) {
         root = FileTreeNode(url: rootURL, isDirectory: true)
         self.onTargetDirectoryChange = onTargetDirectoryChange
         self.onCreateItem = onCreateItem
-        self.onSelect = onSelect
+        self.onPreview = onPreview
+        self.onOpen = onOpen
     }
 
     func makeView(scale: CGFloat, displayScale: CGFloat) -> NSScrollView {
@@ -46,7 +49,8 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         outlineView.dataSource = self
         outlineView.delegate = self
         outlineView.target = self
-        outlineView.action = #selector(handleSelection(_:))
+        outlineView.action = #selector(handlePreview(_:))
+        outlineView.doubleAction = #selector(handleOpen(_:))
         outlineView.menuProvider = { [weak self, weak outlineView] row in
             guard let self, let outlineView else { return nil }
             return self.contextMenu(for: row, in: outlineView)
@@ -74,11 +78,13 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         displayScale: CGFloat,
         onTargetDirectoryChange: @escaping (URL) -> Void,
         onCreateItem: @escaping (FileTreeCreationKind, URL) -> Void,
-        onSelect: @escaping (URL) -> Void
+        onPreview: @escaping (URL) -> Void,
+        onOpen: @escaping (URL) -> Void
     ) {
         self.onTargetDirectoryChange = onTargetDirectoryChange
         self.onCreateItem = onCreateItem
-        self.onSelect = onSelect
+        self.onPreview = onPreview
+        self.onOpen = onOpen
         if root.url != rootURL {
             cancelLoads()
             root = FileTreeNode(url: rootURL, isDirectory: true)
@@ -110,6 +116,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         outlineView?.dataSource = nil
         outlineView?.delegate = nil
         outlineView?.target = nil
+        outlineView?.doubleAction = nil
         outlineView = nil
     }
 
@@ -166,14 +173,21 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         onTargetDirectoryChange(target)
     }
 
-    @objc private func handleSelection(_ sender: NSOutlineView) {
+    @objc private func handlePreview(_ sender: NSOutlineView) {
         guard sender.selectedRow >= 0,
               let node = sender.item(atRow: sender.selectedRow) as? FileTreeNode else { return }
         if node.isDirectory {
             sender.isItemExpanded(node) ? sender.collapseItem(node) : sender.expandItem(node)
         } else {
-            onSelect(node.url)
+            onPreview(node.url)
         }
+    }
+
+    @objc private func handleOpen(_ sender: NSOutlineView) {
+        guard sender.clickedRow >= 0,
+              let node = sender.item(atRow: sender.clickedRow) as? FileTreeNode,
+              !node.isDirectory else { return }
+        onOpen(node.url)
     }
 
     @objc private func createFileFromMenu(_ sender: NSMenuItem) {

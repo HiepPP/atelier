@@ -9,14 +9,16 @@ struct FileTreeRepresentable: NSViewRepresentable {
     let revision: Int
     let onTargetDirectoryChange: (URL) -> Void
     let onCreateItem: (FileTreeCreationKind, URL) -> Void
-    let onSelect: (URL) -> Void
+    let onPreview: (URL) -> Void
+    let onOpen: (URL) -> Void
 
     func makeCoordinator() -> FileTreeController {
         FileTreeController(
             rootURL: rootURL,
             onTargetDirectoryChange: onTargetDirectoryChange,
             onCreateItem: onCreateItem,
-            onSelect: onSelect
+            onPreview: onPreview,
+            onOpen: onOpen
         )
     }
 
@@ -32,7 +34,8 @@ struct FileTreeRepresentable: NSViewRepresentable {
             displayScale: displayScale,
             onTargetDirectoryChange: onTargetDirectoryChange,
             onCreateItem: onCreateItem,
-            onSelect: onSelect
+            onPreview: onPreview,
+            onOpen: onOpen
         )
     }
 

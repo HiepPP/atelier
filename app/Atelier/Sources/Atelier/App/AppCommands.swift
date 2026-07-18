@@ -23,6 +23,26 @@ struct AppCommands: Commands {
         }
 
         CommandGroup(after: .toolbar) {
+            Button(title(.navigateBack)) {
+                perform(.navigateBack)
+            }
+            .keyboardShortcut("-", modifiers: .control)
+            .disabled(!isEnabled(.navigateBack))
+
+            Button(title(.navigateForward)) {
+                perform(.navigateForward)
+            }
+            .keyboardShortcut("-", modifiers: [.control, .shift])
+            .disabled(!isEnabled(.navigateForward))
+
+            Button(title(.reopenClosedTab)) {
+                perform(.reopenClosedTab)
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+            .disabled(!isEnabled(.reopenClosedTab))
+
+            Divider()
+
             Button(title(.zoomIn)) {
                 perform(.zoomIn)
             }

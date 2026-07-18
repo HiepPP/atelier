@@ -38,6 +38,81 @@ nonisolated enum WorkspaceLayoutPolicy {
 
 }
 
+nonisolated struct WorkspacePanelPresentation: Equatable, Sendable {
+    var showsSidebar: Bool
+    var showsInspector: Bool
+    var restoresSidebarAfterInspector: Bool
+
+    static func initial(for layout: WorkspaceLayoutMode) -> WorkspacePanelPresentation {
+        WorkspacePanelPresentation(
+            showsSidebar: layout.docksSidebar,
+            showsInspector: layout.showsInspectorByDefault,
+            restoresSidebarAfterInspector: layout.docksSidebar
+        )
+    }
+
+    func adapting(
+        from oldLayout: WorkspaceLayoutMode,
+        to newLayout: WorkspaceLayoutMode
+    ) -> WorkspacePanelPresentation {
+        if newLayout == .compact {
+            return .initial(for: .compact)
+        }
+        if oldLayout == .compact {
+            return .initial(for: newLayout)
+        }
+        if newLayout == .wide {
+            return .initial(for: .wide)
+        }
+        if showsInspector {
+            return WorkspacePanelPresentation(
+                showsSidebar: false,
+                showsInspector: true,
+                restoresSidebarAfterInspector: showsSidebar
+            )
+        }
+        return WorkspacePanelPresentation(
+            showsSidebar: true,
+            showsInspector: false,
+            restoresSidebarAfterInspector: true
+        )
+    }
+
+    func togglingSidebar(layout: WorkspaceLayoutMode) -> WorkspacePanelPresentation {
+        guard layout.docksSidebar else { return self }
+        if showsSidebar {
+            return WorkspacePanelPresentation(
+                showsSidebar: false,
+                showsInspector: showsInspector,
+                restoresSidebarAfterInspector: restoresSidebarAfterInspector
+            )
+        }
+        return WorkspacePanelPresentation(
+            showsSidebar: true,
+            showsInspector: layout.keepsSidebarWithInspector ? showsInspector : false,
+            restoresSidebarAfterInspector: true
+        )
+    }
+
+    func togglingInspector(layout: WorkspaceLayoutMode) -> WorkspacePanelPresentation {
+        guard layout.supportsInspector else { return self }
+        if showsInspector {
+            return WorkspacePanelPresentation(
+                showsSidebar: layout.keepsSidebarWithInspector
+                    ? showsSidebar
+                    : restoresSidebarAfterInspector,
+                showsInspector: false,
+                restoresSidebarAfterInspector: restoresSidebarAfterInspector
+            )
+        }
+        return WorkspacePanelPresentation(
+            showsSidebar: layout.keepsSidebarWithInspector ? showsSidebar : false,
+            showsInspector: true,
+            restoresSidebarAfterInspector: showsSidebar
+        )
+    }
+}
+
 struct ContentView: View {
     @Environment(AppModel.self) private var app
     @State private var commandPaletteModel = AtelierPaletteModel()
@@ -243,11 +318,8 @@ struct WorkspaceView: View {
     @State private var fileTreeTargetDirectory: URL?
     @State private var responderBeforeAgentPreview: NSResponder?
     @State private var selectedSidebarTab = WorkspaceSidebarTab.explorer
-    @State private var columnVisibility = NavigationSplitViewVisibility.all
-    @State private var columnVisibilityBeforeFocus = NavigationSplitViewVisibility.all
-    @State private var columnVisibilityBeforeInspector = NavigationSplitViewVisibility.all
-    @State private var isInspectorPresented = false
-    @State private var inspectorWasPresentedBeforeFocus = false
+    @State private var panels = WorkspacePanelPresentation.initial(for: .standard)
+    @State private var panelsBeforeFocus = WorkspacePanelPresentation.initial(for: .standard)
     @State private var responderBeforeInspector: NSResponder?
     @State private var hasAppliedInitialLayout = false
     @State private var currentLayoutMode = WorkspaceLayoutMode.standard
@@ -275,12 +347,6 @@ struct WorkspaceView: View {
             .onChange(of: zoom.isFocusMode) { _, isFocused in
                 updateFocusMode(isFocused)
             }
-            .onChange(of: columnVisibility) { _, visibility in
-                guard isInspectorPresented,
-                      !currentLayoutMode.keepsSidebarWithInspector,
-                      visibility != .detailOnly else { return }
-                isInspectorPresented = false
-            }
         }
     }
 
@@ -297,34 +363,45 @@ struct WorkspaceView: View {
     }
 
     private var workspaceSurface: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            workspaceSidebar
-                .navigationSplitViewColumnWidth(
-                    min: AtelierMetrics.workspaceSidebarMinWidth,
-                    ideal: AtelierMetrics.workspaceSidebarIdealWidth,
-                    max: AtelierMetrics.workspaceSidebarMaxWidth
-                )
-        } detail: {
-            TerminalTabs(
-                model: terminalTabs,
-                agentResponses: session.agentResponses,
-                isAgentSidecarPresented: session.isAgentSidecarPresented,
-                onOpenAgentSidecar: openAgentSidecar,
-                onCloseAgentSidecar: closeAgentSidecar
-            )
-            .frame(minWidth: AtelierMetrics.centerMinWidth)
-            .layoutPriority(2)
+        HSplitView {
+            if panels.showsSidebar, !zoom.isFocusMode {
+                workspaceSidebar
+                    .frame(
+                        minWidth: AtelierMetrics.workspaceSidebarMinWidth,
+                        idealWidth: AtelierMetrics.workspaceSidebarIdealWidth,
+                        maxWidth: AtelierMetrics.workspaceSidebarMaxWidth
+                    )
+            }
+
+            workspaceDetail
+
+            if panels.showsInspector, !zoom.isFocusMode {
+                WorkspaceInspectorView(context: terminalTabs.selectedInspectorContext)
+                    .frame(
+                        minWidth: AtelierMetrics.inspectorMinWidth,
+                        idealWidth: AtelierMetrics.inspectorIdealWidth,
+                        maxWidth: AtelierMetrics.inspectorMaxWidth
+                    )
+                    .layoutPriority(1)
+            }
         }
-        .navigationSplitViewStyle(.balanced)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .inspector(isPresented: $isInspectorPresented) {
-            WorkspaceInspectorView(context: terminalTabs.selectedInspectorContext)
-                .inspectorColumnWidth(
-                    min: AtelierMetrics.inspectorMinWidth,
-                    ideal: AtelierMetrics.inspectorIdealWidth,
-                    max: AtelierMetrics.inspectorMaxWidth
-                )
-        }
+        .atelierSplitViewChrome()
+    }
+
+    private var workspaceDetail: some View {
+        TerminalTabs(
+            model: terminalTabs,
+            agentResponses: session.agentResponses,
+            isAgentSidecarPresented: session.isAgentSidecarPresented,
+            onOpenAgentSidecar: openAgentSidecar,
+            onCloseAgentSidecar: closeAgentSidecar
+        )
+        .frame(
+            minWidth: AtelierMetrics.centerMinWidth,
+            idealWidth: AtelierMetrics.centerIdealWidth
+        )
+        .layoutPriority(2)
     }
 
     private func openAgentSidecar() {
@@ -346,6 +423,17 @@ struct WorkspaceView: View {
 
     @ToolbarContentBuilder
     private var workspaceToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Button {
+                panels = panels.togglingSidebar(layout: currentLayoutMode)
+            } label: {
+                Image(systemName: "sidebar.leading")
+            }
+            .accessibilityLabel(panels.showsSidebar ? "Hide Sidebar" : "Show Sidebar")
+            .help(panels.showsSidebar ? "Hide Sidebar" : "Show Sidebar")
+            .disabled(zoom.isFocusMode || !currentLayoutMode.docksSidebar)
+        }
+
         ToolbarItem(placement: .principal) {
             Menu {
                 Button("Open Folder...", systemImage: "folder") {
@@ -404,8 +492,8 @@ struct WorkspaceView: View {
             } label: {
                 Image(systemName: "sidebar.trailing")
             }
-            .accessibilityLabel(isInspectorPresented ? "Hide inspector" : "Show inspector")
-            .help(isInspectorPresented ? "Hide Inspector" : "Show Inspector")
+            .accessibilityLabel(panels.showsInspector ? "Hide inspector" : "Show inspector")
+            .help(panels.showsInspector ? "Hide Inspector" : "Show Inspector")
             .disabled(zoom.isFocusMode || !currentLayoutMode.supportsInspector)
         }
     }
@@ -414,8 +502,7 @@ struct WorkspaceView: View {
         guard !hasAppliedInitialLayout else { return }
         hasAppliedInitialLayout = true
         currentLayoutMode = layout
-        columnVisibility = layout.docksSidebar ? .all : .detailOnly
-        isInspectorPresented = layout.showsInspectorByDefault
+        panels = .initial(for: layout)
     }
 
     private func adaptPanels(
@@ -424,69 +511,24 @@ struct WorkspaceView: View {
     ) {
         currentLayoutMode = newLayout
         guard !zoom.isFocusMode else { return }
-        if newLayout == .compact {
-            columnVisibility = .detailOnly
-            isInspectorPresented = false
-        } else if oldLayout == .compact {
-            columnVisibility = .all
-            isInspectorPresented = newLayout.showsInspectorByDefault
-        } else if newLayout == .wide {
-            columnVisibility = .all
-            isInspectorPresented = true
-        } else if isInspectorPresented {
-            columnVisibilityBeforeInspector = columnVisibility
-            columnVisibility = .detailOnly
-        }
+        panels = panels.adapting(from: oldLayout, to: newLayout)
     }
 
     private func updateFocusMode(_ isFocused: Bool) {
         if isFocused {
-            columnVisibilityBeforeFocus = columnVisibility
-            inspectorWasPresentedBeforeFocus = isInspectorPresented
-            columnVisibility = .detailOnly
-            isInspectorPresented = false
+            panelsBeforeFocus = panels
+            panels = .initial(for: .compact)
         } else {
-            columnVisibility = columnVisibilityBeforeFocus
-            isInspectorPresented = inspectorWasPresentedBeforeFocus
+            panels = panelsBeforeFocus
         }
     }
 
     private func toggleInspector() {
         guard currentLayoutMode.supportsInspector else { return }
         responderBeforeInspector = app.windowController.currentFirstResponder()
-        if isInspectorPresented {
-            isInspectorPresented = false
-            restorePanelsAfterInspectorCloses()
-        } else {
-            columnVisibilityBeforeInspector = columnVisibility
-            if !currentLayoutMode.keepsSidebarWithInspector {
-                columnVisibility = .detailOnly
-                presentInspectorAfterSidebarCloses()
-                return
-            }
-            isInspectorPresented = true
-            restoreInspectorResponder()
-        }
-    }
-
-    private func presentInspectorAfterSidebarCloses() {
+        panels = panels.togglingInspector(layout: currentLayoutMode)
         Task { @MainActor in
             await Task.yield()
-            guard currentLayoutMode.supportsInspector, !zoom.isFocusMode else {
-                restoreInspectorResponder()
-                return
-            }
-            isInspectorPresented = true
-            restoreInspectorResponder()
-        }
-    }
-
-    private func restorePanelsAfterInspectorCloses() {
-        Task { @MainActor in
-            await Task.yield()
-            if currentLayoutMode != .compact {
-                columnVisibility = columnVisibilityBeforeInspector
-            }
             restoreInspectorResponder()
         }
     }
@@ -631,7 +673,8 @@ struct WorkspaceView: View {
                         parentURL: parentURL
                     )
                 },
-                onSelect: terminalTabs.openFile
+                onPreview: terminalTabs.previewFile,
+                onOpen: terminalTabs.openFile
             )
             .environment(\.atelierZoomScale, zoom.sidebarScale)
         }

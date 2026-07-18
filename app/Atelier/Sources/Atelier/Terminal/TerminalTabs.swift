@@ -7,6 +7,11 @@ nonisolated enum AgentSidecarPresentation: Equatable, Sendable {
     case overlay
 }
 
+nonisolated enum FileTabDisposition: Equatable, Sendable {
+    case preview
+    case permanent
+}
+
 nonisolated enum TerminalTabInspectorKind: String, Equatable, Sendable {
     case terminal = "Terminal"
     case file = "File"
@@ -75,12 +80,21 @@ private final class CenterTab: Identifiable {
     let id: UUID
     let content: CenterTabContent
     let customTitle: String?
+    let fileDisposition: FileTabDisposition?
 
-    init(id: UUID = UUID(), content: CenterTabContent, customTitle: String? = nil) {
+    init(
+        id: UUID = UUID(),
+        content: CenterTabContent,
+        customTitle: String? = nil,
+        fileDisposition: FileTabDisposition? = nil
+    ) {
         self.id = id
         self.content = content
         self.customTitle = customTitle
+        self.fileDisposition = fileDisposition
     }
+
+    var isPreview: Bool { fileDisposition == .preview }
 
     var title: String {
         if let customTitle { return customTitle }
@@ -127,6 +141,7 @@ private final class CenterTab: Identifiable {
 final class TerminalTabsModel {
     private var tabs: [CenterTab] = []
     private var recentFiles = RecentFileHistory()
+    private var fileNavigationHistory = FileNavigationHistory()
     var selectedID: UUID?
 
     fileprivate let workspacePath: String
@@ -171,6 +186,27 @@ final class TerminalTabsModel {
         }
     }
 
+    var previewFileTabCount: Int {
+        tabs.count(where: \.isPreview)
+    }
+
+    var previewFileURL: URL? {
+        tabs.first(where: \.isPreview).flatMap { tab in
+            guard case .file(let file) = tab.content else { return nil }
+            return file.document.url
+        }
+    }
+
+    var selectedFileURL: URL? {
+        guard let selectedTab,
+              case .file(let file) = selectedTab.content else { return nil }
+        return file.document.url
+    }
+
+    var selectedFileDisposition: FileTabDisposition? {
+        selectedTab?.fileDisposition
+    }
+
     var gitDiffTabCount: Int {
         tabs.reduce(into: 0) { count, tab in
             if case .gitDiff = tab.content { count += 1 }
@@ -193,6 +229,10 @@ final class TerminalTabsModel {
         guard let selectedTab else { return false }
         return canClose(selectedTab)
     }
+
+    var canNavigateBack: Bool { fileNavigationHistory.canGoBack }
+    var canNavigateForward: Bool { fileNavigationHistory.canGoForward }
+    var canReopenClosedTab: Bool { fileNavigationHistory.canReopenClosed }
 
     var recentFileURLs: [URL] {
         recentFiles.urls
@@ -345,26 +385,104 @@ final class TerminalTabsModel {
         }
         tabs.removeAll(keepingCapacity: false)
         recentFiles.removeAll()
+        fileNavigationHistory.clear()
         selectedID = nil
     }
 
     func openFile(_ url: URL) {
-        let standardizedURL = url.standardizedFileURL
-        recentFiles.record(standardizedURL)
+        openFile(url, disposition: .permanent)
+    }
 
-        if let tab = tabs.first(where: { tab in
+    func previewFile(_ url: URL) {
+        openFile(url, disposition: .preview)
+    }
+
+    func promotePreview(for url: URL) {
+        let standardizedURL = url.standardizedFileURL
+        guard let index = tabs.firstIndex(where: { tab in
+            guard tab.isPreview,
+                  case .file(let file) = tab.content else { return false }
+            return file.document.url == standardizedURL
+        }) else { return }
+        promotePreview(at: index)
+    }
+
+    func navigateBack() {
+        guard let target = fileNavigationHistory.goBack() else { return }
+        openFile(target.url, disposition: target.disposition, recordsNavigation: false)
+    }
+
+    func navigateForward() {
+        guard let target = fileNavigationHistory.goForward() else { return }
+        openFile(target.url, disposition: target.disposition, recordsNavigation: false)
+    }
+
+    func reopenClosedTab() {
+        guard let target = fileNavigationHistory.reopenClosed() else { return }
+        openFile(target.url, disposition: .permanent, recordsNavigation: false)
+    }
+
+    private func openFile(
+        _ url: URL,
+        disposition: FileTabDisposition,
+        recordsNavigation: Bool = true
+    ) {
+        let standardizedURL = url.standardizedFileURL
+
+        if let index = tabs.firstIndex(where: { tab in
             guard case .file(let file) = tab.content else { return false }
             return file.document.url == standardizedURL
         }) {
+            let tab = tabs[index]
             guard case .file(let file) = tab.content else { return }
+            if disposition == .permanent {
+                if tab.isPreview {
+                    promotePreview(at: index)
+                } else {
+                    recentFiles.record(standardizedURL)
+                }
+            }
             file.reload()
             selectedID = tab.id
+            if recordsNavigation,
+               let target = navigationTarget(for: tabs[index]) {
+                fileNavigationHistory.record(target)
+            }
             return
         }
 
-        let tab = CenterTab(content: .file(EditorSession(url: standardizedURL)))
+        if disposition == .preview,
+           let previewIndex = tabs.firstIndex(where: \.isPreview) {
+            removeTab(at: previewIndex, recordsClosedFile: false)
+        }
+
+        let tab = CenterTab(
+            content: .file(EditorSession(url: standardizedURL)),
+            fileDisposition: disposition
+        )
         tabs.append(tab)
         selectedID = tab.id
+        if disposition == .permanent {
+            recentFiles.record(standardizedURL)
+        }
+        if recordsNavigation,
+           let target = navigationTarget(for: tab) {
+            fileNavigationHistory.record(target)
+        }
+    }
+
+    private func promotePreview(at index: Int) {
+        let tab = tabs[index]
+        guard tab.isPreview,
+              case .file(let file) = tab.content else { return }
+        tabs[index] = CenterTab(
+            id: tab.id,
+            content: tab.content,
+            customTitle: tab.customTitle,
+            fileDisposition: .permanent
+        )
+        recentFiles.record(file.document.url)
+        fileNavigationHistory.promote(file.document.url)
     }
 
     func openGitDiff(_ selection: DiffSelection) {
@@ -411,6 +529,9 @@ final class TerminalTabsModel {
 
     fileprivate func select(_ tab: CenterTab) {
         selectedID = tab.id
+        if let target = navigationTarget(for: tab) {
+            fileNavigationHistory.record(target)
+        }
     }
 
     fileprivate func canClose(_ tab: CenterTab) -> Bool {
@@ -422,6 +543,15 @@ final class TerminalTabsModel {
     fileprivate func close(_ tab: CenterTab) {
         guard canClose(tab),
               let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        removeTab(at: index, recordsClosedFile: true)
+    }
+
+    private func removeTab(at index: Int, recordsClosedFile: Bool) {
+        let tab = tabs[index]
+        if recordsClosedFile,
+           let target = navigationTarget(for: tab) {
+            fileNavigationHistory.recordClosed(target)
+        }
         switch tab.content {
         case .terminal(let session):
             session.close()
@@ -437,7 +567,18 @@ final class TerminalTabsModel {
             selectedID = tabs.indices.contains(index)
                 ? tabs[index].id
                 : tabs.last?.id
+            if recordsClosedFile,
+               let selectedTab,
+               let target = navigationTarget(for: selectedTab) {
+                fileNavigationHistory.record(target)
+            }
         }
+    }
+
+    private func navigationTarget(for tab: CenterTab) -> FileNavigationTarget? {
+        guard case .file(let file) = tab.content,
+              let disposition = tab.fileDisposition else { return nil }
+        return FileNavigationTarget(url: file.document.url, disposition: disposition)
     }
 
     fileprivate func renameTab(id: UUID, to title: String) {
@@ -445,7 +586,12 @@ final class TerminalTabsModel {
         guard !title.isEmpty,
               let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let tab = tabs[index]
-        tabs[index] = CenterTab(id: tab.id, content: tab.content, customTitle: title)
+        tabs[index] = CenterTab(
+            id: tab.id,
+            content: tab.content,
+            customTitle: title,
+            fileDisposition: tab.fileDisposition
+        )
     }
 
     fileprivate func moveTab(id: UUID, over destinationID: UUID) {
@@ -539,6 +685,29 @@ struct TerminalTabs: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
+                Button {
+                    model.navigateBack()
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .buttonStyle(AtelierLuminareIconButtonStyle())
+                .disabled(!model.canNavigateBack)
+                .accessibilityLabel("Back")
+                .accessibilityValue(model.canNavigateBack ? "Available" : "Unavailable")
+                .help("Back")
+                .padding(.leading, AtelierMetrics.spaceXS)
+
+                Button {
+                    model.navigateForward()
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .buttonStyle(AtelierLuminareIconButtonStyle())
+                .disabled(!model.canNavigateForward)
+                .accessibilityLabel("Forward")
+                .accessibilityValue(model.canNavigateForward ? "Available" : "Unavailable")
+                .help("Forward")
+
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
                         ForEach(model.visibleTabs) { tab in
@@ -558,8 +727,9 @@ struct TerminalTabs: View {
                                         Text(tab.title)
                                             .atelierFont(
                                                 size: AtelierTypography.label,
-                                                weight: .medium
+                                                weight: tab.isPreview ? .regular : .medium
                                             )
+                                            .opacity(tab.isPreview ? 0.72 : 1)
                                             .lineLimit(1)
                                     }
                                     .padding(
@@ -579,7 +749,7 @@ struct TerminalTabs: View {
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityValue(
-                                    model.selectedID == tab.id ? "Selected" : "Not selected"
+                                    tabAccessibilityValue(tab)
                                 )
 
                                 if model.canClose(tab) {
@@ -745,7 +915,9 @@ struct TerminalTabs: View {
                         onClose: onCloseAgentSidecar
                     )
                 case .file(let file):
-                    FileTabView(file: file)
+                    FileTabView(file: file) {
+                        model.promotePreview(for: file.document.url)
+                    }
                         .id(tab.id)
                         .background(AtelierTheme.editor)
                         .environment(\.atelierZoomScale, zoom.contentScale)
@@ -825,6 +997,11 @@ struct TerminalTabs: View {
             return AtelierTheme.controlFill(for: .hovered)
         }
         return AtelierTheme.tabInactive
+    }
+
+    private func tabAccessibilityValue(_ tab: CenterTab) -> String {
+        let selection = model.selectedID == tab.id ? "Selected" : "Not selected"
+        return tab.isPreview ? "\(selection), Preview" : selection
     }
 
     private func beginRename(_ id: UUID) {
@@ -950,6 +1127,7 @@ private struct TabCloseButton: View {
 
 private struct FileTabView: View {
     let file: EditorSession
+    let onEdit: () -> Void
 
     @ViewBuilder
     var body: some View {
@@ -959,7 +1137,8 @@ private struct FileTabView: View {
             FileViewer(
                 content: file.content,
                 fileURL: file.document.url,
-                isWordWrapEnabled: file.isWordWrapEnabled
+                isWordWrapEnabled: file.isWordWrapEnabled,
+                onEdit: onEdit
             )
         }
     }

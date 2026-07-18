@@ -20,17 +20,20 @@ struct FileViewer: NSViewRepresentable {
     let fileURL: URL?
     let language: HighlightLanguage?
     let isWordWrapEnabled: Bool
+    let onEdit: () -> Void
 
     init(
         content: FileContent,
         fileURL: URL? = nil,
         language: HighlightLanguage? = nil,
-        isWordWrapEnabled: Bool = true
+        isWordWrapEnabled: Bool = true,
+        onEdit: @escaping () -> Void = {}
     ) {
         self.content = content
         self.fileURL = fileURL
         self.language = language ?? fileURL.flatMap(FileViewerLanguage.language(for:))
         self.isWordWrapEnabled = isWordWrapEnabled
+        self.onEdit = onEdit
     }
 
     func makeCoordinator() -> NativeEditorController {
@@ -98,7 +101,8 @@ struct FileViewer: NSViewRepresentable {
             scale: scale,
             displayScale: displayScale,
             usesDarkAppearance: usesDarkAppearance,
-            isWordWrapEnabled: isWordWrapEnabled
+            isWordWrapEnabled: isWordWrapEnabled,
+            onEdit: onEdit
         )
     }
 
@@ -138,6 +142,7 @@ struct FileViewer: NSViewRepresentable {
         private var saveGeneration = 0
         private var saveTask: Task<Void, Never>?
         private var isApplyingText = false
+        private var onEdit: () -> Void = {}
         private(set) var document: EditorDocument?
 
         func attach(_ scrollView: NSScrollView) {
@@ -155,7 +160,8 @@ struct FileViewer: NSViewRepresentable {
             scale: CGFloat,
             displayScale: CGFloat,
             usesDarkAppearance: Bool,
-            isWordWrapEnabled: Bool
+            isWordWrapEnabled: Bool,
+            onEdit: @escaping () -> Void
         ) {
             let contentChanged = renderedContent != content
                 || renderedLanguage != language?.rawValue
@@ -173,6 +179,7 @@ struct FileViewer: NSViewRepresentable {
             renderedDisplayScale = displayScale
             self.usesDarkAppearance = usesDarkAppearance
             renderedWordWrapEnabled = isWordWrapEnabled
+            self.onEdit = onEdit
             textView?.isEditable = fileURL != nil && content.isEditableText
             textView?.allowsUndo = textView?.isEditable == true
 
@@ -201,6 +208,7 @@ struct FileViewer: NSViewRepresentable {
             textView = nil
             scrollView = nil
             document = nil
+            onEdit = {}
         }
 
         func open(_ document: EditorDocument) {
@@ -233,6 +241,7 @@ struct FileViewer: NSViewRepresentable {
                   let textView = notification.object as? STTextView,
                   let fileURL else { return }
             let text = textView.text ?? ""
+            onEdit()
             scheduleSave(text: text, url: fileURL)
             scheduleHighlight(text: text, language: language, delayed: true)
         }

@@ -5,6 +5,9 @@ nonisolated enum AtelierActionID: String, CaseIterable, Identifiable, Sendable {
     case closeWorkspace
     case newTerminal
     case closeTab
+    case navigateBack
+    case navigateForward
+    case reopenClosedTab
     case openGemma
     case zoomIn
     case zoomOut
@@ -25,6 +28,9 @@ nonisolated struct AtelierActionDescriptor: Identifiable, Equatable, Sendable {
 nonisolated struct AtelierActionContext: Equatable, Sendable {
     let hasWorkspace: Bool
     let canCloseTab: Bool
+    let canNavigateBack: Bool
+    let canNavigateForward: Bool
+    let canReopenClosedTab: Bool
     let canZoomIn: Bool
     let canZoomOut: Bool
     let isFocusMode: Bool
@@ -36,6 +42,9 @@ struct AtelierActionHandlers {
     let closeWorkspace: () -> Void
     let newTerminal: () -> Void
     let closeTab: () -> Void
+    let navigateBack: () -> Void
+    let navigateForward: () -> Void
+    let reopenClosedTab: () -> Void
     let openGemma: () -> Void
     let zoomIn: () -> Void
     let zoomOut: () -> Void
@@ -48,6 +57,9 @@ struct AtelierActionHandlers {
             closeWorkspace: model.closeWorkspace,
             newTerminal: { model.workspace?.terminalTabs.add() },
             closeTab: { model.workspace?.terminalTabs.closeSelectedTab() },
+            navigateBack: { model.workspace?.terminalTabs.navigateBack() },
+            navigateForward: { model.workspace?.terminalTabs.navigateForward() },
+            reopenClosedTab: { model.workspace?.terminalTabs.reopenClosedTab() },
             openGemma: { model.workspace?.openGemma() },
             zoomIn: {
                 model.windowController.maximizeWorkspaceWindow()
@@ -89,6 +101,27 @@ nonisolated enum AtelierActionRegistry {
             category: "Tabs",
             systemImage: "xmark",
             shortcutLabel: "Command-W"
+        ),
+        AtelierActionDescriptor(
+            id: .navigateBack,
+            title: "Back",
+            category: "Navigation",
+            systemImage: "chevron.left",
+            shortcutLabel: "Control--"
+        ),
+        AtelierActionDescriptor(
+            id: .navigateForward,
+            title: "Forward",
+            category: "Navigation",
+            systemImage: "chevron.right",
+            shortcutLabel: "Control-Shift--"
+        ),
+        AtelierActionDescriptor(
+            id: .reopenClosedTab,
+            title: "Reopen Closed Tab",
+            category: "Tabs",
+            systemImage: "arrow.uturn.backward",
+            shortcutLabel: "Command-Shift-T"
         ),
         AtelierActionDescriptor(
             id: .openGemma,
@@ -146,6 +179,12 @@ nonisolated enum AtelierActionRegistry {
             context.hasWorkspace
         case .closeTab:
             context.canCloseTab
+        case .navigateBack:
+            context.canNavigateBack
+        case .navigateForward:
+            context.canNavigateForward
+        case .reopenClosedTab:
+            context.canReopenClosedTab
         case .zoomIn:
             context.canZoomIn
         case .zoomOut:
@@ -158,6 +197,9 @@ nonisolated enum AtelierActionRegistry {
         AtelierActionContext(
             hasWorkspace: model.workspace != nil,
             canCloseTab: model.workspace?.terminalTabs.canCloseSelectedTab == true,
+            canNavigateBack: model.workspace?.terminalTabs.canNavigateBack == true,
+            canNavigateForward: model.workspace?.terminalTabs.canNavigateForward == true,
+            canReopenClosedTab: model.workspace?.terminalTabs.canReopenClosedTab == true,
             canZoomIn: model.zoom.canZoomIn,
             canZoomOut: model.zoom.canZoomOut,
             isFocusMode: model.zoom.isFocusMode
@@ -180,6 +222,12 @@ nonisolated enum AtelierActionRegistry {
             handlers.newTerminal()
         case .closeTab:
             handlers.closeTab()
+        case .navigateBack:
+            handlers.navigateBack()
+        case .navigateForward:
+            handlers.navigateForward()
+        case .reopenClosedTab:
+            handlers.reopenClosedTab()
         case .openGemma:
             handlers.openGemma()
         case .zoomIn:

@@ -18,6 +18,9 @@ struct AtelierPalettePresentationTests {
         #expect(model.commandResults.first?.descriptor.id == .openFolder)
         #expect(model.commandResults.first?.isEnabled == true)
         #expect(model.commandResults.first { $0.descriptor.id == .newTerminal }?.isEnabled == false)
+        #expect(model.commandResults.first { $0.descriptor.id == .navigateBack }?.isEnabled == false)
+        #expect(model.commandResults.first { $0.descriptor.id == .navigateForward }?.isEnabled == true)
+        #expect(model.commandResults.first { $0.descriptor.id == .reopenClosedTab }?.isEnabled == false)
         #expect(model.selection == .action(.openFolder))
     }
 
@@ -77,6 +80,9 @@ struct AtelierPalettePresentationTests {
         AtelierActionContext(
             hasWorkspace: hasWorkspace,
             canCloseTab: hasWorkspace,
+            canNavigateBack: false,
+            canNavigateForward: true,
+            canReopenClosedTab: false,
             canZoomIn: true,
             canZoomOut: true,
             isFocusMode: false

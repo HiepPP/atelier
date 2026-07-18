@@ -13,6 +13,9 @@ struct AtelierActionRegistryTests {
             .closeWorkspace,
             .newTerminal,
             .closeTab,
+            .navigateBack,
+            .navigateForward,
+            .reopenClosedTab,
             .openGemma,
             .zoomIn,
             .zoomOut,
@@ -27,6 +30,9 @@ struct AtelierActionRegistryTests {
         let empty = AtelierActionContext(
             hasWorkspace: false,
             canCloseTab: false,
+            canNavigateBack: false,
+            canNavigateForward: true,
+            canReopenClosedTab: false,
             canZoomIn: true,
             canZoomOut: false,
             isFocusMode: false
@@ -36,6 +42,9 @@ struct AtelierActionRegistryTests {
         #expect(!AtelierActionRegistry.isEnabled(.closeWorkspace, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.newTerminal, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.closeTab, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.navigateBack, context: empty))
+        #expect(AtelierActionRegistry.isEnabled(.navigateForward, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.reopenClosedTab, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.openGemma, context: empty))
         #expect(AtelierActionRegistry.isEnabled(.zoomIn, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.zoomOut, context: empty))
@@ -60,6 +69,9 @@ struct AtelierActionRegistryTests {
             closeWorkspace: { recorded.append(.closeWorkspace) },
             newTerminal: { recorded.append(.newTerminal) },
             closeTab: { recorded.append(.closeTab) },
+            navigateBack: { recorded.append(.navigateBack) },
+            navigateForward: { recorded.append(.navigateForward) },
+            reopenClosedTab: { recorded.append(.reopenClosedTab) },
             openGemma: { recorded.append(.openGemma) },
             zoomIn: { recorded.append(.zoomIn) },
             zoomOut: { recorded.append(.zoomOut) },
@@ -78,6 +90,9 @@ struct AtelierActionRegistryTests {
         AtelierActionContext(
             hasWorkspace: true,
             canCloseTab: true,
+            canNavigateBack: true,
+            canNavigateForward: true,
+            canReopenClosedTab: true,
             canZoomIn: true,
             canZoomOut: true,
             isFocusMode: isFocusMode

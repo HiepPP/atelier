@@ -90,4 +90,32 @@ struct DisplaySizingTests {
         #expect(AtelierTypography.terminalSize == 14)
         #expect(AtelierZoomModel.baseMinimumSize == CGSize(width: 760, height: 512))
     }
+
+    @Test("Workspace panel transitions stay atomic across layout modes")
+    func workspacePanelTransitions() {
+        let compact = WorkspacePanelPresentation.initial(for: .compact)
+        let standard = WorkspacePanelPresentation.initial(for: .standard)
+        let wide = WorkspacePanelPresentation.initial(for: .wide)
+
+        #expect(!compact.showsSidebar)
+        #expect(!compact.showsInspector)
+        #expect(standard.showsSidebar)
+        #expect(!standard.showsInspector)
+        #expect(wide.showsSidebar)
+        #expect(wide.showsInspector)
+
+        let standardInspector = standard.togglingInspector(layout: .standard)
+        #expect(!standardInspector.showsSidebar)
+        #expect(standardInspector.showsInspector)
+        #expect(standardInspector.togglingInspector(layout: .standard) == standard)
+        #expect(standardInspector.togglingSidebar(layout: .standard) == standard)
+
+        let standardFromWide = wide.adapting(from: .wide, to: .standard)
+        #expect(!standardFromWide.showsSidebar)
+        #expect(standardFromWide.showsInspector)
+        #expect(standardFromWide.togglingInspector(layout: .standard) == standard)
+
+        #expect(standard.adapting(from: .standard, to: .compact) == compact)
+        #expect(compact.adapting(from: .compact, to: .wide) == wide)
+    }
 }
