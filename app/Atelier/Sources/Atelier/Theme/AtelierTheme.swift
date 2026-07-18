@@ -30,9 +30,9 @@ enum AtelierTheme {
     static let gitUntracked = Color(nsColor: AppKitThemeAdapter.gitUntracked)
     static let selection = Color(nsColor: AppKitThemeAdapter.selection)
     static let danger = gitDeleted
-    static let panelRadius: CGFloat = 8
-    static let controlRadius: CGFloat = 6
-    static let rowRadius: CGFloat = 5
+    static let panelRadius: CGFloat = 12
+    static let controlRadius: CGFloat = 8
+    static let rowRadius: CGFloat = 6
     static let hoverFill = Color(nsColor: AppKitThemeAdapter.hover)
     static let pressedFill = Color(nsColor: AppKitThemeAdapter.pressed)
     static let accentHoverFill = accent.opacity(0.10)
@@ -42,8 +42,9 @@ enum AtelierTheme {
     static let strokeHairline: CGFloat = 0.5
     static let strokeControl: CGFloat = 0.75
     static let strokeFocus: CGFloat = 1.5
-    static let shadowSoft = Color.black.opacity(0.05)
-    static let shadowFloating = Color.black.opacity(0.16)
+    static let shadowSoft = Color(red: 0.18, green: 0.12, blue: 0.08).opacity(0.08)
+    static let shadowFloating = Color(red: 0.14, green: 0.09, blue: 0.06).opacity(0.22)
+    static let scrim = Color.black.opacity(0.12)
 
     static func controlFill(for state: AtelierInteractionState) -> Color {
         switch state {
@@ -85,33 +86,33 @@ enum AtelierMetrics {
     static let spaceL: CGFloat = 16
     static let spaceXL: CGFloat = 24
     static let space2XL: CGFloat = 32
-    static let commandBarHeight: CGFloat = 44
-    static let panelHeaderHeight: CGFloat = 44
+    static let commandBarHeight: CGFloat = 48
+    static let panelHeaderHeight: CGFloat = 50
     static let sectionHeaderHeight: CGFloat = 36
-    static let tabBarHeight: CGFloat = 40
-    static let statusBarHeight: CGFloat = 24
-    static let iconButtonSize: CGFloat = 28
+    static let tabBarHeight: CGFloat = 42
+    static let statusBarHeight: CGFloat = 26
+    static let iconButtonSize: CGFloat = 30
     static let smallIconSize: CGFloat = 8
     static let regularIconSize: CGFloat = 16
-    static let emptyStateIconSize: CGFloat = 30
+    static let emptyStateIconSize: CGFloat = 26
     static let compactControlHeight: CGFloat = 24
     static let controlHeight: CGFloat = 28
     static let fieldHeight: CGFloat = 32
     static let rowHeight: CGFloat = 28
     static let transcriptMaxWidth: CGFloat = 680
-    static let emptyStateMaxWidth: CGFloat = 420
+    static let emptyStateMaxWidth: CGFloat = 460
     static let projectMenuWidth: CGFloat = 280
     static let dialogWidth: CGFloat = 340
     static let settingsWidth: CGFloat = 460
     static let settingsMinHeight: CGFloat = 400
     static let codeGutterWidth: CGFloat = 48
     static let explorerMinWidth: CGFloat = 220
-    static let explorerIdealWidth: CGFloat = 300
+    static let explorerIdealWidth: CGFloat = 280
     static let explorerMaxWidth: CGFloat = 400
     static let centerMinWidth: CGFloat = 420
     static let centerIdealWidth: CGFloat = 660
     static let sourceControlMinWidth: CGFloat = 320
-    static let sourceControlIdealWidth: CGFloat = 420
+    static let sourceControlIdealWidth: CGFloat = 380
     static let sourceControlMaxWidth: CGFloat = 540
     static let tabMinWidth: CGFloat = 112
     static let tabIdealWidth: CGFloat = 152
@@ -128,7 +129,8 @@ enum AtelierTypography {
     static let body: CGFloat = 12.5
     static let uiSize: CGFloat = 13
     static let headline: CGFloat = 15
-    static let display: CGFloat = 20
+    static let title: CGFloat = 17
+    static let display: CGFloat = 24
     static let editorSize: CGFloat = 16
     static let terminalSize: CGFloat = 20
 

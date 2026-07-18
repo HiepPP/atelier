@@ -61,7 +61,7 @@ struct AtelierApp: App {
 @MainActor
 @Observable
 final class AtelierZoomModel {
-    static let baseMinimumSize = CGSize(width: 1_000, height: 600)
+    static let baseMinimumSize = CGSize(width: 760, height: 520)
 
     private(set) var scale: CGFloat = 1
     private(set) var isFocusMode = false

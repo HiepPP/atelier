@@ -54,7 +54,6 @@ struct AtelierLuminarePrimaryButtonStyle: PrimitiveButtonStyle {
         Button(action: configuration.trigger) {
             configuration.label
                 .atelierFont(size: AtelierTypography.label, weight: .semibold)
-                .foregroundStyle(AtelierTheme.accentInk)
                 .padding(.horizontal, AtelierMetrics.spaceM)
         }
         .buttonStyle(AtelierLuminarePrimaryButtonBodyStyle())
@@ -81,12 +80,11 @@ private struct AtelierLuminarePrimaryButtonBodyStyle: ButtonStyle {
                 pressed: AtelierTheme.accentInk.opacity(0.12)
             ))
             .background(
-                AtelierTheme.accent.opacity(
-                    AtelierTheme.controlOpacity(for: isEnabled ? .normal : .disabled)
-                )
+                isEnabled ? AtelierTheme.accent : AtelierTheme.raised
             )
             .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
-            .opacity(isEnabled ? 1 : 0.7)
+            .foregroundStyle(isEnabled ? AtelierTheme.accentInk : Color.secondary)
+            .opacity(1)
             .onHover { isHovering in
                 self.isHovering = isHovering
             }

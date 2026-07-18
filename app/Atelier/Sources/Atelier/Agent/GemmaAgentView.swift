@@ -101,7 +101,12 @@ struct GemmaAgentView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
             Text("Ask about this workspace")
-                .atelierFont(size: AtelierTypography.display, weight: .semibold)
+                .atelierFont(
+                    size: AtelierTypography.display,
+                    weight: .semibold,
+                    design: .serif
+                )
+                .tracking(-0.4)
             Text("Gemma can search files, read bounded line ranges, and inspect Git diffs. It cannot edit files or run commands.")
                 .atelierFont(size: AtelierTypography.body)
                 .foregroundStyle(.secondary)
@@ -113,8 +118,8 @@ struct GemmaAgentView: View {
 
     private func messageView(_ message: GemmaTranscriptMessage) -> some View {
         VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
-            Text(message.role == .user ? "YOU" : "GEMMA")
-                .atelierFont(size: AtelierTypography.micro, weight: .bold, design: .monospaced)
+            Text(message.role == .user ? "You" : "Gemma")
+                .atelierFont(size: AtelierTypography.caption, weight: .semibold)
                 .foregroundStyle(message.role == .user ? Color.secondary : AtelierTheme.accent)
             if message.content.isEmpty && model.isRunning {
                 Text("Thinking...")

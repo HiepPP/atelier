@@ -57,4 +57,21 @@ struct DisplaySizingTests {
         #expect(TerminalRenderingPolicy.usesFontSmoothing(displayScale: 1))
         #expect(TerminalRenderingPolicy.usesFontSmoothing(displayScale: 2))
     }
+
+    @Test("Workspace panes adapt around editor-first breakpoints")
+    func workspaceLayoutPolicy() {
+        #expect(WorkspaceLayoutPolicy.mode(containerWidth: 759) == .compact)
+        #expect(WorkspaceLayoutPolicy.mode(containerWidth: 899) == .compact)
+        #expect(WorkspaceLayoutPolicy.mode(containerWidth: 900) == .standard)
+        #expect(WorkspaceLayoutPolicy.mode(containerWidth: 1_279) == .standard)
+        #expect(WorkspaceLayoutPolicy.mode(containerWidth: 1_280) == .wide)
+
+        #expect(!WorkspaceLayoutMode.compact.docksExplorer)
+        #expect(WorkspaceLayoutMode.standard.docksExplorer)
+        #expect(!WorkspaceLayoutMode.standard.docksSourceControl)
+        #expect(WorkspaceLayoutMode.wide.docksSourceControl)
+
+        #expect(WorkspaceLayoutPolicy.overlayWidth(containerWidth: 760) == 350)
+        #expect(WorkspaceLayoutPolicy.overlayWidth(containerWidth: 1_000) == 380)
+    }
 }

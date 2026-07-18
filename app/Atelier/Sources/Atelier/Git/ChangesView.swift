@@ -142,6 +142,7 @@ final class GitWorkspaceModel {
 struct ChangesView: View {
     let model: GitWorkspaceModel
     let onOpenDiff: (DiffSelection) -> Void
+    var onClose: (() -> Void)? = nil
     @Environment(AtelierZoomModel.self) private var zoom
     @State private var commitMessage = ""
     @State private var discardCandidate: GitChange?
@@ -173,26 +174,40 @@ struct ChangesView: View {
             sourceControlHeader
                 .atelierGitErrorEffect(value: model.errorMessage)
             repositoryHeader
-            commitInput
-            commitButton
 
             if let message = model.errorMessage {
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .atelierFont(size: AtelierTypography.label)
-                    .foregroundStyle(AtelierTheme.danger)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(AtelierMetrics.spaceM)
-                    .environment(\.atelierZoomScale, zoom.sidebarScale)
-            }
-
-            if model.snapshot.status.changes.isEmpty {
+                VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .atelierFont(size: AtelierTypography.label)
+                        .foregroundStyle(AtelierTheme.danger)
+                    Button("Try Again") { model.refresh() }
+                        .buttonStyle(AtelierGhostButtonStyle(tint: AtelierTheme.danger))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(AtelierMetrics.spaceM)
+                .background(AtelierTheme.danger.opacity(0.06))
+                .environment(\.atelierZoomScale, zoom.sidebarScale)
+            } else if model.isLoading, model.snapshot.branch.isEmpty {
+                AtelierEmptyState(
+                    systemImage: "arrow.triangle.2.circlepath",
+                    title: "Checking repository",
+                    message: "Reading branch and working tree state."
+                ) {
+                    ProgressView().controlSize(.small)
+                }
+                .environment(\.atelierZoomScale, zoom.sidebarScale)
+            } else if model.snapshot.status.changes.isEmpty {
                 AtelierEmptyState(
                     systemImage: "checkmark.circle",
                     title: "Working tree clean",
-                    message: "No staged or unstaged changes."
+                    message: "No changes need review."
                 )
                 .environment(\.atelierZoomScale, zoom.sidebarScale)
             } else {
+                changeSummary
+                commitInput
+                commitButton
+
                 List {
                     changeSection("Staged Changes", changes: model.snapshot.status.staged, staged: true)
                     changeSection("Changes", changes: model.snapshot.status.unstaged, staged: false)
@@ -210,19 +225,30 @@ struct ChangesView: View {
 
     private var sourceControlHeader: some View {
         AtelierPanelHeader(title: "Source Control") {
-            Button {
-                model.refresh()
-            } label: {
-                if model.isLoading {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Image(systemName: "arrow.clockwise")
+            HStack(spacing: AtelierMetrics.spaceXS) {
+                Button {
+                    model.refresh()
+                } label: {
+                    if model.isLoading {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(AtelierLuminareIconButtonStyle())
+                .atelierRefreshCompletionEffect(isLoading: model.isLoading)
+                .accessibilityLabel("Refresh Git status")
+                .help("Refresh Git status")
+
+                if let onClose {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(AtelierLuminareIconButtonStyle())
+                    .accessibilityLabel("Close Source Control")
+                    .help("Close Source Control")
                 }
             }
-            .buttonStyle(AtelierLuminareIconButtonStyle())
-            .atelierRefreshCompletionEffect(isLoading: model.isLoading)
-            .accessibilityLabel("Refresh Git status")
-            .help("Refresh Git status")
         }
         .environment(\.atelierZoomScale, zoom.sidebarScale)
     }
@@ -248,16 +274,22 @@ struct ChangesView: View {
     }
 
     private var commitInput: some View {
-        TextField(commitPlaceholder, text: $commitMessage)
-            .textFieldStyle(.plain)
-            .atelierFont(size: AtelierTypography.uiSize)
-            .focused($isCommitFieldFocused)
-            .padding(.horizontal, AtelierMetrics.spaceS)
-            .frame(height: AtelierMetrics.fieldHeight)
-            .atelierField(isFocused: isCommitFieldFocused)
-            .padding(.horizontal, AtelierMetrics.spaceM)
-            .onSubmit(commit)
-            .environment(\.atelierZoomScale, zoom.sidebarScale)
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
+            Text("Commit message")
+                .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+                .foregroundStyle(.secondary)
+
+            TextField(commitPlaceholder, text: $commitMessage)
+                .textFieldStyle(.plain)
+                .atelierFont(size: AtelierTypography.uiSize)
+                .focused($isCommitFieldFocused)
+                .padding(.horizontal, AtelierMetrics.spaceS)
+                .frame(height: AtelierMetrics.fieldHeight)
+                .atelierField(isFocused: isCommitFieldFocused)
+                .onSubmit(commit)
+        }
+        .padding(.horizontal, AtelierMetrics.spaceM)
+        .environment(\.atelierZoomScale, zoom.sidebarScale)
     }
 
     private var commitButton: some View {
@@ -268,6 +300,36 @@ struct ChangesView: View {
             .padding(.top, AtelierMetrics.spaceS)
             .padding(.bottom, AtelierMetrics.spaceS)
             .environment(\.atelierZoomScale, zoom.sidebarScale)
+    }
+
+    private var changeSummary: some View {
+        HStack(spacing: AtelierMetrics.spaceS) {
+            Label("Staged", systemImage: "checkmark.circle")
+                .foregroundStyle(.secondary)
+            AtelierCountBadge(value: model.snapshot.status.staged.count)
+
+            Divider().frame(height: AtelierMetrics.spaceL)
+
+            Label("Working", systemImage: "pencil.line")
+                .foregroundStyle(.secondary)
+            AtelierCountBadge(
+                value: model.snapshot.status.unstaged.count
+                    + model.snapshot.status.untracked.count,
+                color: AtelierTheme.gitOrange
+            )
+
+            Spacer(minLength: 0)
+        }
+        .atelierFont(size: AtelierTypography.caption, weight: .medium)
+        .padding(.horizontal, AtelierMetrics.spaceM)
+        .padding(.vertical, AtelierMetrics.spaceS)
+        .background(AtelierTheme.raised.opacity(0.48))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(AtelierTheme.border)
+                .frame(height: AtelierTheme.strokeHairline)
+        }
+        .environment(\.atelierZoomScale, zoom.sidebarScale)
     }
 
     @ViewBuilder
@@ -295,7 +357,7 @@ struct ChangesView: View {
                     )
                 }
             } header: {
-                Text(title.uppercased())
+                Text(title)
                     .atelierFont(size: AtelierTypography.caption, weight: .semibold)
                     .foregroundStyle(.secondary)
             }
@@ -337,8 +399,21 @@ private struct GitChangeRow: View {
         HStack(spacing: AtelierMetrics.spaceS) {
             Button(action: onOpen) {
                 HStack(spacing: AtelierMetrics.spaceS) {
-                    Text(change.path)
-                        .atelierFont(size: AtelierTypography.uiSize)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(URL(fileURLWithPath: change.path).lastPathComponent)
+                            .atelierFont(size: AtelierTypography.label, weight: .medium)
+                            .lineLimit(1)
+
+                        let parent = (change.path as NSString).deletingLastPathComponent
+                        if !parent.isEmpty {
+                            Text(parent)
+                                .atelierFont(size: AtelierTypography.micro, design: .monospaced)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
@@ -359,7 +434,7 @@ private struct GitChangeRow: View {
             .frame(width: actionWidth + AtelierMetrics.spaceL, alignment: .trailing)
         }
         .padding(.horizontal, AtelierMetrics.spaceXS)
-        .frame(height: AtelierMetrics.rowHeight)
+        .frame(minHeight: AtelierMetrics.rowHeight + AtelierMetrics.spaceS)
         .background {
             RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
                 .fill(isHovering ? AtelierTheme.hoverFill : Color.clear)

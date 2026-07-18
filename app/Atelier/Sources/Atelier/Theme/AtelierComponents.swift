@@ -26,11 +26,18 @@ struct AtelierPanelHeader<Trailing: View>: View {
                 Image(systemName: systemImage)
                     .atelierFont(size: AtelierTypography.label, weight: .medium)
                     .foregroundStyle(AtelierTheme.accent)
+                    .frame(width: 26, height: 26)
+                    .background(AtelierTheme.accent.opacity(0.09))
+                    .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.rowRadius))
             }
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .atelierFont(size: AtelierTypography.label, weight: .semibold)
+                    .atelierFont(
+                        size: AtelierTypography.headline,
+                        weight: .semibold,
+                        design: .serif
+                    )
                 if let subtitle {
                     Text(subtitle)
                         .atelierFont(size: AtelierTypography.micro, design: .monospaced)
@@ -47,6 +54,12 @@ struct AtelierPanelHeader<Trailing: View>: View {
         .padding(.horizontal, AtelierMetrics.spaceM)
         .frame(height: AtelierMetrics.panelHeaderHeight)
         .background(AtelierTheme.chrome)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.white.opacity(0.28))
+                .frame(height: AtelierTheme.strokeHairline)
+                .accessibilityHidden(true)
+        }
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(AtelierTheme.border)
@@ -56,7 +69,7 @@ struct AtelierPanelHeader<Trailing: View>: View {
     }
 }
 
-/// Standard empty / loading / error state: centered, calm, one accent.
+/// Standard empty / loading / error state: calm editorial hierarchy, one accent.
 struct AtelierEmptyState<Accessory: View>: View {
     let systemImage: String
     let title: String
@@ -76,12 +89,35 @@ struct AtelierEmptyState<Accessory: View>: View {
     }
 
     var body: some View {
-        VStack(spacing: AtelierMetrics.spaceS) {
-            Image(systemName: systemImage)
-                .atelierFont(size: AtelierMetrics.emptyStateIconSize, weight: .ultraLight)
-                .foregroundStyle(AtelierTheme.accent)
+        VStack(spacing: AtelierMetrics.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AtelierTheme.panelRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                AtelierTheme.accent.opacity(0.20),
+                                AtelierTheme.accent.opacity(0.07)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                Image(systemName: systemImage)
+                    .atelierFont(size: AtelierMetrics.emptyStateIconSize, weight: .light)
+                    .foregroundStyle(AtelierTheme.accent)
+            }
+            .frame(width: 54, height: 54)
+            .overlay {
+                RoundedRectangle(cornerRadius: AtelierTheme.panelRadius, style: .continuous)
+                    .stroke(Color.white.opacity(0.35), lineWidth: AtelierTheme.strokeHairline)
+            }
+            .shadow(color: AtelierTheme.shadowSoft, radius: 7, y: 3)
             Text(title)
-                .atelierFont(size: AtelierTypography.headline, weight: .semibold)
+                .atelierFont(
+                    size: AtelierTypography.title,
+                    weight: .semibold,
+                    design: .serif
+                )
             Text(message)
                 .atelierFont(size: AtelierTypography.body)
                 .foregroundStyle(.secondary)
@@ -91,9 +127,82 @@ struct AtelierEmptyState<Accessory: View>: View {
             accessory()
                 .padding(.top, AtelierMetrics.spaceXS)
         }
-        .padding(AtelierMetrics.spaceXL)
+        .padding(AtelierMetrics.space2XL)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+struct AtelierToolbarButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .atelierFont(size: AtelierTypography.label, weight: .medium)
+            .frame(width: AtelierMetrics.iconButtonSize, height: AtelierMetrics.iconButtonSize)
+            .foregroundStyle(isSelected ? AtelierTheme.accent : Color.primary)
+            .glassEffect(
+                .regular
+                    .tint(isSelected ? AtelierTheme.accent.opacity(0.18) : nil)
+                    .interactive(isEnabled),
+                in: RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+            )
+            .overlay(alignment: .bottom) {
+                if isSelected {
+                    Capsule()
+                        .fill(AtelierTheme.accent)
+                        .frame(width: 10, height: 2)
+                        .padding(.bottom, 3)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
+            .opacity(isEnabled ? 1 : AtelierTheme.disabledOpacity)
+            .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : 0.96)
+            .atelierPointerCursor()
+    }
+}
+
+struct AtelierCountBadge: View {
+    let value: Int
+    var color = AtelierTheme.accent
+
+    var body: some View {
+        Text(value.formatted())
+            .atelierFont(size: AtelierTypography.micro, weight: .bold, design: .monospaced)
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .frame(minHeight: 18)
+            .background(color.opacity(0.10))
+            .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.rowRadius))
+            .accessibilityLabel("\(value) items")
+    }
+}
+
+private struct AtelierOverlayPanelModifier: ViewModifier {
+    let edge: Edge
+
+    func body(content: Content) -> some View {
+        content
+            .background(AtelierTheme.panel)
+            .overlay(alignment: edge == .leading ? .trailing : .leading) {
+                Rectangle()
+                    .fill(AtelierTheme.border)
+                    .frame(width: AtelierTheme.strokeControl)
+            }
+            .shadow(
+                color: AtelierTheme.shadowSoft,
+                radius: 4,
+                x: edge == .leading ? 1 : -1
+            )
+    }
+}
+
+extension View {
+    func atelierOverlayPanel(edge: Edge) -> some View {
+        modifier(AtelierOverlayPanelModifier(edge: edge))
     }
 }
 
@@ -146,12 +255,12 @@ struct AtelierFilledButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .atelierFont(size: AtelierTypography.label, weight: .semibold)
-            .foregroundStyle(AtelierTheme.accentInk)
+            .foregroundStyle(isEnabled ? AtelierTheme.accentInk : Color.secondary)
             .frame(maxWidth: .infinity)
             .frame(height: AtelierMetrics.fieldHeight)
             .background {
                 ZStack {
-                    AtelierTheme.accent.opacity(isEnabled ? 1 : AtelierTheme.disabledOpacity)
+                    isEnabled ? AtelierTheme.accent : AtelierTheme.raised
                     if configuration.isPressed {
                         AtelierTheme.accentInk.opacity(0.12)
                     } else if isHovering && isEnabled {
@@ -165,7 +274,7 @@ struct AtelierFilledButtonStyle: ButtonStyle {
             .contentShape(
                 RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
             )
-            .opacity(isEnabled ? 1 : 0.7)
+            .opacity(1)
             .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : 0.985)
             .onHover { isHovering = $0 }
             .animation(

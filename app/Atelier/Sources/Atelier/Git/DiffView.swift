@@ -245,7 +245,7 @@ struct GitDiffTabView: View {
                 }
             }
 
-            Text(session.selection.stateLabel.uppercased())
+            Text(session.selection.stateLabel)
                 .atelierFont(size: AtelierTypography.micro, weight: .semibold)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, AtelierMetrics.spaceS)

@@ -64,28 +64,55 @@ struct AgentResponsesView: View {
     }
 
     private var header: some View {
-        AtelierPanelHeader(
-            title: "Response Preview",
-            subtitle: "Read-only - terminal stays interactive",
-            systemImage: "doc.richtext"
-        ) {
-            HStack(spacing: AtelierMetrics.spaceXS) {
-                sessionPicker
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(AtelierLuminareIconButtonStyle())
-                .accessibilityLabel("Refresh agent responses")
-                .help("Refresh agent responses")
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                }
-                .buttonStyle(AtelierLuminareIconButtonStyle())
-                .accessibilityLabel("Close agent preview")
-                .help("Close agent preview")
+        HStack(spacing: AtelierMetrics.spaceS) {
+            Image(systemName: "doc.richtext")
+                .atelierFont(size: AtelierTypography.label, weight: .medium)
+                .foregroundStyle(AtelierTheme.accent)
+                .frame(width: 26, height: 26)
+                .background(AtelierTheme.accent.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.rowRadius))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Responses")
+                    .atelierFont(
+                        size: AtelierTypography.headline,
+                        weight: .semibold,
+                        design: .serif
+                    )
+                Text("Read-only")
+                    .atelierFont(size: AtelierTypography.micro, design: .monospaced)
+                    .foregroundStyle(.secondary)
             }
+
+            Spacer(minLength: AtelierMetrics.spaceS)
+
+            sessionPicker
+
+            Button {
+                Task { await model.refresh() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.glass)
+            .accessibilityLabel("Refresh agent responses")
+            .help("Refresh agent responses")
+
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.glass)
+            .accessibilityLabel("Close agent preview")
+            .help("Close agent preview")
+        }
+        .padding(.horizontal, AtelierMetrics.spaceM)
+        .frame(height: AtelierMetrics.panelHeaderHeight)
+        .background(AtelierTheme.chrome)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(AtelierTheme.border)
+                .frame(height: AtelierTheme.strokeHairline)
         }
     }
 
@@ -107,24 +134,26 @@ struct AgentResponsesView: View {
             HStack(spacing: 5) {
                 if let summary = selectedSummary {
                     Text(summary.provider.rawValue)
-                    Text(shortSessionID(summary.sessionID))
-                        .foregroundStyle(.secondary)
-                    Text(summary.latestResponseTime, style: .time)
-                        .foregroundStyle(.secondary)
                     if summary.unreadCount > 0 {
                         Text("\(summary.unreadCount)")
                             .foregroundStyle(AtelierTheme.gitOrange)
                     }
                 } else {
-                    Text("Select session")
+                    Text("Session")
                 }
                 Image(systemName: "chevron.down")
                     .atelierFont(size: AtelierMetrics.smallIconSize, weight: .semibold)
             }
             .atelierFont(
-                size: AtelierTypography.micro,
+                size: AtelierTypography.caption,
                 weight: .semibold,
-                design: .monospaced
+                design: .default
+            )
+            .padding(.horizontal, AtelierMetrics.spaceS)
+            .frame(height: AtelierMetrics.controlHeight)
+            .glassEffect(
+                .regular.interactive(),
+                in: RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
             )
             .lineLimit(1)
         }
@@ -209,7 +238,11 @@ struct AgentResponsesView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
             Label("Waiting for a final response", systemImage: "waveform.path")
-                .atelierFont(size: AtelierTypography.headline, weight: .semibold)
+                .atelierFont(
+                    size: AtelierTypography.title,
+                    weight: .semibold,
+                    design: .serif
+                )
             Text("Use Codex or Claude in the terminal. Markdown and Mermaid previews appear here.")
                 .atelierFont(size: AtelierTypography.body)
                 .foregroundStyle(.secondary)
@@ -222,7 +255,11 @@ struct AgentResponsesView: View {
     private var noSelectionState: some View {
         VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
             Label("Select a session", systemImage: "rectangle.stack")
-                .atelierFont(size: AtelierTypography.headline, weight: .semibold)
+                .atelierFont(
+                    size: AtelierTypography.title,
+                    weight: .semibold,
+                    design: .serif
+                )
             Text("Choose a Codex or Claude session to preview its final responses.")
                 .atelierFont(size: AtelierTypography.body)
                 .foregroundStyle(.secondary)
@@ -234,11 +271,10 @@ struct AgentResponsesView: View {
     private func responseCard(_ response: AgentResponse) -> some View {
         VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
             HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceS) {
-                Text(response.provider.rawValue.uppercased())
+                Text(response.provider.rawValue.capitalized)
                     .atelierFont(
-                        size: AtelierTypography.micro,
-                        weight: .bold,
-                        design: .monospaced
+                        size: AtelierTypography.caption,
+                        weight: .semibold
                     )
                     .foregroundStyle(AtelierTheme.accent)
                 Text(response.timestamp, style: .time)

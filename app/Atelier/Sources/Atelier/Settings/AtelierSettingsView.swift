@@ -14,7 +14,7 @@ struct AtelierSettingsView: View {
             )
 
             ScrollView {
-                VStack(spacing: AtelierMetrics.spaceL) {
+                VStack(spacing: 0) {
                     AtelierSettingsSection(
                         title: "Workspace",
                         systemImage: "macwindow"
@@ -71,14 +71,23 @@ private struct AtelierSettingsSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AtelierMetrics.spaceM) {
             Label(title, systemImage: systemImage)
-                .atelierFont(size: AtelierTypography.body, weight: .semibold)
+                .atelierFont(
+                    size: AtelierTypography.title,
+                    weight: .semibold,
+                    design: .serif
+                )
                 .foregroundStyle(AtelierTheme.accent)
 
             content()
         }
-        .padding(AtelierMetrics.spaceL)
+        .padding(.horizontal, AtelierMetrics.spaceL)
+        .padding(.vertical, AtelierMetrics.spaceXL)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .atelierCard(radius: AtelierTheme.panelRadius)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(AtelierTheme.border)
+                .frame(height: AtelierTheme.strokeHairline)
+        }
         .accessibilityElement(children: .contain)
     }
 }

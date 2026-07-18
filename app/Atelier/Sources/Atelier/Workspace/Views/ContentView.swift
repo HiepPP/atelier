@@ -1,6 +1,34 @@
 import AppKit
 import SwiftUI
 
+nonisolated enum WorkspaceLayoutMode: Equatable, Sendable {
+    case compact
+    case standard
+    case wide
+
+    var docksExplorer: Bool { self != .compact }
+    var docksSourceControl: Bool { self == .wide }
+}
+
+nonisolated enum WorkspaceLayoutPolicy {
+    static let compactBreakpoint: CGFloat = 900
+    static let wideBreakpoint: CGFloat = 1_280
+    static let maximumOverlayWidth: CGFloat = 380
+
+    static func mode(containerWidth: CGFloat) -> WorkspaceLayoutMode {
+        if containerWidth < compactBreakpoint { return .compact }
+        if containerWidth < wideBreakpoint { return .standard }
+        return .wide
+    }
+
+    static func overlayWidth(containerWidth: CGFloat) -> CGFloat {
+        min(
+            maximumOverlayWidth,
+            max(300, (containerWidth * 0.46).rounded())
+        )
+    }
+}
+
 struct ContentView: View {
     @Environment(AppModel.self) private var app
 
@@ -18,27 +46,97 @@ struct ContentView: View {
     }
 }
 
-/// Empty state: chưa có workspace.
 struct EmptyStateView: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        ContentUnavailableView {
-            Label("Chưa mở workspace", systemImage: "folder")
-                .foregroundStyle(AtelierTheme.accent)
-        } description: {
-            Text("Chọn một folder để xem Git, đọc file và chạy terminal.")
-        } actions: {
-            Button {
-                app.chooseWorkspace()
-            } label: {
-                Text("Mở Folder")
+        ZStack {
+            AtelierWelcomeBackdrop()
+
+            VStack(alignment: .leading, spacing: AtelierMetrics.spaceL) {
+                Text("ATELIER")
+                    .atelierFont(
+                        size: AtelierTypography.micro,
+                        weight: .bold,
+                        design: .monospaced
+                    )
+                    .tracking(2.4)
+                    .foregroundStyle(AtelierTheme.accent)
+
+                Text("A quieter place to build.")
+                    .atelierFont(
+                        size: 34,
+                        weight: .semibold,
+                        design: .serif
+                    )
+                    .tracking(-0.8)
+
+                Text("Open a local folder to edit files, run commands, and review Git changes in one native workspace.")
+                    .atelierFont(size: AtelierTypography.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 430, alignment: .leading)
+
+                HStack(spacing: AtelierMetrics.spaceM) {
+                    Button("Open Folder") {
+                        app.chooseWorkspace()
+                    }
+                    .buttonStyle(AtelierLuminarePrimaryButtonStyle())
+                    .keyboardShortcut("o", modifiers: .command)
+
+                    Text("Command-O")
+                        .atelierFont(size: AtelierTypography.caption, design: .monospaced)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .buttonStyle(AtelierLuminarePrimaryButtonStyle())
-            .keyboardShortcut("o", modifiers: .command)
+            .padding(AtelierMetrics.space2XL * 2)
+            .frame(maxWidth: 680, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AtelierTheme.canvas)
+    }
+}
+
+private struct AtelierWelcomeBackdrop: View {
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topTrailing) {
+                Rectangle()
+                    .fill(AtelierTheme.canvas)
+
+                Ellipse()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                AtelierTheme.accent.opacity(0.22),
+                                AtelierTheme.accent.opacity(0.04),
+                                .clear
+                            ],
+                            center: .center,
+                            startRadius: 8,
+                            endRadius: min(geometry.size.width, geometry.size.height) * 0.48
+                        )
+                    )
+                    .frame(
+                        width: geometry.size.width * 0.72,
+                        height: geometry.size.height * 0.92
+                    )
+                    .offset(x: geometry.size.width * 0.14, y: -geometry.size.height * 0.18)
+
+                Circle()
+                    .stroke(AtelierTheme.accent.opacity(0.12), lineWidth: 1)
+                    .frame(width: min(geometry.size.width, geometry.size.height) * 0.72)
+                    .offset(x: 100, y: -90)
+
+                Rectangle()
+                    .fill(AtelierTheme.accent.opacity(0.14))
+                    .frame(width: 1, height: geometry.size.height * 0.56)
+                    .padding(.trailing, geometry.size.width * 0.22)
+                    .padding(.top, geometry.size.height * 0.18)
+
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -54,81 +152,61 @@ struct WorkspaceView: View {
     @State private var responderBeforeAgentPreview: NSResponder?
     @State private var responderBeforeProjectMenu: NSResponder?
     @State private var isProjectMenuPresented = false
-    @State private var isProjectButtonHovered = false
     @State private var isAgentResizeHandleHovered = false
+    @State private var isExplorerDockedHidden = false
+    @State private var isSourceControlDockedHidden = false
+    @State private var isExplorerOverlayPresented = false
+    @State private var isSourceControlOverlayPresented = false
     @FocusState private var isProjectMenuFocused: Bool
 
     var body: some View {
-        ZStack(alignment: .top) {
-            VStack(spacing: 0) {
-                commandBar
+        GeometryReader { outerGeometry in
+            let workspaceLayout = WorkspaceLayoutPolicy.mode(
+                containerWidth: outerGeometry.size.width
+            )
 
-                Divider()
+            ZStack(alignment: .top) {
+                VStack(spacing: 0) {
+                    commandBar(layout: workspaceLayout)
 
-                GeometryReader { geometry in
-                    let layout = AgentPreviewLayoutPolicy.layout(
-                        containerWidth: geometry.size.width
-                    )
-                    HStack(spacing: 0) {
-                        workspaceColumns
+                    Divider()
 
-                        if session.isAgentPreviewPresented, layout == .docked {
-                            agentPreviewResizeHandle(containerWidth: geometry.size.width)
-                            agentPreview
-                                .frame(
-                                    width: AgentPreviewLayoutPolicy.clampedDockedWidth(
-                                        agentPreviewWidth,
-                                        containerWidth: geometry.size.width
-                                    )
-                                )
-                        }
+                    GeometryReader { geometry in
+                        workspaceSurface(
+                            containerWidth: geometry.size.width,
+                            workspaceLayout: workspaceLayout
+                        )
                     }
-                    .overlay(alignment: .trailing) {
-                        if session.isAgentPreviewPresented, layout == .overlay {
-                            agentPreview
-                                .frame(
-                                    width: AgentPreviewLayoutPolicy.panelWidth(
-                                        containerWidth: geometry.size.width,
-                                        layout: layout
-                                    )
-                                )
-                                .shadow(
-                                    color: AtelierTheme.shadowFloating,
-                                    radius: AtelierMetrics.spaceL,
-                                    x: -AtelierMetrics.spaceS
-                                )
-                        }
-                    }
+
+                    statusBar
                 }
 
-                statusBar
-            }
+                if isProjectMenuPresented {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: closeProjectMenu)
+                        .accessibilityHidden(true)
 
-            if isProjectMenuPresented {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: closeProjectMenu)
-                    .accessibilityHidden(true)
-
-                projectMenuContent
-                    .padding(.top, AtelierMetrics.commandBarHeight - 3)
-                    .focusable()
-                    .focused($isProjectMenuFocused)
-                    .focusEffectDisabled()
-                    .onAppear {
-                        isProjectMenuFocused = true
-                    }
-                    .onExitCommand(perform: closeProjectMenu)
-                    .transition(
-                        .scale(scale: 0.96, anchor: .top)
-                            .combined(with: .opacity)
-                    )
+                    projectMenuContent
+                        .padding(.top, AtelierMetrics.commandBarHeight - 3)
+                        .focusable()
+                        .focused($isProjectMenuFocused)
+                        .focusEffectDisabled()
+                        .onAppear {
+                            isProjectMenuFocused = true
+                        }
+                        .onExitCommand(perform: closeProjectMenu)
+                        .transition(
+                            .scale(scale: 0.96, anchor: .top)
+                                .combined(with: .opacity)
+                        )
+                }
             }
+            .background(AtelierTheme.editor)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(.container, edges: .top)
+            .onExitCommand(perform: closeProjectMenu)
         }
-        .background(AtelierTheme.editor)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea(.container, edges: .top)
-        .onExitCommand(perform: closeProjectMenu)
     }
 
     private var state: WorkspaceState { session.state }
@@ -143,9 +221,15 @@ struct WorkspaceView: View {
         URL(fileURLWithPath: state.path, isDirectory: true)
     }
 
-    private var workspaceColumns: some View {
+    private func workspaceColumns(
+        layout: WorkspaceLayoutMode,
+        hidesExplorerForAgent: Bool
+    ) -> some View {
         HSplitView {
-            if !zoom.isFocusMode {
+            if !zoom.isFocusMode,
+               layout.docksExplorer,
+               !isExplorerDockedHidden,
+               !hidesExplorerForAgent {
                 explorerColumn
                     .frame(
                         minWidth: AtelierMetrics.explorerMinWidth,
@@ -161,7 +245,9 @@ struct WorkspaceView: View {
                 )
                 .layoutPriority(2)
 
-            if !zoom.isFocusMode {
+            if !zoom.isFocusMode,
+               layout.docksSourceControl,
+               !isSourceControlDockedHidden {
                 ChangesView(
                     model: gitModel,
                     onOpenDiff: terminalTabs.openGitDiff
@@ -176,6 +262,81 @@ struct WorkspaceView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .atelierSplitViewChrome()
+    }
+
+    private func workspaceSurface(
+        containerWidth: CGFloat,
+        workspaceLayout: WorkspaceLayoutMode
+    ) -> some View {
+        let agentLayout = AgentPreviewLayoutPolicy.layout(containerWidth: containerWidth)
+        let hidesExplorerForAgent = session.isAgentPreviewPresented
+            && agentLayout == .overlay
+            && workspaceLayout != .wide
+
+        return HStack(spacing: 0) {
+            workspaceColumns(
+                layout: workspaceLayout,
+                hidesExplorerForAgent: hidesExplorerForAgent
+            )
+
+            if session.isAgentPreviewPresented, agentLayout == .docked {
+                agentPreviewResizeHandle(containerWidth: containerWidth)
+                agentPreview
+                    .frame(
+                        width: AgentPreviewLayoutPolicy.clampedDockedWidth(
+                            agentPreviewWidth,
+                            containerWidth: containerWidth
+                        )
+                    )
+            }
+        }
+        .overlay(alignment: .leading) {
+            if !zoom.isFocusMode,
+               !workspaceLayout.docksExplorer,
+               isExplorerOverlayPresented,
+               !session.isAgentPreviewPresented {
+                explorerColumn
+                    .frame(width: WorkspaceLayoutPolicy.overlayWidth(containerWidth: containerWidth))
+                    .atelierOverlayPanel(edge: .leading)
+                    .onExitCommand {
+                        isExplorerOverlayPresented = false
+                    }
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+        }
+        .overlay(alignment: .trailing) {
+            if !zoom.isFocusMode,
+               !workspaceLayout.docksSourceControl,
+               isSourceControlOverlayPresented,
+               !session.isAgentPreviewPresented {
+                ChangesView(
+                    model: gitModel,
+                    onOpenDiff: terminalTabs.openGitDiff,
+                    onClose: {
+                        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+                            isSourceControlOverlayPresented = false
+                        }
+                    }
+                )
+                .frame(width: WorkspaceLayoutPolicy.overlayWidth(containerWidth: containerWidth))
+                .atelierOverlayPanel(edge: .trailing)
+                .onExitCommand {
+                    isSourceControlOverlayPresented = false
+                }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else if session.isAgentPreviewPresented, agentLayout == .overlay {
+                agentPreview
+                    .frame(
+                        width: AgentPreviewLayoutPolicy.panelWidth(
+                            containerWidth: containerWidth,
+                            layout: agentLayout
+                        )
+                    )
+                    .atelierOverlayPanel(edge: .trailing)
+                    .onExitCommand(perform: closeAgentPreview)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
     }
 
     private var agentPreview: some View {
@@ -237,6 +398,8 @@ struct WorkspaceView: View {
 
     private func openAgentPreview() {
         responderBeforeAgentPreview = app.windowController.currentFirstResponder()
+        isSourceControlOverlayPresented = false
+        isExplorerOverlayPresented = false
         session.openResponses()
     }
 
@@ -254,7 +417,45 @@ struct WorkspaceView: View {
         }
     }
 
-    private var commandBar: some View {
+    private func isExplorerVisible(layout: WorkspaceLayoutMode) -> Bool {
+        layout.docksExplorer ? !isExplorerDockedHidden : isExplorerOverlayPresented
+    }
+
+    private func isSourceControlVisible(layout: WorkspaceLayoutMode) -> Bool {
+        layout.docksSourceControl
+            ? !isSourceControlDockedHidden
+            : isSourceControlOverlayPresented
+    }
+
+    private func toggleExplorer(layout: WorkspaceLayoutMode) {
+        if session.isAgentPreviewPresented {
+            closeAgentPreview()
+        }
+        isSourceControlOverlayPresented = false
+        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+            if layout.docksExplorer {
+                isExplorerDockedHidden.toggle()
+            } else {
+                isExplorerOverlayPresented.toggle()
+            }
+        }
+    }
+
+    private func toggleSourceControl(layout: WorkspaceLayoutMode) {
+        if session.isAgentPreviewPresented {
+            closeAgentPreview()
+        }
+        isExplorerOverlayPresented = false
+        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+            if layout.docksSourceControl {
+                isSourceControlDockedHidden.toggle()
+            } else {
+                isSourceControlOverlayPresented.toggle()
+            }
+        }
+    }
+
+    private func commandBar(layout: WorkspaceLayoutMode) -> some View {
         ZStack {
             Color.clear
                 .contentShape(Rectangle())
@@ -262,23 +463,56 @@ struct WorkspaceView: View {
                     app.windowController.zoomWorkspaceWindow()
                 }
 
-            HStack(spacing: AtelierMetrics.spaceS) {
+            HStack(spacing: AtelierMetrics.spaceXS) {
                 Color.clear
                     .frame(width: AtelierMetrics.trafficLightReserve, height: 1)
 
-                Spacer(minLength: AtelierMetrics.spaceM)
-
-                Text("\(Int((zoom.scale * 100).rounded()))%")
-                    .atelierFont(
-                        size: AtelierTypography.caption,
-                        weight: .medium,
-                        design: .monospaced
+                Button {
+                    toggleExplorer(layout: layout)
+                } label: {
+                    Image(systemName: "sidebar.leading")
+                }
+                .buttonStyle(
+                    AtelierToolbarButtonStyle(
+                        isSelected: isExplorerVisible(layout: layout)
                     )
-                    .foregroundStyle(.secondary)
-                    .frame(minWidth: AtelierMetrics.zoomLabelMinWidth)
-                    .accessibilityLabel("Zoom level")
-                    .accessibilityValue("\(Int((zoom.scale * 100).rounded())) percent")
-                    .help("Zoom level")
+                )
+                .accessibilityLabel(
+                    isExplorerVisible(layout: layout) ? "Hide Explorer" : "Show Explorer"
+                )
+                .help(isExplorerVisible(layout: layout) ? "Hide Explorer" : "Show Explorer")
+
+                Button {
+                    toggleSourceControl(layout: layout)
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "arrow.triangle.branch")
+                        if gitModel.snapshot.status.changes.count > 0 {
+                            Circle()
+                                .fill(AtelierTheme.gitOrange)
+                                .frame(width: 6, height: 6)
+                                .offset(x: 3, y: -3)
+                        }
+                    }
+                }
+                .buttonStyle(
+                    AtelierToolbarButtonStyle(
+                        isSelected: isSourceControlVisible(layout: layout)
+                    )
+                )
+                .accessibilityLabel(
+                    isSourceControlVisible(layout: layout)
+                        ? "Hide Source Control"
+                        : "Show Source Control"
+                )
+                .accessibilityValue("\(gitModel.snapshot.status.changes.count) changes")
+                .help(
+                    isSourceControlVisible(layout: layout)
+                        ? "Hide Source Control"
+                        : "Show Source Control"
+                )
+
+                Spacer(minLength: AtelierMetrics.spaceM)
 
                 Button {
                     toggleAgentPreview()
@@ -290,7 +524,9 @@ struct WorkspaceView: View {
                                 : Color.primary
                         )
                 }
-                .buttonStyle(AtelierLuminareIconButtonStyle())
+                .buttonStyle(
+                    AtelierToolbarButtonStyle(isSelected: session.isAgentPreviewPresented)
+                )
                 .accessibilityLabel(
                     session.isAgentPreviewPresented
                         ? "Close agent preview"
@@ -304,7 +540,7 @@ struct WorkspaceView: View {
                 } label: {
                     Image(systemName: "sparkles")
                 }
-                .buttonStyle(AtelierLuminareIconButtonStyle())
+                .buttonStyle(AtelierToolbarButtonStyle(isSelected: terminalTabs.gemmaTabCount > 0))
                 .accessibilityLabel("Open Gemma workspace assistant")
                 .help("Open Gemma workspace assistant")
 
@@ -317,7 +553,7 @@ struct WorkspaceView: View {
                             : "rectangle.center.inset.filled"
                     )
                 }
-                .buttonStyle(AtelierLuminareIconButtonStyle())
+                .buttonStyle(AtelierToolbarButtonStyle(isSelected: zoom.isFocusMode))
                 .accessibilityLabel(zoom.isFocusMode ? "Exit focus mode" : "Enter focus mode")
                 .help(zoom.isFocusMode ? "Exit focus mode" : "Enter focus mode")
             }
@@ -325,21 +561,38 @@ struct WorkspaceView: View {
             Button {
                 toggleProjectMenu()
             } label: {
-                HStack(spacing: AtelierMetrics.spaceS) {
-                    Image(systemName: "folder")
-                        .atelierFont(size: AtelierTypography.label, weight: .medium)
+                HStack(spacing: AtelierMetrics.spaceM) {
+                    Image(systemName: "square.stack.3d.up")
+                        .atelierFont(size: AtelierTypography.label, weight: .semibold)
                         .foregroundStyle(AtelierTheme.accent)
 
-                    Text(folderName)
-                        .atelierFont(size: AtelierTypography.label, weight: .semibold)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(folderName)
+                            .atelierFont(
+                                size: AtelierTypography.headline,
+                                weight: .semibold,
+                                design: .serif
+                            )
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+
+                        if layout != .compact {
+                            Text(
+                                gitModel.snapshot.branch.isEmpty
+                                    ? "Detached HEAD"
+                                    : gitModel.snapshot.branch
+                            )
+                            .atelierFont(size: AtelierTypography.micro, design: .monospaced)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        }
+                    }
                 }
                 .padding(.horizontal, AtelierMetrics.spaceM)
                 .frame(
-                    minWidth: 240,
-                    idealWidth: 320,
-                    maxWidth: 360,
+                    minWidth: layout == .compact ? 180 : 240,
+                    idealWidth: 300,
+                    maxWidth: 340,
                     minHeight: AtelierMetrics.controlHeight,
                     maxHeight: AtelierMetrics.controlHeight
                 )
@@ -348,26 +601,12 @@ struct WorkspaceView: View {
                 )
             }
             .buttonStyle(.plain)
-            .background(
-                isProjectMenuPresented
-                    ? AtelierTheme.controlFill(for: .selected)
-                    : (isProjectButtonHovered
-                        ? AtelierTheme.controlFill(for: .hovered)
-                        : AtelierTheme.panel)
+            .glassEffect(
+                .regular
+                    .tint(isProjectMenuPresented ? AtelierTheme.accent.opacity(0.16) : nil)
+                    .interactive(),
+                in: RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
             )
-            .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                    .stroke(
-                        AtelierTheme.controlStroke(
-                            for: isProjectMenuPresented ? .selected : .normal
-                        ),
-                        lineWidth: isProjectMenuPresented
-                            ? AtelierTheme.strokeFocus
-                            : AtelierTheme.strokeControl
-                    )
-            }
-            .shadow(color: AtelierTheme.shadowSoft, radius: 2, y: 1)
             .scaleEffect(
                 reduceMotion ? 1 : (isProjectMenuPresented ? 1.012 : 1)
             )
@@ -387,13 +626,11 @@ struct WorkspaceView: View {
                 ].joined(separator: ", ")
             )
             .help("Project commands")
-            .onHover { isProjectButtonHovered = $0 }
             .atelierPointerCursor()
         }
         .padding(.horizontal, AtelierMetrics.spaceM)
         .frame(height: AtelierMetrics.commandBarHeight)
         .background(AtelierTheme.chrome)
-        .atelierPointerCursor()
     }
 
     private var projectMenuContent: some View {

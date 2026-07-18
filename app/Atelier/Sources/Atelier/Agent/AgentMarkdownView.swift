@@ -105,43 +105,69 @@ struct AgentMarkdownView: View {
         .atelierCard()
     }
 
+    @ViewBuilder
     private func table(headers: [String], rows: [[String]]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-                GridRow {
-                    ForEach(headers.indices, id: \.self) { index in
-                        inlineText(headers[index])
-                            .atelierFont(size: AtelierTypography.label, weight: .semibold)
-                            .padding(.horizontal, AtelierMetrics.spaceM)
-                            .padding(.vertical, AtelierMetrics.spaceS)
-                            .frame(minWidth: 100, maxWidth: 240, alignment: .leading)
-                            .background(AtelierTheme.raised)
-                    }
-                }
-                ForEach(rows.indices, id: \.self) { rowIndex in
-                    Divider()
-                        .gridCellColumns(headers.count)
-                    GridRow {
-                        ForEach(headers.indices, id: \.self) { columnIndex in
-                            let value = rows[rowIndex].indices.contains(columnIndex)
-                                ? rows[rowIndex][columnIndex]
-                                : ""
-                            inlineText(value)
-                                .atelierFont(size: AtelierTypography.label)
-                                .padding(.horizontal, AtelierMetrics.spaceM)
-                                .padding(.vertical, AtelierMetrics.spaceS)
-                                .frame(minWidth: 100, maxWidth: 240, alignment: .leading)
-                        }
-                    }
-                }
+        if headers.count <= 3 {
+            tableGrid(headers: headers, rows: rows, isFlexible: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            ScrollView(.horizontal, showsIndicators: true) {
+                tableGrid(headers: headers, rows: rows, isFlexible: false)
             }
-            .overlay {
-                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                    .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
+            .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.panel)
         }
-        .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.panel)
+    }
+
+    private func tableGrid(
+        headers: [String],
+        rows: [[String]],
+        isFlexible: Bool
+    ) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+            GridRow {
+                ForEach(headers.indices, id: \.self) { index in
+                    tableCell(headers[index], isHeader: true, isFlexible: isFlexible)
+                }
+            }
+            ForEach(rows.indices, id: \.self) { rowIndex in
+                Divider()
+                    .gridCellColumns(headers.count)
+                GridRow {
+                    ForEach(headers.indices, id: \.self) { columnIndex in
+                        let value = rows[rowIndex].indices.contains(columnIndex)
+                            ? rows[rowIndex][columnIndex]
+                            : ""
+                        tableCell(value, isHeader: false, isFlexible: isFlexible)
+                    }
+                }
+            }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
+                .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
+    }
+
+    private func tableCell(
+        _ value: String,
+        isHeader: Bool,
+        isFlexible: Bool
+    ) -> some View {
+        inlineText(value)
+            .atelierFont(
+                size: AtelierTypography.label,
+                weight: isHeader ? .semibold : .regular
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, AtelierMetrics.spaceM)
+            .padding(.vertical, AtelierMetrics.spaceS)
+            .frame(
+                minWidth: isFlexible ? 0 : 112,
+                maxWidth: isFlexible ? .infinity : 240,
+                alignment: .leading
+            )
+            .background(isHeader ? AtelierTheme.raised : Color.clear)
     }
 
     private func copyToPasteboard(_ value: String) {

@@ -1,6 +1,15 @@
 import Pow
 import SwiftUI
 
+enum AtelierMotionTokens {
+    static let quick = 0.12
+    static let standard = 0.20
+    static let deliberate = 0.32
+
+    static let panel = Animation.spring(response: 0.30, dampingFraction: 0.88)
+    static let selection = Animation.spring(response: 0.24, dampingFraction: 0.86)
+}
+
 private struct AtelierRefreshCompletionModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let isLoading: Bool
