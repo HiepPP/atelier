@@ -473,6 +473,18 @@ private struct GitChangeRow: View {
             guard isHovering != hovering else { return }
             isHovering = hovering
         }
+        .contextMenu {
+            Button("Open Diff", action: onOpen)
+            Divider()
+            if staged {
+                Button("Unstage", action: onUnstage)
+            } else {
+                Button("Stage", action: onStage)
+                if change.kind != .untracked {
+                    Button("Discard Changes...", role: .destructive, action: onDiscard)
+                }
+            }
+        }
     }
 
     @ViewBuilder

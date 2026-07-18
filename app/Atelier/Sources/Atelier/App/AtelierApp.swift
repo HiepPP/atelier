@@ -45,7 +45,7 @@ struct AtelierApp: App {
                 )
             }
         }
-        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unifiedCompact)
         .commands {
             AppCommands(model: model)
             AtelierTabCommands()
@@ -100,7 +100,7 @@ struct AtelierApp: App {
 @MainActor
 @Observable
 final class AtelierZoomModel {
-    static let baseMinimumSize = CGSize(width: 760, height: 520)
+    static let baseMinimumSize = CGSize(width: 760, height: 512)
 
     private(set) var scale: CGFloat = 1
     private(set) var isFocusMode = false

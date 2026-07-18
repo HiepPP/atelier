@@ -7,6 +7,27 @@ nonisolated enum AgentSidecarPresentation: Equatable, Sendable {
     case overlay
 }
 
+nonisolated enum TerminalTabInspectorKind: String, Equatable, Sendable {
+    case terminal = "Terminal"
+    case file = "File"
+    case gitDiff = "Git diff"
+    case gemma = "Gemma"
+}
+
+nonisolated struct TerminalTabInspectorDetail: Equatable, Sendable {
+    let label: String
+    let value: String
+}
+
+nonisolated struct TerminalTabInspectorContext: Equatable, Sendable {
+    let kind: TerminalTabInspectorKind
+    let title: String
+    let systemImage: String
+    let status: String
+    let details: [TerminalTabInspectorDetail]
+    let showsActivity: Bool
+}
+
 nonisolated enum AgentSidecarLayoutPolicy {
     static let splitBreakpoint: CGFloat = 900
     static let minimumWidth: CGFloat = 300
@@ -167,6 +188,130 @@ final class TerminalTabsModel {
         return true
     }
 
+    var selectedInspectorContext: TerminalTabInspectorContext? {
+        guard let selectedTab else { return nil }
+
+        switch selectedTab.content {
+        case .terminal:
+            return TerminalTabInspectorContext(
+                kind: .terminal,
+                title: selectedTab.title,
+                systemImage: "terminal",
+                status: "Running",
+                details: [
+                    TerminalTabInspectorDetail(
+                        label: "Working directory",
+                        value: workspacePath
+                    ),
+                    TerminalTabInspectorDetail(
+                        label: "Session",
+                        value: "Interactive shell"
+                    )
+                ],
+                showsActivity: true
+            )
+        case .file(let editor):
+            return TerminalTabInspectorContext(
+                kind: .file,
+                title: selectedTab.title,
+                systemImage: "doc.text",
+                status: fileStatus(editor.content),
+                details: [
+                    TerminalTabInspectorDetail(
+                        label: "Path",
+                        value: editor.document.url.path
+                    ),
+                    TerminalTabInspectorDetail(
+                        label: "Type",
+                        value: editor.document.url.pathExtension.isEmpty
+                            ? "File"
+                            : editor.document.url.pathExtension.uppercased()
+                    ),
+                    TerminalTabInspectorDetail(
+                        label: "Word wrap",
+                        value: editor.isWordWrapEnabled ? "On" : "Off"
+                    )
+                ],
+                showsActivity: false
+            )
+        case .gitDiff(let diff):
+            var details = [
+                TerminalTabInspectorDetail(label: "Path", value: diff.selection.change.path),
+                TerminalTabInspectorDetail(label: "Source", value: diff.selection.stateLabel),
+                TerminalTabInspectorDetail(
+                    label: "Change",
+                    value: diff.selection.change.kind.rawValue.capitalized
+                )
+            ]
+            if case .loaded(let document) = diff.state {
+                details.append(
+                    TerminalTabInspectorDetail(
+                        label: "Delta",
+                        value: "+\(document.additions) -\(document.deletions)"
+                    )
+                )
+            }
+            return TerminalTabInspectorContext(
+                kind: .gitDiff,
+                title: selectedTab.title,
+                systemImage: "doc.text.magnifyingglass",
+                status: gitDiffStatus(diff.state),
+                details: details,
+                showsActivity: false
+            )
+        case .gemma(let model):
+            return TerminalTabInspectorContext(
+                kind: .gemma,
+                title: selectedTab.title,
+                systemImage: "sparkles",
+                status: gemmaStatus(model.status),
+                details: [
+                    TerminalTabInspectorDetail(label: "Model", value: "gemma4:cloud"),
+                    TerminalTabInspectorDetail(
+                        label: "Messages",
+                        value: model.messages.count.formatted()
+                    ),
+                    TerminalTabInspectorDetail(
+                        label: "Tool activity",
+                        value: model.activities.count.formatted()
+                    ),
+                    TerminalTabInspectorDetail(label: "Access", value: "Read-only")
+                ],
+                showsActivity: model.isRunning
+            )
+        }
+    }
+
+    private func fileStatus(_ content: FileContent) -> String {
+        switch content {
+        case .loading: "Loading"
+        case .text(let text): "\(text.split(whereSeparator: \Character.isNewline).count) lines"
+        case .image: "Image preview"
+        case .binary: "Binary"
+        case .tooLarge: "Too large to preview"
+        case .error: "Load failed"
+        }
+    }
+
+    private func gitDiffStatus(_ state: GitDiffLoadState) -> String {
+        switch state {
+        case .loading: "Loading"
+        case .loaded: "Ready"
+        case .message: "No diff"
+        case .failed: "Load failed"
+        }
+    }
+
+    private func gemmaStatus(_ status: GemmaAgentStatus) -> String {
+        switch status {
+        case .idle: "Ready"
+        case .running: "Running"
+        case .completed: "Completed"
+        case .failed: "Failed"
+        case .cancelled: "Cancelled"
+        }
+    }
+
     func add() {
         let session = TerminalSession(number: nextNumber, workspacePath: workspacePath)
         let tab = CenterTab(content: .terminal(session))
@@ -316,6 +461,10 @@ private struct ToggleWordWrapKey: FocusedValueKey {
     typealias Value = () -> Void
 }
 
+private struct CloseActiveTabKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
 extension FocusedValues {
     var renameActiveTab: (() -> Void)? {
         get { self[RenameActiveTabKey.self] }
@@ -326,14 +475,26 @@ extension FocusedValues {
         get { self[ToggleWordWrapKey.self] }
         set { self[ToggleWordWrapKey.self] = newValue }
     }
+
+    var closeActiveTab: (() -> Void)? {
+        get { self[CloseActiveTabKey.self] }
+        set { self[CloseActiveTabKey.self] = newValue }
+    }
 }
 
 struct AtelierTabCommands: Commands {
     @FocusedValue(\.renameActiveTab) private var renameActiveTab
     @FocusedValue(\.toggleWordWrap) private var toggleWordWrap
+    @FocusedValue(\.closeActiveTab) private var closeActiveTab
 
     var body: some Commands {
         CommandGroup(after: .toolbar) {
+            Button("Close Tab") {
+                closeActiveTab?()
+            }
+            .keyboardShortcut("w", modifiers: .command)
+            .disabled(closeActiveTab == nil)
+
             Button("Rename Tab...") {
                 renameActiveTab?()
             }
@@ -369,7 +530,7 @@ struct TerminalTabs: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
                         ForEach(model.visibleTabs) { tab in
-                            ZStack(alignment: .leading) {
+                            ZStack(alignment: .trailing) {
                                 Button {
                                     withAnimation(
                                         reduceMotion
@@ -390,12 +551,12 @@ struct TerminalTabs: View {
                                             .lineLimit(1)
                                     }
                                     .padding(
-                                        .leading,
+                                        .trailing,
                                         model.canClose(tab)
                                             ? AtelierMetrics.space2XL
                                             : AtelierMetrics.spaceM
                                     )
-                                    .padding(.trailing, AtelierMetrics.spaceM)
+                                    .padding(.leading, AtelierMetrics.spaceM)
                                     .frame(
                                         minWidth: AtelierMetrics.tabMinWidth,
                                         idealWidth: AtelierMetrics.tabIdealWidth,
@@ -469,6 +630,12 @@ struct TerminalTabs: View {
                                 Button("Rename Tab...") {
                                     beginRename(tab.id)
                                 }
+                                if model.canClose(tab) {
+                                    Divider()
+                                    Button("Close Tab") {
+                                        model.close(tab)
+                                    }
+                                }
                             }
                         }
                     }
@@ -505,19 +672,7 @@ struct TerminalTabs: View {
                     .foregroundStyle(
                         isAgentSidecarPresented ? AtelierTheme.accent : Color.primary
                     )
-                    .glassEffect(
-                        .regular
-                            .tint(
-                                isAgentSidecarPresented
-                                    ? AtelierTheme.accent.opacity(0.16)
-                                    : nil
-                            )
-                            .interactive(),
-                        in: RoundedRectangle(
-                            cornerRadius: AtelierTheme.controlRadius,
-                            style: .continuous
-                        )
-                    )
+                    .atelierGlassControl(isSelected: isAgentSidecarPresented)
                     .accessibilityLabel(
                         isAgentSidecarPresented
                             ? "Close agent response sidecar"
@@ -608,6 +763,7 @@ struct TerminalTabs: View {
             beginRename(selectedID)
         }
         .focusedSceneValue(\.toggleWordWrap, toggleWordWrapAction)
+        .focusedSceneValue(\.closeActiveTab, closeActiveTabAction)
         .sheet(isPresented: renameSheetPresented) {
             TabRenameSheet(currentTitle: renameTargetTitle) { title in
                 guard let renameTargetID else { return }
@@ -631,6 +787,11 @@ struct TerminalTabs: View {
     private var toggleWordWrapAction: (() -> Void)? {
         guard let editor = model.selectedEditor else { return nil }
         return { editor.toggleWordWrap() }
+    }
+
+    private var closeActiveTabAction: (() -> Void)? {
+        guard let tab = model.selectedTab, model.canClose(tab) else { return nil }
+        return { model.close(tab) }
     }
 
     private var renameTargetTitle: String {

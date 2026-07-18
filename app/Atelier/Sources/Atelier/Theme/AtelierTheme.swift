@@ -86,10 +86,9 @@ enum AtelierMetrics {
     static let spaceL: CGFloat = 16
     static let spaceXL: CGFloat = 24
     static let space2XL: CGFloat = 32
-    static let commandBarHeight: CGFloat = 48
-    static let panelHeaderHeight: CGFloat = 50
+    static let panelHeaderHeight: CGFloat = 40
     static let sectionHeaderHeight: CGFloat = 36
-    static let tabBarHeight: CGFloat = 42
+    static let tabBarHeight: CGFloat = 34
     static let statusBarHeight: CGFloat = 26
     static let iconButtonSize: CGFloat = 30
     static let smallIconSize: CGFloat = 8
@@ -117,25 +116,27 @@ enum AtelierMetrics {
     static let workspaceSidebarMinWidth: CGFloat = 300
     static let workspaceSidebarIdealWidth: CGFloat = 340
     static let workspaceSidebarMaxWidth: CGFloat = 420
+    static let inspectorMinWidth: CGFloat = 220
+    static let inspectorIdealWidth: CGFloat = 260
+    static let inspectorMaxWidth: CGFloat = 320
     static let tabMinWidth: CGFloat = 112
     static let tabIdealWidth: CGFloat = 152
     static let tabMaxWidth: CGFloat = 220
-    static let trafficLightReserve: CGFloat = 66
     static let zoomLabelMinWidth: CGFloat = 42
 }
 
 enum AtelierTypography {
     // Typographic scale: micro < caption < label < body < uiSize < headline < display.
-    static let micro: CGFloat = 9.5
-    static let caption: CGFloat = 10.5
+    static let micro: CGFloat = 11
+    static let caption: CGFloat = 11
     static let label: CGFloat = 11.5
     static let body: CGFloat = 12.5
     static let uiSize: CGFloat = 13
     static let headline: CGFloat = 15
     static let title: CGFloat = 17
     static let display: CGFloat = 24
-    static let editorSize: CGFloat = 16
-    static let terminalSize: CGFloat = 20
+    static let editorSize: CGFloat = 13
+    static let terminalSize: CGFloat = 14
 
     static func codeFont(size: CGFloat) -> NSFont {
         NSFont(name: "JetBrains Mono", size: size)

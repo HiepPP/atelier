@@ -259,6 +259,50 @@ struct AtelierTests {
         #expect(tabs.isTerminalSelected)
     }
 
+    @Test("Selected tab exposes stable inspector context")
+    @MainActor
+    func selectedTabInspectorContext() throws {
+        let root = temporaryDirectory("tab-inspector-context")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let fileURL = root.appendingPathComponent("main.swift")
+        try Data("let value = 1\n".utf8).write(to: fileURL)
+        let selection = DiffSelection(
+            change: GitChange(
+                path: "main.swift",
+                originalPath: nil,
+                kind: .untracked,
+                isStaged: false,
+                isUnstaged: true
+            ),
+            staged: false
+        )
+        let tabs = TerminalTabsModel(workspacePath: root.path)
+        defer { tabs.closeAll() }
+
+        let terminal = try #require(tabs.selectedInspectorContext)
+        #expect(terminal.kind == .terminal)
+        #expect(terminal.status == "Running")
+        #expect(terminal.showsActivity)
+        #expect(terminal.details.contains {
+            $0.label == "Working directory" && $0.value == root.path
+        })
+
+        tabs.openFile(fileURL)
+        let file = try #require(tabs.selectedInspectorContext)
+        #expect(file.kind == .file)
+        #expect(file.title == "main.swift")
+        #expect(!file.showsActivity)
+        #expect(file.details.contains { $0.label == "Word wrap" && $0.value == "On" })
+
+        tabs.openGitDiff(selection)
+        let diff = try #require(tabs.selectedInspectorContext)
+        #expect(diff.kind == .gitDiff)
+        #expect(diff.status == "No diff")
+        #expect(diff.details.contains {
+            $0.label == "Change" && $0.value == "Untracked"
+        })
+    }
+
     @Test("Editor documents use standardized URL identity")
     func editorDocumentIdentity() {
         let root = temporaryDirectory("editor-document")

@@ -7,6 +7,9 @@ nonisolated enum WorkspaceLayoutMode: Equatable, Sendable {
     case wide
 
     var docksSidebar: Bool { self != .compact }
+    var supportsInspector: Bool { self != .compact }
+    var showsInspectorByDefault: Bool { self == .wide }
+    var keepsSidebarWithInspector: Bool { self == .wide }
 }
 
 nonisolated enum WorkspaceSidebarTab: String, CaseIterable, Identifiable, Sendable {
@@ -26,7 +29,6 @@ nonisolated enum WorkspaceSidebarTab: String, CaseIterable, Identifiable, Sendab
 nonisolated enum WorkspaceLayoutPolicy {
     static let compactBreakpoint: CGFloat = 900
     static let wideBreakpoint: CGFloat = 1_280
-    static let maximumOverlayWidth: CGFloat = 380
 
     static func mode(containerWidth: CGFloat) -> WorkspaceLayoutMode {
         if containerWidth < compactBreakpoint { return .compact }
@@ -34,12 +36,6 @@ nonisolated enum WorkspaceLayoutPolicy {
         return .wide
     }
 
-    static func overlayWidth(containerWidth: CGFloat) -> CGFloat {
-        min(
-            maximumOverlayWidth,
-            max(300, (containerWidth * 0.46).rounded())
-        )
-    }
 }
 
 struct ContentView: View {
@@ -157,16 +153,18 @@ struct WorkspaceView: View {
     let session: WorkspaceSession
     @Environment(AppModel.self) private var app
     @Environment(AtelierZoomModel.self) private var zoom
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fileTreeCreationRequest: FileTreeCreationRequest?
     @State private var fileTreeTargetDirectory: URL?
     @State private var responderBeforeAgentPreview: NSResponder?
-    @State private var responderBeforeProjectMenu: NSResponder?
-    @State private var isProjectMenuPresented = false
     @State private var selectedSidebarTab = WorkspaceSidebarTab.explorer
-    @State private var isSidebarDockedHidden = false
-    @State private var isSidebarOverlayPresented = false
-    @FocusState private var isProjectMenuFocused: Bool
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
+    @State private var columnVisibilityBeforeFocus = NavigationSplitViewVisibility.all
+    @State private var columnVisibilityBeforeInspector = NavigationSplitViewVisibility.all
+    @State private var isInspectorPresented = false
+    @State private var inspectorWasPresentedBeforeFocus = false
+    @State private var responderBeforeInspector: NSResponder?
+    @State private var hasAppliedInitialLayout = false
+    @State private var currentLayoutMode = WorkspaceLayoutMode.standard
 
     var body: some View {
         GeometryReader { outerGeometry in
@@ -174,48 +172,29 @@ struct WorkspaceView: View {
                 containerWidth: outerGeometry.size.width
             )
 
-            ZStack(alignment: .top) {
-                VStack(spacing: 0) {
-                    commandBar(layout: workspaceLayout)
-
-                    Divider()
-
-                    GeometryReader { geometry in
-                        workspaceSurface(
-                            containerWidth: geometry.size.width,
-                            containerHeight: geometry.size.height,
-                            workspaceLayout: workspaceLayout
-                        )
-                    }
-
-                    statusBar
-                }
-
-                if isProjectMenuPresented {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture(perform: closeProjectMenu)
-                        .accessibilityHidden(true)
-
-                    projectMenuContent
-                        .padding(.top, AtelierMetrics.commandBarHeight - 3)
-                        .focusable()
-                        .focused($isProjectMenuFocused)
-                        .focusEffectDisabled()
-                        .onAppear {
-                            isProjectMenuFocused = true
-                        }
-                        .onExitCommand(perform: closeProjectMenu)
-                        .transition(
-                            .scale(scale: 0.96, anchor: .top)
-                                .combined(with: .opacity)
-                        )
-                }
+            VStack(spacing: 0) {
+                workspaceSurface
+                statusBar
             }
             .background(AtelierTheme.editor)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .ignoresSafeArea(.container, edges: .top)
-            .onExitCommand(perform: closeProjectMenu)
+            .toolbar { workspaceToolbar }
+            .navigationTitle(folderName)
+            .onAppear {
+                applyInitialLayout(workspaceLayout)
+            }
+            .onChange(of: workspaceLayout) { oldLayout, newLayout in
+                adaptPanels(from: oldLayout, to: newLayout)
+            }
+            .onChange(of: zoom.isFocusMode) { _, isFocused in
+                updateFocusMode(isFocused)
+            }
+            .onChange(of: columnVisibility) { _, visibility in
+                guard isInspectorPresented,
+                      !currentLayoutMode.keepsSidebarWithInspector,
+                      visibility != .detailOnly else { return }
+                isInspectorPresented = false
+            }
         }
     }
 
@@ -231,19 +210,15 @@ struct WorkspaceView: View {
         URL(fileURLWithPath: state.path, isDirectory: true)
     }
 
-    private func workspaceColumns(layout: WorkspaceLayoutMode) -> some View {
-        HSplitView {
-            if !zoom.isFocusMode,
-               layout.docksSidebar,
-               !isSidebarDockedHidden {
-                workspaceSidebar
-                    .frame(
-                        minWidth: AtelierMetrics.workspaceSidebarMinWidth,
-                        idealWidth: AtelierMetrics.workspaceSidebarIdealWidth,
-                        maxWidth: AtelierMetrics.workspaceSidebarMaxWidth
-                    )
-            }
-
+    private var workspaceSurface: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            workspaceSidebar
+                .navigationSplitViewColumnWidth(
+                    min: AtelierMetrics.workspaceSidebarMinWidth,
+                    ideal: AtelierMetrics.workspaceSidebarIdealWidth,
+                    max: AtelierMetrics.workspaceSidebarMaxWidth
+                )
+        } detail: {
             TerminalTabs(
                 model: terminalTabs,
                 agentResponses: session.agentResponses,
@@ -251,346 +226,188 @@ struct WorkspaceView: View {
                 onOpenAgentSidecar: openAgentSidecar,
                 onCloseAgentSidecar: closeAgentSidecar
             )
-                .frame(
-                    minWidth: AtelierMetrics.centerMinWidth,
-                    idealWidth: AtelierMetrics.centerIdealWidth
-                )
-                .layoutPriority(2)
+            .frame(minWidth: AtelierMetrics.centerMinWidth)
+            .layoutPriority(2)
         }
+        .navigationSplitViewStyle(.balanced)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .atelierSplitViewChrome()
-    }
-
-    private func workspaceSurface(
-        containerWidth: CGFloat,
-        containerHeight: CGFloat,
-        workspaceLayout: WorkspaceLayoutMode
-    ) -> some View {
-        workspaceColumns(layout: workspaceLayout)
-        .overlay(alignment: .leading) {
-            if !zoom.isFocusMode,
-               !workspaceLayout.docksSidebar,
-               isSidebarOverlayPresented {
-                workspaceSidebar
-                    .frame(width: WorkspaceLayoutPolicy.overlayWidth(containerWidth: containerWidth))
-                    .atelierOverlayPanel(edge: .leading)
-                    .onExitCommand {
-                        isSidebarOverlayPresented = false
-                    }
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            }
+        .inspector(isPresented: $isInspectorPresented) {
+            WorkspaceInspectorView(context: terminalTabs.selectedInspectorContext)
+                .inspectorColumnWidth(
+                    min: AtelierMetrics.inspectorMinWidth,
+                    ideal: AtelierMetrics.inspectorIdealWidth,
+                    max: AtelierMetrics.inspectorMaxWidth
+                )
         }
     }
 
     private func openAgentSidecar() {
         responderBeforeAgentPreview = app.windowController.currentFirstResponder()
-        session.openAgentSidecar()
+        Task { @MainActor in
+            await Task.yield()
+            session.openAgentSidecar()
+        }
     }
 
     private func closeAgentSidecar() {
-        session.closeAgentSidecar()
-        app.windowController.restoreFirstResponder(responderBeforeAgentPreview)
-        responderBeforeAgentPreview = nil
-    }
-
-    private func isSidebarVisible(layout: WorkspaceLayoutMode) -> Bool {
-        layout.docksSidebar ? !isSidebarDockedHidden : isSidebarOverlayPresented
-    }
-
-    private func selectSidebar(_ tab: WorkspaceSidebarTab, layout: WorkspaceLayoutMode) {
-        let shouldHide = selectedSidebarTab == tab && isSidebarVisible(layout: layout)
-        selectedSidebarTab = tab
-        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
-            if layout.docksSidebar {
-                isSidebarDockedHidden = shouldHide
-            } else {
-                isSidebarOverlayPresented = !shouldHide
-            }
+        Task { @MainActor in
+            await Task.yield()
+            session.closeAgentSidecar()
+            app.windowController.restoreFirstResponder(responderBeforeAgentPreview)
+            responderBeforeAgentPreview = nil
         }
     }
 
-    private func commandBar(layout: WorkspaceLayoutMode) -> some View {
-        ZStack {
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) {
-                    app.windowController.zoomWorkspaceWindow()
-                }
-
-            HStack(spacing: AtelierMetrics.spaceXS) {
-                Color.clear
-                    .frame(width: AtelierMetrics.trafficLightReserve, height: 1)
-
-                Button {
-                    selectSidebar(.explorer, layout: layout)
-                } label: {
-                    Image(systemName: "sidebar.leading")
-                }
-                .buttonStyle(
-                    AtelierToolbarButtonStyle(
-                        isSelected: isSidebarVisible(layout: layout)
-                            && selectedSidebarTab == .explorer
-                    )
-                )
-                .accessibilityLabel(
-                    isSidebarVisible(layout: layout) && selectedSidebarTab == .explorer
-                        ? "Hide Explorer"
-                        : "Show Explorer"
-                )
-                .help("Show Explorer")
-
-                Button {
-                    selectSidebar(.sourceControl, layout: layout)
-                } label: {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "arrow.triangle.branch")
-                        if gitModel.snapshot.status.changes.count > 0 {
-                            Circle()
-                                .fill(AtelierTheme.gitOrange)
-                                .frame(width: 6, height: 6)
-                                .offset(x: 3, y: -3)
-                        }
-                    }
-                }
-                .buttonStyle(
-                    AtelierToolbarButtonStyle(
-                        isSelected: isSidebarVisible(layout: layout)
-                            && selectedSidebarTab == .sourceControl
-                    )
-                )
-                .accessibilityLabel(
-                    isSidebarVisible(layout: layout) && selectedSidebarTab == .sourceControl
-                        ? "Hide Source Control"
-                        : "Show Source Control"
-                )
-                .accessibilityValue("\(gitModel.snapshot.status.changes.count) changes")
-                .help(
-                    isSidebarVisible(layout: layout) && selectedSidebarTab == .sourceControl
-                        ? "Hide Source Control"
-                        : "Show Source Control"
-                )
-
-                Spacer(minLength: AtelierMetrics.spaceM)
-
-                Button {
-                    session.openGemma()
-                } label: {
-                    Image(systemName: "sparkles")
-                }
-                .buttonStyle(AtelierToolbarButtonStyle(isSelected: terminalTabs.gemmaTabCount > 0))
-                .accessibilityLabel("Open Gemma workspace assistant")
-                .help("Open Gemma workspace assistant")
-
-                Button {
-                    zoom.toggleFocusMode()
-                } label: {
-                    Image(
-                        systemName: zoom.isFocusMode
-                            ? "rectangle.split.3x1"
-                            : "rectangle.center.inset.filled"
-                    )
-                }
-                .buttonStyle(AtelierToolbarButtonStyle(isSelected: zoom.isFocusMode))
-                .accessibilityLabel(zoom.isFocusMode ? "Exit focus mode" : "Enter focus mode")
-                .help(zoom.isFocusMode ? "Exit focus mode" : "Enter focus mode")
-            }
-
-            Button {
-                toggleProjectMenu()
-            } label: {
-                HStack(spacing: AtelierMetrics.spaceM) {
-                    Image(systemName: "square.stack.3d.up")
-                        .atelierFont(size: AtelierTypography.label, weight: .semibold)
-                        .foregroundStyle(AtelierTheme.accent)
-
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(folderName)
-                            .atelierFont(
-                                size: AtelierTypography.headline,
-                                weight: .semibold,
-                                design: .serif
-                            )
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-
-                        if layout != .compact {
-                            Text(
-                                gitModel.snapshot.branch.isEmpty
-                                    ? "Detached HEAD"
-                                    : gitModel.snapshot.branch
-                            )
-                            .atelierFont(size: AtelierTypography.micro, design: .monospaced)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        }
-                    }
-                }
-                .padding(.horizontal, AtelierMetrics.spaceM)
-                .frame(
-                    minWidth: layout == .compact ? 180 : 240,
-                    idealWidth: 300,
-                    maxWidth: 340,
-                    minHeight: AtelierMetrics.controlHeight,
-                    maxHeight: AtelierMetrics.controlHeight
-                )
-                .contentShape(
-                    RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                )
-            }
-            .buttonStyle(.plain)
-            .glassEffect(
-                .regular
-                    .tint(isProjectMenuPresented ? AtelierTheme.accent.opacity(0.16) : nil)
-                    .interactive(),
-                in: RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
-            )
-            .scaleEffect(
-                reduceMotion ? 1 : (isProjectMenuPresented ? 1.012 : 1)
-            )
-            .animation(
-                reduceMotion
-                    ? nil
-                    : .spring(response: 0.22, dampingFraction: 0.76),
-                value: isProjectMenuPresented
-            )
-            .accessibilityLabel("Project commands for \(folderName)")
-            .accessibilityValue(
-                [
-                    isProjectMenuPresented ? "Expanded" : "Collapsed",
-                    gitModel.snapshot.branch.isEmpty
-                        ? "No active branch"
-                        : "Branch \(gitModel.snapshot.branch)"
-                ].joined(separator: ", ")
-            )
-            .help("Project commands")
-            .atelierPointerCursor()
-        }
-        .padding(.horizontal, AtelierMetrics.spaceM)
-        .frame(height: AtelierMetrics.commandBarHeight)
-        .background(AtelierTheme.chrome)
-    }
-
-    private var projectMenuContent: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            ProjectMenuSectionLabel(title: "Workspace")
-
-            ProjectMenuRow(title: "Open Folder...", systemImage: "folder") {
-                performProjectCommand {
+    @ToolbarContentBuilder
+    private var workspaceToolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            Menu {
+                Button("Open Folder...", systemImage: "folder") {
                     app.chooseWorkspace()
                 }
-            }
-
-            ProjectMenuRow(
-                title: "Show in Finder",
-                systemImage: "folder.badge.magnifyingglass"
-            ) {
-                performProjectCommand {
+                Button("Show in Finder", systemImage: "folder.badge.magnifyingglass") {
                     NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
                 }
-            }
-
-            Divider()
-                .padding(.vertical, AtelierMetrics.spaceXS)
-
-            ProjectMenuSectionLabel(title: "Open")
-
-            ProjectMenuRow(title: "Open Gemma", systemImage: "sparkles") {
-                performProjectCommand {
+                Divider()
+                Button("Open Gemma", systemImage: "sparkles") {
                     session.openGemma()
                 }
-            }
-
-            Divider()
-                .padding(.vertical, AtelierMetrics.spaceXS)
-
-            ProjectMenuSectionLabel(title: "View")
-
-            ProjectMenuRow(
-                title: zoom.isFocusMode ? "Exit Focus Mode" : "Enter Focus Mode",
-                systemImage: zoom.isFocusMode
-                    ? "rectangle.split.3x1"
-                    : "rectangle.center.inset.filled"
-            ) {
-                performProjectCommand {
-                    zoom.toggleFocusMode()
-                }
-            }
-
-            ProjectMenuRow(
-                title: "Zoom In",
-                systemImage: "plus.magnifyingglass",
-                isEnabled: zoom.canZoomIn
-            ) {
-                performProjectCommand {
+                Divider()
+                Button("Zoom In", systemImage: "plus.magnifyingglass") {
                     app.windowController.maximizeWorkspaceWindow()
                     zoom.zoomIn()
                 }
-            }
-
-            ProjectMenuRow(
-                title: "Zoom Out",
-                systemImage: "minus.magnifyingglass",
-                isEnabled: zoom.canZoomOut
-            ) {
-                performProjectCommand {
+                .disabled(!zoom.canZoomIn)
+                Button("Zoom Out", systemImage: "minus.magnifyingglass") {
                     zoom.zoomOut()
                 }
-            }
-
-            ProjectMenuRow(title: "Actual Size", systemImage: "1.magnifyingglass") {
-                performProjectCommand {
+                .disabled(!zoom.canZoomOut)
+                Button("Actual Size", systemImage: "1.magnifyingglass") {
                     zoom.reset()
                 }
+            } label: {
+                Label(folderName, systemImage: "square.stack.3d.up")
             }
+            .help("Project commands")
+            .accessibilityLabel("Project commands for \(folderName)")
         }
-        .padding(AtelierMetrics.spaceS)
-        .frame(width: AtelierMetrics.projectMenuWidth)
-        .background(AtelierTheme.panel)
-        .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.panelRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: AtelierTheme.panelRadius)
-                .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                session.openGemma()
+            } label: {
+                Image(systemName: "sparkles")
+            }
+            .accessibilityLabel("Open Gemma workspace assistant")
+            .help("Open Gemma workspace assistant")
+
+            Button {
+                zoom.toggleFocusMode()
+            } label: {
+                Image(
+                    systemName: zoom.isFocusMode
+                        ? "rectangle.split.3x1"
+                        : "rectangle.center.inset.filled"
+                )
+            }
+            .accessibilityLabel(zoom.isFocusMode ? "Exit focus mode" : "Enter focus mode")
+            .help(zoom.isFocusMode ? "Exit focus mode" : "Enter focus mode")
+
+            Button {
+                toggleInspector()
+            } label: {
+                Image(systemName: "sidebar.trailing")
+            }
+            .accessibilityLabel(isInspectorPresented ? "Hide inspector" : "Show inspector")
+            .help(isInspectorPresented ? "Hide Inspector" : "Show Inspector")
+            .disabled(zoom.isFocusMode || !currentLayoutMode.supportsInspector)
         }
-        .shadow(
-            color: AtelierTheme.shadowFloating,
-            radius: AtelierMetrics.spaceL,
-            y: AtelierMetrics.spaceS
-        )
     }
 
-    private func toggleProjectMenu() {
-        if !isProjectMenuPresented {
-            responderBeforeProjectMenu = app.windowController.currentFirstResponder()
-        }
-        withAnimation(projectMenuAnimation) {
-            isProjectMenuPresented.toggle()
-        }
-        if !isProjectMenuPresented {
-            restoreProjectMenuResponder()
+    private func applyInitialLayout(_ layout: WorkspaceLayoutMode) {
+        guard !hasAppliedInitialLayout else { return }
+        hasAppliedInitialLayout = true
+        currentLayoutMode = layout
+        columnVisibility = layout.docksSidebar ? .all : .detailOnly
+        isInspectorPresented = layout.showsInspectorByDefault
+    }
+
+    private func adaptPanels(
+        from oldLayout: WorkspaceLayoutMode,
+        to newLayout: WorkspaceLayoutMode
+    ) {
+        currentLayoutMode = newLayout
+        guard !zoom.isFocusMode else { return }
+        if newLayout == .compact {
+            columnVisibility = .detailOnly
+            isInspectorPresented = false
+        } else if oldLayout == .compact {
+            columnVisibility = .all
+            isInspectorPresented = newLayout.showsInspectorByDefault
+        } else if newLayout == .wide {
+            columnVisibility = .all
+            isInspectorPresented = true
+        } else if isInspectorPresented {
+            columnVisibilityBeforeInspector = columnVisibility
+            columnVisibility = .detailOnly
         }
     }
 
-    private func closeProjectMenu() {
-        guard isProjectMenuPresented else { return }
-        withAnimation(projectMenuAnimation) {
-            isProjectMenuPresented = false
+    private func updateFocusMode(_ isFocused: Bool) {
+        if isFocused {
+            columnVisibilityBeforeFocus = columnVisibility
+            inspectorWasPresentedBeforeFocus = isInspectorPresented
+            columnVisibility = .detailOnly
+            isInspectorPresented = false
+        } else {
+            columnVisibility = columnVisibilityBeforeFocus
+            isInspectorPresented = inspectorWasPresentedBeforeFocus
         }
-        restoreProjectMenuResponder()
     }
 
-    private func performProjectCommand(_ action: () -> Void) {
-        closeProjectMenu()
-        action()
+    private func toggleInspector() {
+        guard currentLayoutMode.supportsInspector else { return }
+        responderBeforeInspector = app.windowController.currentFirstResponder()
+        if isInspectorPresented {
+            isInspectorPresented = false
+            restorePanelsAfterInspectorCloses()
+        } else {
+            columnVisibilityBeforeInspector = columnVisibility
+            if !currentLayoutMode.keepsSidebarWithInspector {
+                columnVisibility = .detailOnly
+                presentInspectorAfterSidebarCloses()
+                return
+            }
+            isInspectorPresented = true
+            restoreInspectorResponder()
+        }
     }
 
-    private var projectMenuAnimation: Animation? {
-        reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.76)
+    private func presentInspectorAfterSidebarCloses() {
+        Task { @MainActor in
+            await Task.yield()
+            guard currentLayoutMode.supportsInspector, !zoom.isFocusMode else {
+                restoreInspectorResponder()
+                return
+            }
+            isInspectorPresented = true
+            restoreInspectorResponder()
+        }
     }
 
-    private func restoreProjectMenuResponder() {
-        isProjectMenuFocused = false
-        app.windowController.restoreFirstResponder(responderBeforeProjectMenu)
-        responderBeforeProjectMenu = nil
+    private func restorePanelsAfterInspectorCloses() {
+        Task { @MainActor in
+            await Task.yield()
+            if currentLayoutMode != .compact {
+                columnVisibility = columnVisibilityBeforeInspector
+            }
+            restoreInspectorResponder()
+        }
+    }
+
+    private func restoreInspectorResponder() {
+        app.windowController.restoreFirstResponder(responderBeforeInspector)
+        responderBeforeInspector = nil
     }
 
     private var workspaceSidebar: some View {
@@ -760,72 +577,101 @@ struct WorkspaceView: View {
     }
 }
 
-private struct ProjectMenuSectionLabel: View {
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .atelierFont(size: AtelierTypography.micro, weight: .semibold)
-            .foregroundStyle(.secondary)
-            .textCase(.uppercase)
-            .padding(.horizontal, AtelierMetrics.spaceS)
-            .padding(.bottom, AtelierMetrics.spaceXS)
-            .accessibilityAddTraits(.isHeader)
-    }
-}
-
-private struct ProjectMenuRow: View {
-    let title: String
-    let systemImage: String
-    var isEnabled = true
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: AtelierMetrics.spaceS) {
-                Image(systemName: systemImage)
-                    .atelierFont(size: AtelierTypography.label, weight: .medium)
-                    .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
-                    .frame(width: AtelierMetrics.spaceL)
-
-                Text(title)
-                    .atelierFont(size: AtelierTypography.label)
-
-                Spacer(minLength: AtelierMetrics.spaceM)
-            }
-            .padding(.horizontal, AtelierMetrics.spaceS)
-            .frame(maxWidth: .infinity)
-            .frame(height: AtelierMetrics.controlHeight)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(AtelierMenuRowButtonStyle())
-        .disabled(!isEnabled)
-        .accessibilityLabel(title)
-    }
-}
-
-private struct AtelierMenuRowButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
+private struct WorkspaceInspectorView: View {
+    let context: TerminalTabInspectorContext?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovering = false
+    @Environment(\.colorSchemeContrast) private var contrast
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background {
-                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
-                    .fill(AtelierTheme.controlFill(for: interactionState(configuration)))
+    var body: some View {
+        Group {
+            if let context {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: AtelierMetrics.spaceL) {
+                        inspectorHeader(context)
+
+                        Divider()
+
+                        VStack(spacing: 0) {
+                            ForEach(Array(context.details.enumerated()), id: \.offset) { index, detail in
+                                inspectorRow(detail)
+                                if index < context.details.count - 1 {
+                                    Divider()
+                                }
+                            }
+                        }
+                    }
+                    .padding(AtelierMetrics.spaceL)
+                }
+            } else {
+                AtelierEmptyState(
+                    systemImage: "sidebar.trailing",
+                    title: "Inspector",
+                    message: "Open a tab to inspect its context."
+                )
             }
-            .opacity(AtelierTheme.controlOpacity(for: interactionState(configuration)))
-            .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : 0.99)
-            .onHover { isHovering = $0 }
-            .atelierPointerCursor()
+        }
+        .background(AtelierTheme.panel)
+        .accessibilityLabel("Workspace inspector")
     }
 
-    private func interactionState(_ configuration: Configuration) -> AtelierInteractionState {
-        if !isEnabled { return .disabled }
-        if configuration.isPressed { return .pressed }
-        if isHovering { return .hovered }
-        return .normal
+    private func inspectorHeader(_ context: TerminalTabInspectorContext) -> some View {
+        HStack(alignment: .top, spacing: AtelierMetrics.spaceM) {
+            ZStack {
+                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+                    .fill(AtelierTheme.accent.opacity(contrast == .increased ? 0.18 : 0.10))
+                Image(systemName: context.systemImage)
+                    .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
+                    .foregroundStyle(AtelierTheme.accent)
+            }
+            .frame(width: 30, height: 30)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(context.title)
+                    .atelierFont(size: AtelierTypography.uiSize, weight: .semibold)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+
+                HStack(spacing: AtelierMetrics.spaceXS) {
+                    if context.showsActivity {
+                        Image(systemName: "circle.fill")
+                            .atelierFont(size: 7)
+                            .foregroundStyle(AtelierTheme.accent)
+                            .symbolEffect(
+                                .pulse,
+                                options: .repeating,
+                                isActive: !reduceMotion
+                            )
+                            .accessibilityHidden(true)
+                    }
+                    Text("\(context.kind.rawValue) - \(context.status)")
+                        .atelierFont(size: AtelierTypography.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(context.kind.rawValue), \(context.title), \(context.status)")
+    }
+
+    private func inspectorRow(_ detail: TerminalTabInspectorDetail) -> some View {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
+            Text(detail.label)
+                .atelierFont(size: AtelierTypography.caption, weight: .medium)
+                .foregroundStyle(.secondary)
+            Text(detail.value)
+                .atelierFont(
+                    size: AtelierTypography.label,
+                    design: detail.label == "Path" || detail.label == "Working directory"
+                        ? .monospaced
+                        : .default
+                )
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, AtelierMetrics.spaceS)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(detail.label): \(detail.value)")
     }
 }
 

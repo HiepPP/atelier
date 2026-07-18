@@ -61,6 +61,7 @@ struct DisplaySizingTests {
     @Test("Workspace panes adapt around editor-first breakpoints")
     func workspaceLayoutPolicy() {
         #expect(WorkspaceLayoutPolicy.mode(containerWidth: 759) == .compact)
+        #expect(WorkspaceLayoutPolicy.mode(containerWidth: 760) == .compact)
         #expect(WorkspaceLayoutPolicy.mode(containerWidth: 899) == .compact)
         #expect(WorkspaceLayoutPolicy.mode(containerWidth: 900) == .standard)
         #expect(WorkspaceLayoutPolicy.mode(containerWidth: 1_279) == .standard)
@@ -69,10 +70,24 @@ struct DisplaySizingTests {
         #expect(!WorkspaceLayoutMode.compact.docksSidebar)
         #expect(WorkspaceLayoutMode.standard.docksSidebar)
         #expect(WorkspaceLayoutMode.wide.docksSidebar)
+        #expect(!WorkspaceLayoutMode.compact.showsInspectorByDefault)
+        #expect(!WorkspaceLayoutMode.standard.showsInspectorByDefault)
+        #expect(WorkspaceLayoutMode.wide.showsInspectorByDefault)
+        #expect(!WorkspaceLayoutMode.compact.supportsInspector)
+        #expect(WorkspaceLayoutMode.standard.supportsInspector)
+        #expect(WorkspaceLayoutMode.wide.supportsInspector)
+        #expect(!WorkspaceLayoutMode.compact.keepsSidebarWithInspector)
+        #expect(!WorkspaceLayoutMode.standard.keepsSidebarWithInspector)
+        #expect(WorkspaceLayoutMode.wide.keepsSidebarWithInspector)
 
         #expect(WorkspaceSidebarTab.allCases == [.explorer, .sourceControl])
 
-        #expect(WorkspaceLayoutPolicy.overlayWidth(containerWidth: 760) == 350)
-        #expect(WorkspaceLayoutPolicy.overlayWidth(containerWidth: 1_000) == 380)
+        #expect(AtelierMetrics.tabBarHeight == 34)
+        #expect(AtelierTypography.micro == 11)
+        #expect(AtelierTypography.caption == 11)
+        #expect(AtelierTypography.uiSize == 13)
+        #expect(AtelierTypography.editorSize == 13)
+        #expect(AtelierTypography.terminalSize == 14)
+        #expect(AtelierZoomModel.baseMinimumSize == CGSize(width: 760, height: 512))
     }
 }

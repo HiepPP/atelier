@@ -165,10 +165,7 @@ struct AgentResponsesView: View {
             )
             .padding(.horizontal, AtelierMetrics.spaceS)
             .frame(height: AtelierMetrics.controlHeight)
-            .glassEffect(
-                .regular.interactive(),
-                in: RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
-            )
+            .atelierGlassControl()
             .lineLimit(1)
         }
         .menuStyle(.borderlessButton)

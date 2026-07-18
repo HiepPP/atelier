@@ -1,5 +1,52 @@
 import SwiftUI
 
+private struct AtelierGlassControlModifier: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    let isSelected: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content
+                .background(
+                    isSelected ? AtelierTheme.selection : AtelierTheme.raised,
+                    in: RoundedRectangle(
+                        cornerRadius: AtelierTheme.controlRadius,
+                        style: .continuous
+                    )
+                )
+                .overlay {
+                    RoundedRectangle(
+                        cornerRadius: AtelierTheme.controlRadius,
+                        style: .continuous
+                    )
+                    .stroke(
+                        isSelected ? AtelierTheme.accent : AtelierTheme.border,
+                        lineWidth: contrast == .increased ? 1.5 : AtelierTheme.strokeControl
+                    )
+                }
+        } else {
+            content.glassEffect(
+                .regular
+                    .tint(isSelected ? AtelierTheme.accent.opacity(0.16) : nil)
+                    .interactive(),
+                in: RoundedRectangle(
+                    cornerRadius: AtelierTheme.controlRadius,
+                    style: .continuous
+                )
+            )
+        }
+    }
+}
+
+extension View {
+    func atelierGlassControl(isSelected: Bool = false) -> some View {
+        modifier(AtelierGlassControlModifier(isSelected: isSelected))
+    }
+}
+
 /// Standard panel header: icon, title, optional mono subtitle, trailing controls.
 /// One height, one background, one hairline for every panel in the app.
 struct AtelierPanelHeader<Trailing: View>: View {
@@ -144,12 +191,7 @@ struct AtelierToolbarButtonStyle: ButtonStyle {
             .atelierFont(size: AtelierTypography.label, weight: .medium)
             .frame(width: AtelierMetrics.iconButtonSize, height: AtelierMetrics.iconButtonSize)
             .foregroundStyle(isSelected ? AtelierTheme.accent : Color.primary)
-            .glassEffect(
-                .regular
-                    .tint(isSelected ? AtelierTheme.accent.opacity(0.18) : nil)
-                    .interactive(isEnabled),
-                in: RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
-            )
+            .atelierGlassControl(isSelected: isSelected)
             .overlay(alignment: .bottom) {
                 if isSelected {
                     Capsule()

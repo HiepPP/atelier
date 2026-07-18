@@ -18,6 +18,11 @@ struct GemmaAgentModelTests {
 
         #expect(tabs.gemmaTabCount == 1)
         #expect(tabs.selectedID == firstSelection)
+        #expect(tabs.selectedInspectorContext?.kind == .gemma)
+        #expect(tabs.selectedInspectorContext?.status == "Ready")
+        #expect(tabs.selectedInspectorContext?.details.contains {
+            $0.label == "Access" && $0.value == "Read-only"
+        } == true)
     }
 
     @Test("Model streams an answer and clears its session")
