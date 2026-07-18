@@ -12,10 +12,11 @@ struct AtelierTests {
         let state = WorkspaceState(path: root.path, bookmark: nil, lastOpenedAt: Date(timeIntervalSince1970: 1))
         let service = WorkspacePersistenceService(fileURL: fileURL)
 
-        try await service.save(state)
+        let catalog = WorkspaceCatalogState(workspaces: [state], selectedWorkspaceID: state.id)
+        try await service.save(catalog)
         let loaded = try await service.load()
 
-        #expect(loaded == state)
+        #expect(loaded == catalog)
     }
 
     @Test("File loader classifies text, binary, and large files")

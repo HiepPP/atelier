@@ -107,6 +107,7 @@ struct AtelierPaletteView: View {
                                 model.select(id: match.id)
                                 activateSelection()
                             }
+                            .atelierPointerCursor()
                     }
                 case .commands:
                     ForEach(model.commandResults) { match in
@@ -117,6 +118,7 @@ struct AtelierPaletteView: View {
                                 model.select(id: match.id)
                                 activateSelection()
                             }
+                            .atelierPointerCursor()
                     }
                 }
             }

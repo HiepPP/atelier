@@ -9,6 +9,8 @@ Atelier is a native macOS IDE for browsing, editing, running, and reviewing a lo
 - Embedded multi-tab SwiftTerm terminals.
 - Git status, diff, staging, commit, and branch controls.
 - Workspace restoration and security-scoped folder access.
+- Concurrent workspaces with isolated tabs, terminals, navigation, Git, agent, and palette state.
+- Persistent outer workspace rail for adding and switching live sessions.
 - File-system monitoring with incremental UI refreshes.
 - Keyboard shortcuts, focus mode, zoom, and native window behavior.
 
@@ -28,8 +30,8 @@ Main state owners:
 
 | State | Owner |
 |---|---|
-| Application lifecycle and active workspace | `AppModel` |
-| Workspace resources and file watching | `WorkspaceSession` |
+| Application lifecycle, ordered workspace catalog, and active selection | `AppModel` |
+| Isolated workspace resources, models, terminals, and file watching | `WorkspaceSession` |
 | File content and wrap mode | `EditorSession` |
 | Open file and terminal tabs | `TerminalTabsModel` |
 | Git status and operations | `GitWorkspaceModel` |
@@ -37,6 +39,8 @@ Main state owners:
 | Window and global shortcut behavior | `WindowController` |
 
 Side effects stay behind focused services for persistence, workspace access, file loading, file watching, Git, and terminal processes. Long-lived tasks and native resources have explicit cancellation paths.
+
+The persisted app catalog stores ordered workspace identity, folder access data, and the selected workspace. Each live `WorkspaceSession` owns its runtime state and security-scoped access. Switching changes selection only, so inactive terminals and watchers stay alive. Tabs, terminals, navigation, Git presentation, agents, and palette state remain session-only and are not restored after app termination.
 
 ## Project Structure
 

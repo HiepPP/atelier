@@ -79,6 +79,7 @@ struct AtelierPalettePresentationTests {
     private func actionContext(hasWorkspace: Bool) -> AtelierActionContext {
         AtelierActionContext(
             hasWorkspace: hasWorkspace,
+            canCloseWorkspace: hasWorkspace,
             canCloseTab: hasWorkspace,
             canNavigateBack: false,
             canNavigateForward: true,

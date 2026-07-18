@@ -27,6 +27,7 @@ nonisolated struct AtelierActionDescriptor: Identifiable, Equatable, Sendable {
 
 nonisolated struct AtelierActionContext: Equatable, Sendable {
     let hasWorkspace: Bool
+    let canCloseWorkspace: Bool
     let canCloseTab: Bool
     let canNavigateBack: Bool
     let canNavigateForward: Bool
@@ -175,7 +176,9 @@ nonisolated enum AtelierActionRegistry {
         switch id {
         case .openFolder, .actualSize, .toggleFocusMode:
             true
-        case .closeWorkspace, .newTerminal, .openGemma:
+        case .closeWorkspace:
+            context.canCloseWorkspace
+        case .newTerminal, .openGemma:
             context.hasWorkspace
         case .closeTab:
             context.canCloseTab
@@ -196,6 +199,7 @@ nonisolated enum AtelierActionRegistry {
     static func context(for model: AppModel) -> AtelierActionContext {
         AtelierActionContext(
             hasWorkspace: model.workspace != nil,
+            canCloseWorkspace: model.selectedWorkspaceItem != nil,
             canCloseTab: model.workspace?.terminalTabs.canCloseSelectedTab == true,
             canNavigateBack: model.workspace?.terminalTabs.canNavigateBack == true,
             canNavigateForward: model.workspace?.terminalTabs.canNavigateForward == true,

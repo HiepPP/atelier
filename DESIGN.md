@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Status | Current implementation baseline |
-| Updated | 2026-07-18 |
+| Updated | 2026-07-19 |
 | Baseline commit | `72fcd61` |
 | Platform | macOS 26+ |
 | UI stack | SwiftUI, AppKit, Luminare |
@@ -31,23 +31,27 @@ SwiftUI owns composition and observable presentation state. AppKit owns native v
 ```text
 AtelierApp
 `-- ContentView
-    |-- Empty workspace
-    |-- Quick Open or Command Palette overlay
-    `-- WorkspaceView
-        |-- Toolbar
-        |-- HSplitView
-        |   |-- Sidebar: Explorer or Git
-        |   |-- Center: terminal, file, diff, or Gemma tabs
-        |   `-- Inspector
-        `-- Status bar
+    |-- Workspace rail
+    |   |-- Ordered live workspace items
+    |   `-- Add workspace action
+    |-- Selected workspace content
+    |   |-- Empty catalog
+    |   `-- WorkspaceView
+    |       |-- Toolbar
+    |       |-- HSplitView
+    |       |   |-- Sidebar: Explorer or Git
+    |       |   |-- Center: terminal, file, diff, or Gemma tabs
+    |       |   `-- Inspector
+    |       `-- Status bar
+    `-- Quick Open or Command Palette overlay
 ```
 
 | Layer | Owns |
 |---|---|
-| SwiftUI | App shell, workspace layout, tabs, commands, settings, visible state |
+| SwiftUI | App shell, workspace catalog, active selection, layout, tabs, commands, settings, visible state |
 | AppKit | File outline, editor, terminal, window focus, cursor, native tracking |
-| Models | Tab lifecycle, navigation history, Git state, palette state, zoom state |
-| Services | File loading, watching, persistence, Git, terminal processes, workspace access |
+| Models | Ordered live sessions, tab lifecycle, navigation history, Git state, palette state, zoom state |
+| Services | Catalog persistence, file loading, watching, Git, terminal processes, per-session workspace access |
 | Theme bridge | Shared colors and native view chrome across SwiftUI and AppKit |
 
 ## Layout System
@@ -55,6 +59,8 @@ AtelierApp
 ### Window and Modes
 
 The minimum workspace size is `760 x 512` points.
+
+The workspace rail stays at the outer-left edge in every mode. Its fixed width is included inside the minimum window size. Focus mode hides workspace side panels, but never hides the rail.
 
 | Mode | Container width | Sidebar | Inspector |
 |---|---:|---|---|
@@ -77,6 +83,7 @@ Rules:
 
 | Surface | Minimum | Ideal | Maximum |
 |---|---:|---:|---:|
+| Workspace rail | 56 | 56 | 56 |
 | Workspace sidebar | 300 | 340 | 420 |
 | Center | 420 | 660 | Flexible |
 | Inspector | 220 | 260 | 320 |
@@ -95,6 +102,9 @@ Rules:
 | `controlHeight` | 28 | Regular controls |
 | `compactControlHeight` | 24 | Inline and code controls |
 | `rowHeight` | 28 | Dense list rows |
+| `workspaceRailWidth` | 56 | Persistent outer workspace rail |
+| `workspaceRailItemSize` | 36 | Workspace identity target |
+| `workspaceRailItemGap` | 8 | Vertical space between identities |
 
 ## Color Tokens
 
@@ -262,6 +272,17 @@ Every interactive control must define these states where relevant:
 - Focused: accent-tinted fill and 1.5-point focus ring.
 - Disabled: visible control with `0.45` opacity.
 
+### Pointer Cursor
+
+- Every enabled in-app control that performs an action on click must show the pointing-hand cursor across its full hit target.
+- This rule includes buttons, menu triggers, tabs, selectable rows, toggles, pickers, shortcut recorders, and click-to-dismiss surfaces.
+- Disabled controls must show the arrow cursor because they cannot perform their action.
+- Text entry and selectable text keep the I-beam cursor. Splitters keep resize cursors. Drag-only surfaces keep their native drag cursor.
+- System-owned window chrome, scroll bars, menu items, alerts, and sheets keep AppKit cursor behavior. Their in-app trigger still uses the pointing hand.
+- SwiftUI controls use `atelierPointerCursor()`, preferably through their shared button style.
+- AppKit controls use idempotent cursor rectangles that match the clickable region.
+- Cursor and visual hover feedback must cover the same hit target.
+
 ## Surface Rules
 
 ### Workspace Chrome
@@ -272,6 +293,50 @@ Every interactive control must define these states where relevant:
 - Put Gemma, focus mode, and inspector in primary actions.
 - Keep branch, focus state, and zoom in the 26-point status bar.
 - Use thin dividers between sidebar, center, inspector, and status bar.
+
+### Workspace Rail
+
+- Keep the rail outside `WorkspaceView`, its toolbar, split view, and status bar.
+- Use a fixed 56-point rail with one hairline divider on its trailing edge.
+- Place 36-point workspace items in one vertical column with 8-point gaps and 10-point horizontal insets.
+- Derive each identity from the first meaningful character of the workspace folder name. Use native text, not invented logos.
+- Show the full workspace name and path in help text. Never truncate identity without this alternate text.
+- Put one 36-point `plus` action after the workspace list. It opens the existing folder picker.
+- Keep the add action quiet. Use the same item anatomy without selected emphasis.
+- Scroll only the workspace item column when it exceeds available height. Keep the add action reachable.
+- Use selection fill and a 2-point leading accent rule for the active workspace.
+- Use semantic hover and pressed fills. Do not use glow, gradients, heavy shadows, pills, or dock magnification.
+- Keep optional motion limited to quick opacity and scale feedback. Disable it under Reduce Motion.
+- Use the sidebar surface color for the rail and the existing border token for separation.
+
+Workspace item states:
+
+| State | Visual treatment | Interaction | Accessibility value |
+|---|---|---|---|
+| Active | Selection fill, primary label, leading accent rule | Selecting again keeps current session | `Selected, available` |
+| Inactive | Clear fill, secondary label | Selects existing live session | `Available` |
+| Loading | Raised fill, secondary label, native progress indicator | Disabled until restore finishes | `Loading` |
+| Unavailable | Clear fill, tertiary label, `questionmark.folder` status | Selects item and presents recovery context | `Unavailable` |
+| Error | Clear fill, primary label, semantic error status | Selects item and presents error context | `Error` |
+| Disabled | Clear fill at disabled opacity | No action | `Disabled` |
+
+Catalog states:
+
+- Empty: keep the rail and add action visible. Show the existing open-folder empty state in the content area.
+- Partial restore: restore every saved item independently. One missing folder never blocks valid sessions.
+- No active item: show the empty content state while preserving unavailable catalog items.
+- Switching: change active selection only. Keep inactive sessions, terminals, watchers, Git models, agents, palettes, tabs, and navigation alive.
+- Duplicate selection: activate the existing item for the standardized path. Never create a second live session.
+- Close: release only the closed session, then select the next item, previous item, or empty state in that order.
+- Quit: stop every session and release every security-scoped resource.
+
+Persistence boundaries:
+
+- Persist ordered workspace identity, standardized path, bookmark data, and selected workspace identity as one app-level catalog.
+- Decode the legacy single `WorkspaceState` payload as a one-item catalog without user action.
+- Keep tabs, terminals, preview state, navigation, Git presentation, agents, palettes, and responders session-only.
+- Each live `WorkspaceSession` owns independent security-scoped access for its full lifetime.
+- Never restore a saved AppKit responder unless it belongs to the active session and target window.
 
 ### Sidebar
 
@@ -375,6 +440,7 @@ Rules:
 - Increase selected glass borders when Increase Contrast is enabled.
 - Disable optional motion when Reduce Motion is enabled.
 - Keep keyboard focus stable after overlays and panel transitions.
+- Keep keyboard focus within the active session after workspace switching. Reject responders from inactive sessions.
 - Keep narrow layouts usable without hiding core tab navigation.
 
 ## Implementation Rules
@@ -391,6 +457,8 @@ Rules:
 - Do not change panel visibility in several async steps.
 - Do not restore an AppKit responder from another window.
 - Route global actions through `AtelierActionRegistry`.
+- Resolve workspace-scoped actions against the active session at invocation time.
+- Keep the workspace catalog on `MainActor`. Do not share workspace-owned model instances between sessions.
 - Keep preview state session-only. Keep navigation history session-only.
 
 ## Verification Rules
@@ -411,7 +479,12 @@ Native checks:
 - Check light and dark appearance when colors change.
 - Check keyboard focus after opening and closing overlays.
 - Check Reduce Motion and Reduce Transparency when effects change.
+- Switch between two workspaces ten times and confirm tabs and terminals remain isolated and alive.
+- Select the same standardized folder twice and confirm the existing session activates.
+- Restore one valid and one missing workspace and confirm the valid workspace remains usable.
 - Stress sidebar, inspector, preview, and window-size transitions.
+- Hover every visible clickable control and confirm the pointing hand covers its full hit target.
+- Confirm disabled controls use the arrow while text, resize, and drag surfaces keep their semantic cursors.
 - Treat AppKit constraint-loop and detached-responder warnings as failures.
 - Store screenshots outside tracked paths unless a task requests fixtures.
 

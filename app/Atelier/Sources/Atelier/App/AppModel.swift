@@ -6,13 +6,57 @@ final class AppModel {
     let zoom: AtelierZoomModel
     let windowController: WindowController
 
-    private(set) var workspace: WorkspaceSession?
+    private(set) var workspaceStates: [WorkspaceState] = []
+    private(set) var selectedWorkspaceID: String? {
+        didSet {
+            guard selectedWorkspaceID != oldValue else { return }
+            windowController.setActiveWorkspace(id: selectedWorkspaceID)
+        }
+    }
+    private(set) var loadingWorkspaceIDs = Set<String>()
+    private(set) var workspaceFailures: [String: WorkspaceCatalogItemStatus] = [:]
     var presentedError: AppError?
+
+    private var sessionsByID: [String: WorkspaceSession] = [:]
+
+    var workspace: WorkspaceSession? {
+        guard let selectedWorkspaceID else { return nil }
+        return sessionsByID[selectedWorkspaceID]
+    }
+
+    var liveSessions: [WorkspaceSession] {
+        workspaceStates.compactMap { sessionsByID[$0.id] }
+    }
+
+    var workspaceItems: [WorkspaceCatalogItem] {
+        workspaceStates.map { state in
+            let status: WorkspaceCatalogItemStatus
+            if loadingWorkspaceIDs.contains(state.id) {
+                status = .loading
+            } else if let failure = workspaceFailures[state.id] {
+                status = failure
+            } else if state.id == selectedWorkspaceID {
+                status = .active
+            } else {
+                status = .inactive
+            }
+            return WorkspaceCatalogItem(state: state, status: status)
+        }
+    }
+
+    var selectedWorkspaceItem: WorkspaceCatalogItem? {
+        guard let selectedWorkspaceID else { return nil }
+        return workspaceItems.first { $0.id == selectedWorkspaceID }
+    }
 
     private let environment: AppEnvironment
     private var startupTask: Task<Void, Never>?
     private var persistenceTask: Task<Void, Never>?
+    private var pendingPersistence: WorkspaceCatalogState?
+    private var catalogMutationRevision: UInt64 = 0
     private var hasStarted = false
+    private var hasStopped = false
+    private var isStartupRestorePending = false
 
     init(environment: AppEnvironment = .live()) {
         self.environment = environment
@@ -26,16 +70,23 @@ final class AppModel {
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
+        isStartupRestorePending = true
         presentLastResourceExitIfNeeded()
         windowController.installGlobalShortcut()
+        let startupMutationRevision = catalogMutationRevision
         startupTask = Task { [weak self] in
             guard let self else { return }
             do {
-                if let state = try await environment.persistence.load() {
-                    guard !Task.isCancelled else { return }
-                    try activate(state, persist: false)
+                if let catalog = try await environment.persistence.load() {
+                    guard !Task.isCancelled else {
+                        finishStartupRestore()
+                        return
+                    }
+                    await restore(catalog, startupMutationRevision: startupMutationRevision)
                 }
+                finishStartupRestore()
             } catch {
+                finishStartupRestore()
                 AppLogger.workspace.error("Workspace restore failed: \(error.localizedDescription, privacy: .public)")
                 presentedError = .workspace(error)
             }
@@ -45,7 +96,7 @@ final class AppModel {
     func chooseWorkspace() {
         do {
             guard let state = try environment.openFolderPanel.selectWorkspace() else { return }
-            try activate(state, persist: true)
+            try openWorkspace(state)
         } catch {
             AppLogger.workspace.error("Workspace open failed: \(error.localizedDescription, privacy: .public)")
             presentedError = .workspace(error)
@@ -53,30 +104,151 @@ final class AppModel {
     }
 
     func closeWorkspace() {
-        workspace?.stop()
-        workspace = nil
-        environment.workspaceAccess.stop()
-        persist(nil)
+        guard let selectedWorkspaceID,
+              let index = workspaceStates.firstIndex(where: { $0.id == selectedWorkspaceID }) else {
+            return
+        }
+        catalogMutationRevision &+= 1
+        sessionsByID.removeValue(forKey: selectedWorkspaceID)?.stop()
+        workspaceFailures.removeValue(forKey: selectedWorkspaceID)
+        loadingWorkspaceIDs.remove(selectedWorkspaceID)
+        workspaceStates.remove(at: index)
+
+        if workspaceStates.indices.contains(index), sessionsByID[workspaceStates[index].id] != nil {
+            self.selectedWorkspaceID = workspaceStates[index].id
+        } else if index > 0, sessionsByID[workspaceStates[index - 1].id] != nil {
+            self.selectedWorkspaceID = workspaceStates[index - 1].id
+        } else {
+            self.selectedWorkspaceID = workspaceStates.first { sessionsByID[$0.id] != nil }?.id
+        }
+        persistCatalog()
     }
 
-    func stop() {
+    func selectWorkspace(id: String) {
+        guard workspaceStates.contains(where: { $0.id == id }) else { return }
+        catalogMutationRevision &+= 1
+        selectedWorkspaceID = id
+        persistCatalog()
+    }
+
+    func openWorkspace(_ state: WorkspaceState) throws {
+        catalogMutationRevision &+= 1
+        let standardizedState = WorkspaceState(
+            path: state.id,
+            bookmark: state.bookmark,
+            lastOpenedAt: state.lastOpenedAt
+        )
+        if sessionsByID[standardizedState.id] != nil {
+            selectedWorkspaceID = standardizedState.id
+            persistCatalog()
+            return
+        }
+
+        workspaceStates.removeAll { $0.id == standardizedState.id }
+        workspaceStates.append(standardizedState)
+        workspaceFailures.removeValue(forKey: standardizedState.id)
+        do {
+            try activate(standardizedState)
+            selectedWorkspaceID = standardizedState.id
+            persistCatalog()
+        } catch let error as WorkspaceAccessError {
+            workspaceFailures[standardizedState.id] = .unavailable(error.localizedDescription)
+            selectedWorkspaceID = standardizedState.id
+            persistCatalog()
+            throw error
+        } catch {
+            workspaceFailures[standardizedState.id] = .error(error.localizedDescription)
+            selectedWorkspaceID = standardizedState.id
+            persistCatalog()
+            throw error
+        }
+    }
+
+    @discardableResult
+    func stop() -> Task<Void, Never> {
+        if hasStopped {
+            return Task { @MainActor [weak self] in
+                await self?.flushPersistence()
+            }
+        }
+        hasStopped = true
         startupTask?.cancel()
         startupTask = nil
-        persistenceTask?.cancel()
-        persistenceTask = nil
-        workspace?.stop()
-        workspace = nil
-        environment.workspaceAccess.stop()
+        persistCatalog()
+        finishStartupRestore()
+        sessionsByID.values.forEach { $0.stop() }
+        sessionsByID.removeAll()
+        loadingWorkspaceIDs.removeAll()
+        return Task { @MainActor [weak self] in
+            await self?.flushPersistence()
+        }
     }
 
-    private func activate(_ state: WorkspaceState, persist shouldPersist: Bool) throws {
-        let rootURL = try environment.workspaceAccess.activate(state)
-        workspace?.stop()
-
-        let session = WorkspaceSession(state: state, rootURL: rootURL)
-        workspace = session
+    private func activate(_ state: WorkspaceState) throws {
+        let workspaceAccess = environment.makeWorkspaceAccess()
+        let rootURL = try workspaceAccess.activate(state)
+        let session = WorkspaceSession(
+            state: state,
+            rootURL: rootURL,
+            workspaceAccess: workspaceAccess
+        )
+        sessionsByID[state.id] = session
         session.start()
-        if shouldPersist { persist(state) }
+    }
+
+    private func restore(
+        _ catalog: WorkspaceCatalogState,
+        startupMutationRevision: UInt64
+    ) async {
+        for state in catalog.workspaces where !workspaceStates.contains(where: { $0.id == state.id }) {
+            workspaceStates.append(state)
+        }
+
+        let statesToRestore = catalog.workspaces.filter { sessionsByID[$0.id] == nil }
+        loadingWorkspaceIDs.formUnion(statesToRestore.map(\.id))
+        await environment.scheduleWorkspaceRestore()
+
+        for state in statesToRestore {
+            await Task.yield()
+            guard !Task.isCancelled else {
+                loadingWorkspaceIDs.subtract(statesToRestore.map(\.id))
+                return
+            }
+            guard workspaceStates.contains(where: { $0.id == state.id }) else {
+                loadingWorkspaceIDs.remove(state.id)
+                continue
+            }
+            guard sessionsByID[state.id] == nil else {
+                loadingWorkspaceIDs.remove(state.id)
+                continue
+            }
+            do {
+                try activate(state)
+            } catch let error as WorkspaceAccessError {
+                workspaceFailures[state.id] = .unavailable(error.localizedDescription)
+                AppLogger.workspace.error(
+                    "Workspace restore failed for \(state.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            } catch {
+                workspaceFailures[state.id] = .error(error.localizedDescription)
+                AppLogger.workspace.error(
+                    "Workspace restore failed for \(state.path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+            loadingWorkspaceIDs.remove(state.id)
+        }
+
+        let userChangedCatalog = startupMutationRevision > 0
+            || catalogMutationRevision != startupMutationRevision
+        if !userChangedCatalog {
+            if let selected = catalog.selectedWorkspaceID, sessionsByID[selected] != nil {
+                selectedWorkspaceID = selected
+            } else {
+                selectedWorkspaceID = workspaceStates.first { sessionsByID[$0.id] != nil }?.id
+                    ?? catalog.selectedWorkspaceID
+            }
+        }
+        persistCatalog()
     }
 
     private func presentLastResourceExitIfNeeded() {
@@ -86,18 +258,44 @@ final class AppModel {
         ResourceExitMarker.clear(at: url)
     }
 
-    private func persist(_ state: WorkspaceState?) {
-        persistenceTask?.cancel()
+    private func persistCatalog() {
+        pendingPersistence = WorkspaceCatalogState(
+            workspaces: workspaceStates,
+            selectedWorkspaceID: selectedWorkspaceID
+        )
+        guard !isStartupRestorePending else { return }
+        startPersistenceIfNeeded()
+    }
+
+    private func startPersistenceIfNeeded() {
+        guard persistenceTask == nil else { return }
         persistenceTask = Task { [weak self] in
-            guard let self else { return }
+            await self?.drainPersistence()
+        }
+    }
+
+    private func finishStartupRestore() {
+        guard isStartupRestorePending else { return }
+        isStartupRestorePending = false
+        startPersistenceIfNeeded()
+    }
+
+    private func drainPersistence() async {
+        while let catalog = pendingPersistence {
+            pendingPersistence = nil
             do {
-                try await environment.persistence.save(state)
-            } catch is CancellationError {
-                return
+                try await environment.persistence.save(catalog)
             } catch {
                 AppLogger.workspace.error("Workspace save failed: \(error.localizedDescription, privacy: .public)")
                 presentedError = .workspace(error)
             }
+        }
+        persistenceTask = nil
+    }
+
+    private func flushPersistence() async {
+        while let persistenceTask {
+            await persistenceTask.value
         }
     }
 }

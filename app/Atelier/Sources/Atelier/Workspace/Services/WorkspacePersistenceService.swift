@@ -18,13 +18,27 @@ nonisolated enum WorkspacePersistenceError: LocalizedError, Sendable {
 }
 
 actor WorkspacePersistenceService {
-    private let fileURL: URL
+    typealias LoadHook = @Sendable () async -> Void
+    typealias SaveHook = @Sendable (UInt64, WorkspaceCatalogState?) async -> Void
 
-    init(fileURL: URL = WorkspacePersistenceService.defaultStateURL()) {
+    private let fileURL: URL
+    private let beforeLoad: LoadHook
+    private let beforeSave: SaveHook
+    private var nextSaveRevision: UInt64 = 0
+    private var latestRequestedSaveRevision: UInt64 = 0
+
+    init(
+        fileURL: URL = WorkspacePersistenceService.defaultStateURL(),
+        beforeLoad: @escaping LoadHook = {},
+        beforeSave: @escaping SaveHook = { _, _ in }
+    ) {
         self.fileURL = fileURL
+        self.beforeLoad = beforeLoad
+        self.beforeSave = beforeSave
     }
 
-    func load() throws -> WorkspaceState? {
+    func load() async throws -> WorkspaceCatalogState? {
+        await beforeLoad()
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
 
         let data: Data
@@ -37,20 +51,33 @@ actor WorkspacePersistenceService {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         do {
-            return try decoder.decode(WorkspaceState.self, from: data)
+            if let catalog = try? decoder.decode(WorkspaceCatalogState.self, from: data) {
+                return catalog
+            }
+            let legacy = try decoder.decode(WorkspaceState.self, from: data)
+            return WorkspaceCatalogState(
+                workspaces: [legacy],
+                selectedWorkspaceID: legacy.id
+            )
         } catch {
             throw WorkspacePersistenceError.decode(error.localizedDescription)
         }
     }
 
-    func save(_ workspace: WorkspaceState?) throws {
+    func save(_ catalog: WorkspaceCatalogState?) async throws {
+        nextSaveRevision &+= 1
+        let revision = nextSaveRevision
+        latestRequestedSaveRevision = revision
+        await beforeSave(revision, catalog)
+        guard revision == latestRequestedSaveRevision else { return }
+
         do {
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
 
-            guard let workspace else {
+            guard let catalog else {
                 if FileManager.default.fileExists(atPath: fileURL.path) {
                     try FileManager.default.removeItem(at: fileURL)
                 }
@@ -60,7 +87,7 @@ actor WorkspacePersistenceService {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(workspace).write(to: fileURL, options: .atomic)
+            try encoder.encode(catalog).write(to: fileURL, options: .atomic)
         } catch {
             throw WorkspacePersistenceError.write(error.localizedDescription)
         }

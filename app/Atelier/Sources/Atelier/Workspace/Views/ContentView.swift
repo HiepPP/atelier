@@ -121,12 +121,33 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Group {
-                if let workspace = app.workspace {
-                    WorkspaceView(session: workspace)
-                        .id(workspace.state.id)
-                } else {
-                    EmptyStateView()
+            HStack(spacing: 0) {
+                WorkspaceRailView()
+
+                ZStack {
+                    ForEach(app.liveSessions, id: \.state.id) { workspace in
+                        let isActive = workspace.state.id == app.selectedWorkspaceID
+                        WorkspaceView(session: workspace, isActive: isActive)
+                            .opacity(isActive ? 1 : 0)
+                            .allowsHitTesting(isActive)
+                            .accessibilityHidden(!isActive)
+                            .zIndex(isActive ? 1 : 0)
+                    }
+
+                    if app.workspace == nil {
+                        if let item = app.selectedWorkspaceItem,
+                           case .unavailable(let message) = item.status {
+                            WorkspaceUnavailableView(item: item, message: message)
+                                .zIndex(2)
+                        } else if let item = app.selectedWorkspaceItem,
+                                  case .error(let message) = item.status {
+                            WorkspaceUnavailableView(item: item, message: message)
+                                .zIndex(2)
+                        } else {
+                            EmptyStateView()
+                                .zIndex(2)
+                        }
+                    }
                 }
             }
 
@@ -141,9 +162,9 @@ struct ContentView: View {
         .focusedSceneValue(\.showCommandPalette) {
             presentPalette(.commands)
         }
-        .onChange(of: app.workspace?.state.id) { _, workspaceID in
-            if workspaceID == nil, presentedPaletteMode == .files {
-                dismissPalette(restoresResponder: true)
+        .onChange(of: app.selectedWorkspaceID) { _, _ in
+            if presentedPaletteMode != nil {
+                dismissPalette(restoresResponder: false)
             }
         }
     }
@@ -168,6 +189,7 @@ struct ContentView: View {
                 .onTapGesture {
                     dismissPalette(restoresResponder: true)
                 }
+                .atelierPointerCursor()
 
             AtelierPaletteView(
                 model: activePaletteModel,
@@ -249,7 +271,7 @@ struct EmptyStateView: View {
 
                 HStack(spacing: AtelierMetrics.spaceM) {
                     Button("Open Folder") {
-                        app.chooseWorkspace()
+                        AtelierActionRegistry.perform(.openFolder, model: app)
                     }
                     .buttonStyle(AtelierLuminarePrimaryButtonStyle())
                     .keyboardShortcut("o", modifiers: .command)
@@ -312,6 +334,7 @@ private struct AtelierWelcomeBackdrop: View {
 
 struct WorkspaceView: View {
     let session: WorkspaceSession
+    let isActive: Bool
     @Environment(AppModel.self) private var app
     @Environment(AtelierZoomModel.self) private var zoom
     @State private var fileTreeCreationRequest: FileTreeCreationRequest?
@@ -336,8 +359,12 @@ struct WorkspaceView: View {
             }
             .background(AtelierTheme.editor)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .toolbar { workspaceToolbar }
-            .navigationTitle(folderName)
+            .toolbar {
+                if isActive {
+                    workspaceToolbar
+                }
+            }
+            .navigationTitle(isActive ? folderName : "")
             .onAppear {
                 applyInitialLayout(workspaceLayout)
             }
@@ -432,12 +459,13 @@ struct WorkspaceView: View {
             .accessibilityLabel(panels.showsSidebar ? "Hide Sidebar" : "Show Sidebar")
             .help(panels.showsSidebar ? "Hide Sidebar" : "Show Sidebar")
             .disabled(zoom.isFocusMode || !currentLayoutMode.docksSidebar)
+            .atelierPointerCursor()
         }
 
         ToolbarItem(placement: .principal) {
             Menu {
                 Button("Open Folder...", systemImage: "folder") {
-                    app.chooseWorkspace()
+                    AtelierActionRegistry.perform(.openFolder, model: app)
                 }
                 Button("Show in Finder", systemImage: "folder.badge.magnifyingglass") {
                     NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
@@ -464,6 +492,7 @@ struct WorkspaceView: View {
             }
             .help("Project commands")
             .accessibilityLabel("Project commands for \(folderName)")
+            .atelierPointerCursor()
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
@@ -474,6 +503,7 @@ struct WorkspaceView: View {
             }
             .accessibilityLabel("Open Gemma workspace assistant")
             .help("Open Gemma workspace assistant")
+            .atelierPointerCursor()
 
             Button {
                 zoom.toggleFocusMode()
@@ -486,6 +516,7 @@ struct WorkspaceView: View {
             }
             .accessibilityLabel(zoom.isFocusMode ? "Exit focus mode" : "Enter focus mode")
             .help(zoom.isFocusMode ? "Exit focus mode" : "Enter focus mode")
+            .atelierPointerCursor()
 
             Button {
                 toggleInspector()
@@ -495,6 +526,7 @@ struct WorkspaceView: View {
             .accessibilityLabel(panels.showsInspector ? "Hide inspector" : "Show inspector")
             .help(panels.showsInspector ? "Hide Inspector" : "Show Inspector")
             .disabled(zoom.isFocusMode || !currentLayoutMode.supportsInspector)
+            .atelierPointerCursor()
         }
     }
 
@@ -561,6 +593,7 @@ struct WorkspaceView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .atelierPointerCursor()
                     .foregroundStyle(
                         selectedSidebarTab == tab ? Color.primary : Color.secondary
                     )

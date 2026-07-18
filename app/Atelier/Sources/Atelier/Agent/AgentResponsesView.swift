@@ -80,6 +80,7 @@ struct AgentResponsesView: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.glass)
+            .atelierPointerCursor()
             .disabled(previousResponseIndex == nil)
             .accessibilityLabel("Previous agent response")
             .help("Previous Response")
@@ -89,6 +90,7 @@ struct AgentResponsesView: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.glass)
+            .atelierPointerCursor()
             .disabled(nextResponseIndex == nil)
             .accessibilityLabel("Next agent response")
             .help("Next Response")
@@ -107,6 +109,7 @@ struct AgentResponsesView: View {
                 .frame(width: 24, height: 24)
             }
             .buttonStyle(.glass)
+            .atelierPointerCursor()
             .disabled(model.isRefreshing)
             .accessibilityLabel("Refresh agent responses")
             .accessibilityValue(model.isRefreshing ? "Loading" : "Ready")
@@ -117,6 +120,7 @@ struct AgentResponsesView: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.glass)
+            .atelierPointerCursor()
             .accessibilityLabel("Close agent response sidecar")
             .help("Close Agent Responses")
         }
@@ -169,6 +173,7 @@ struct AgentResponsesView: View {
             .lineLimit(1)
         }
         .menuStyle(.borderlessButton)
+        .atelierPointerCursor()
         .fixedSize()
         .accessibilityLabel("Agent session picker")
         .accessibilityValue(

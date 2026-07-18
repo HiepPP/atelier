@@ -851,6 +851,7 @@ struct TerminalTabs: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .atelierPointerCursor()
                     .foregroundStyle(
                         isAgentSidecarPresented ? AtelierTheme.accent : Color.primary
                     )

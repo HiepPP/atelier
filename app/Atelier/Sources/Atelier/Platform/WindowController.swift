@@ -1,12 +1,31 @@
 import AppKit
 import KeyboardShortcuts
 
+nonisolated enum WorkspaceResponderPolicy {
+    static func canRestore(
+        ownerWorkspaceID: String?,
+        activeWorkspaceID: String?,
+        capturedRevision: UInt64,
+        currentRevision: UInt64
+    ) -> Bool {
+        ownerWorkspaceID != nil
+            && ownerWorkspaceID == activeWorkspaceID
+            && capturedRevision == currentRevision
+    }
+}
+
 @MainActor
 final class WindowController {
     var onScreenDidChange: (() -> Void)?
 
     private weak var workspaceWindow: NSWindow?
     private var shortcutInstalled = false
+    private var activeWorkspaceID: String?
+    private var responderRevision: UInt64 = 0
+    private let responderOwners = NSMapTable<NSResponder, NSString>(
+        keyOptions: .weakMemory,
+        valueOptions: .strongMemory
+    )
 
     func installGlobalShortcut() {
         guard !shortcutInstalled else { return }
@@ -43,20 +62,45 @@ final class WindowController {
 
     func maximizeWorkspaceWindow() {
         guard let workspaceWindow, !workspaceWindow.isZoomed else { return }
-        let firstResponder = workspaceWindow.firstResponder
+        let firstResponder = currentFirstResponder()
         workspaceWindow.zoom(nil)
         restoreFirstResponder(firstResponder)
     }
 
     func currentFirstResponder() -> NSResponder? {
-        workspaceWindow?.firstResponder
+        guard let responder = workspaceWindow?.firstResponder else { return nil }
+        if let activeWorkspaceID {
+            responderOwners.setObject(activeWorkspaceID as NSString, forKey: responder)
+        }
+        return responder
+    }
+
+    func setActiveWorkspace(id: String?) {
+        guard id != activeWorkspaceID else { return }
+        activeWorkspaceID = id
+        responderRevision &+= 1
+        workspaceWindow?.makeFirstResponder(nil)
     }
 
     func restoreFirstResponder(_ responder: NSResponder?) {
         guard let workspaceWindow, let responder else { return }
+        let ownerWorkspaceID = responderOwners.object(forKey: responder) as String?
+        let capturedRevision = responderRevision
+        guard WorkspaceResponderPolicy.canRestore(
+            ownerWorkspaceID: ownerWorkspaceID,
+            activeWorkspaceID: activeWorkspaceID,
+            capturedRevision: capturedRevision,
+            currentRevision: responderRevision
+        ) else { return }
         Task { @MainActor [weak workspaceWindow, weak responder] in
             await Task.yield()
             guard let workspaceWindow, let responder else { return }
+            guard WorkspaceResponderPolicy.canRestore(
+                ownerWorkspaceID: ownerWorkspaceID,
+                activeWorkspaceID: activeWorkspaceID,
+                capturedRevision: capturedRevision,
+                currentRevision: responderRevision
+            ) else { return }
             guard Self.responder(responder, belongsTo: workspaceWindow) else { return }
             workspaceWindow.makeFirstResponder(responder)
         }

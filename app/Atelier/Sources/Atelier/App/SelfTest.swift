@@ -34,9 +34,24 @@ enum SelfTest {
                 lastOpenedAt: Date(timeIntervalSince1970: 1)
             )
             let persistence = WorkspacePersistenceService(fileURL: persistenceURL)
-            try await persistence.save(workspaceState)
-            let loadedState = try await persistence.load()
-            check("workspace persistence", loadedState == workspaceState, "state round-tripped")
+            let catalog = WorkspaceCatalogState(
+                workspaces: [workspaceState],
+                selectedWorkspaceID: workspaceState.id
+            )
+            try await persistence.save(catalog)
+            let loadedCatalog = try await persistence.load()
+            check("workspace catalog persistence", loadedCatalog == catalog, "catalog round-tripped")
+
+            let legacyURL = root.appendingPathComponent("legacy-state.json")
+            let legacyEncoder = JSONEncoder()
+            legacyEncoder.dateEncodingStrategy = .iso8601
+            try legacyEncoder.encode(workspaceState).write(to: legacyURL)
+            let legacyCatalog = try await WorkspacePersistenceService(fileURL: legacyURL).load()
+            check(
+                "workspace legacy migration",
+                legacyCatalog == catalog,
+                "single workspace decoded as one-item catalog"
+            )
 
             let textURL = root.appendingPathComponent("text.txt")
             let binaryURL = root.appendingPathComponent("binary.bin")

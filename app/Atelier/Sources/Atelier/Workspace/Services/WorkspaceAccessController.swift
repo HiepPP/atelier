@@ -17,6 +17,7 @@ enum WorkspaceAccessError: LocalizedError {
 @MainActor
 final class WorkspaceAccessController {
     private var scopedURL: URL?
+    private(set) var isActive = false
 
     func activate(_ state: WorkspaceState) throws -> URL {
         stop()
@@ -44,11 +45,13 @@ final class WorkspaceAccessController {
         if url.startAccessingSecurityScopedResource() {
             scopedURL = url
         }
+        isActive = true
         return url
     }
 
     func stop() {
         scopedURL?.stopAccessingSecurityScopedResource()
         scopedURL = nil
+        isActive = false
     }
 }

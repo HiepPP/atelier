@@ -33,6 +33,7 @@ struct AtelierSettingsView: View {
                                 }
                             }
                             .labelsHidden()
+                            .atelierPointerCursor()
 
                             Text("Automatic scales text and UI to the display size: larger on desktop monitors, tighter on laptops. Pick a tier to force it. Zoom still stacks on top.")
                                 .atelierFont(size: AtelierTypography.caption)
@@ -47,6 +48,7 @@ struct AtelierSettingsView: View {
                     ) {
                         Toggle("Resource safety gate", isOn: $watchdogEnabled)
                             .toggleStyle(.switch)
+                            .atelierPointerCursor()
                         Text("Quit Atelier automatically if it runs away (100% CPU for 5s, or 3 GB memory). Applies on next launch.")
                             .atelierFont(size: AtelierTypography.caption)
                             .foregroundStyle(.secondary)

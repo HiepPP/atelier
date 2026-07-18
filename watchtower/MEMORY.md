@@ -44,3 +44,6 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 
 - 2026-07-18: Keep Codex and Claude interaction in SwiftTerm. Native response UI observes transcripts and never replaces or mutates terminal state.
 - 2026-07-18: Keep FocusedValue-only palette shortcuts in a separate Commands type. Mixing them into model-bearing AppCommands crashed SwiftUI during app launch.
+- 2026-07-19: Persist only the ordered workspace catalog and active identity. Keep tabs, terminals, navigation, Git, agents, and palettes inside live sessions.
+- 2026-07-19: Defer catalog writes until startup load merges with user changes. Serialize later writes and flush the final catalog before app termination.
+- 2026-07-19: Resign the old AppKit responder when switching workspaces. Restore a responder only when its workspace owner and revision remain active.

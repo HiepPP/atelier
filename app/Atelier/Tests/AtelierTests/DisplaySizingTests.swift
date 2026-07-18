@@ -83,6 +83,12 @@ struct DisplaySizingTests {
         #expect(WorkspaceSidebarTab.allCases == [.explorer, .sourceControl])
 
         #expect(AtelierMetrics.tabBarHeight == 34)
+        #expect(AtelierMetrics.workspaceRailWidth == 56)
+        #expect(AtelierMetrics.workspaceRailItemSize == 36)
+        #expect(AtelierMetrics.workspaceRailItemGap == 8)
+        #expect(AtelierMetrics.workspaceRailWidth == WorkspaceRailPolicy.railWidth)
+        #expect(WorkspaceRailPolicy.contentWidth(containerWidth: 760) == 704)
+        #expect(WorkspaceRailPolicy.contentWidth(containerWidth: 1_440) == 1_384)
         #expect(AtelierTypography.micro == 11)
         #expect(AtelierTypography.caption == 11)
         #expect(AtelierTypography.uiSize == 13)

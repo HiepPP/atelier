@@ -16,16 +16,19 @@ final class WorkspaceSession {
 
     private let fileTreeService = FileTreeService()
     private var fileWatcher: FileWatcher?
-    private var isStarted = false
+    private(set) var isStarted = false
+    private let workspaceAccess: WorkspaceAccessController?
 
     init(
         state: WorkspaceState,
         rootURL: URL,
+        workspaceAccess: WorkspaceAccessController? = nil,
         gemmaAgent: GemmaAgentModel? = nil,
         agentResponses: AgentResponsesModel? = nil
     ) {
         self.state = state
         self.rootURL = rootURL
+        self.workspaceAccess = workspaceAccess
         let tabs = TerminalTabsModel(workspacePath: rootURL.path)
         terminalTabs = tabs
         paletteModel = AtelierPaletteModel(
@@ -67,16 +70,18 @@ final class WorkspaceSession {
     }
 
     func stop() {
-        guard isStarted else { return }
-        isStarted = false
-        fileWatcher?.stop()
-        fileWatcher = nil
-        gitModel.stop()
-        gemmaAgent.close()
-        agentResponses.stop()
-        paletteModel.stop()
-        terminalTabs.closeAll()
-        AppLogger.workspace.info("Stopped workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
+        if isStarted {
+            isStarted = false
+            fileWatcher?.stop()
+            fileWatcher = nil
+            gitModel.stop()
+            gemmaAgent.close()
+            agentResponses.stop()
+            paletteModel.stop()
+            terminalTabs.closeAll()
+            AppLogger.workspace.info("Stopped workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
+        }
+        workspaceAccess?.stop()
     }
 
     func createFile(named name: String, in directory: URL) async throws {
