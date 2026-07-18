@@ -342,6 +342,7 @@ struct AtelierTests {
     func terminalEnvironment() {
         let environment = TerminalProcessService.configuredEnvironment(from: [
             "TERM": "dumb",
+            "NO_COLOR": "1",
             "PATH": "/usr/bin"
         ])
 
@@ -349,6 +350,7 @@ struct AtelierTests {
         #expect(environment["COLORTERM"] == "truecolor")
         #expect(environment["CLICOLOR"] == "1")
         #expect(environment["TERM_PROGRAM"] == "Atelier")
+        #expect(environment["NO_COLOR"] == nil)
         #expect(environment["PATH"] == "/usr/bin")
     }
 

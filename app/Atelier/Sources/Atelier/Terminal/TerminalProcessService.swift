@@ -30,6 +30,7 @@ struct TerminalProcessService {
         environment["COLORTERM"] = "truecolor"
         environment["CLICOLOR"] = "1"
         environment["TERM_PROGRAM"] = "Atelier"
+        environment.removeValue(forKey: "NO_COLOR")
         return environment
     }
 }
