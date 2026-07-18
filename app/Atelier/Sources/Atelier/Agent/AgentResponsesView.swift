@@ -1,39 +1,21 @@
+import AppKit
 import SwiftUI
 
 nonisolated enum AgentResponseSelectionPolicy {
     static let defaultEnabled = false
 }
 
-nonisolated enum AgentPreviewPanePolicy {
-    static let minimumHeight: CGFloat = 220
-    static let workspaceMinimumHeight: CGFloat = 220
-    static let preferredMaximumHeight: CGFloat = 560
-
-    static func preferredHeight(containerHeight: CGFloat) -> CGFloat {
-        min(
-            maximumHeight(containerHeight: containerHeight),
-            max(minimumHeight, (containerHeight * 0.46).rounded())
-        )
+nonisolated enum AgentResponseNavigationPolicy {
+    static func previousIndex(currentIndex: Int?, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        let currentIndex = currentIndex ?? count - 1
+        return currentIndex > 0 ? currentIndex - 1 : nil
     }
 
-    static func maximumHeight(containerHeight: CGFloat) -> CGFloat {
-        min(
-            preferredMaximumHeight,
-            max(minimumHeight, containerHeight - workspaceMinimumHeight)
-        )
-    }
-}
-
-nonisolated enum AgentResponseTimelinePolicy {
-    static func showsPendingResponse(
-        previousLastID: AgentResponseReadIdentity?,
-        newLastID: AgentResponseReadIdentity?,
-        isPinnedToBottom: Bool
-    ) -> Bool {
-        guard let previousLastID, let newLastID, previousLastID != newLastID else {
-            return false
-        }
-        return !isPinnedToBottom
+    static func nextIndex(currentIndex: Int?, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        let currentIndex = currentIndex ?? count - 1
+        return currentIndex < count - 1 ? currentIndex + 1 : nil
     }
 }
 
@@ -43,8 +25,7 @@ struct AgentResponsesView: View {
     let textSelectionEnabled: Bool
     let profileScrollCycles: Int
 
-    @State private var isPinnedToBottom = true
-    @State private var showsPendingResponse = false
+    @State private var selectedResponseID: AgentResponseReadIdentity?
 
     init(
         model: AgentResponsesModel,
@@ -62,36 +43,55 @@ struct AgentResponsesView: View {
         VStack(spacing: 0) {
             header
             transcript
+            footer
         }
         .background(AtelierTheme.editor)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Agent response preview")
+        .accessibilityLabel("Agent response sidecar")
+        .onAppear(perform: selectLatestResponse)
+        .onChange(of: model.selectedSession) {
+            selectLatestResponse()
+        }
+        .onChange(of: model.selectedResponses.last?.readIdentity) { previous, current in
+            if selectedResponseID == nil || selectedResponseID == previous {
+                selectedResponseID = current
+            }
+        }
     }
 
     private var header: some View {
         HStack(spacing: AtelierMetrics.spaceS) {
-            Image(systemName: "doc.richtext")
-                .atelierFont(size: AtelierTypography.label, weight: .medium)
-                .foregroundStyle(AtelierTheme.accent)
-                .frame(width: 26, height: 26)
-                .background(AtelierTheme.accent.opacity(0.10))
-                .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.rowRadius))
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Responses")
-                    .atelierFont(
-                        size: AtelierTypography.headline,
-                        weight: .semibold,
-                        design: .serif
-                    )
-                Text("Read-only")
-                    .atelierFont(size: AtelierTypography.micro, design: .monospaced)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: AtelierMetrics.spaceS)
-
             sessionPicker
+
+            Spacer(minLength: 0)
+
+            ViewThatFits(in: .horizontal) {
+                Label("Final", systemImage: "checkmark.circle")
+                    .labelStyle(.titleAndIcon)
+                    .fixedSize()
+                Image(systemName: "checkmark.circle")
+                    .accessibilityLabel("Final response")
+            }
+            .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+            .foregroundStyle(.secondary)
+
+            Button(action: showPreviousResponse) {
+                Image(systemName: "chevron.left")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.glass)
+            .disabled(previousResponseIndex == nil)
+            .accessibilityLabel("Previous agent response")
+            .help("Previous Response")
+
+            Button(action: showNextResponse) {
+                Image(systemName: "chevron.right")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.glass)
+            .disabled(nextResponseIndex == nil)
+            .accessibilityLabel("Next agent response")
+            .help("Next Response")
 
             Button {
                 Task { await model.refresh() }
@@ -117,8 +117,8 @@ struct AgentResponsesView: View {
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.glass)
-            .accessibilityLabel("Close agent preview")
-            .help("Close agent preview")
+            .accessibilityLabel("Close agent response sidecar")
+            .help("Close Agent Responses")
         }
         .padding(.horizontal, AtelierMetrics.spaceM)
         .frame(height: AtelierMetrics.panelHeaderHeight)
@@ -188,6 +188,10 @@ struct AgentResponsesView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: AtelierMetrics.spaceL) {
+                    Color.clear
+                        .frame(height: 1)
+                        .id("agent-response-top")
+
                     if model.responses.isEmpty {
                         if model.isRefreshing {
                             loadingState
@@ -197,7 +201,8 @@ struct AgentResponsesView: View {
                     } else if model.selectedSession == nil {
                         noSelectionState
                     }
-                    ForEach(model.selectedResponses) { response in
+
+                    if let response = selectedResponse {
                         responseCard(response)
                             .id(response.id)
                     }
@@ -210,52 +215,11 @@ struct AgentResponsesView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.editor)
-            .overlay(alignment: .bottomTrailing) {
-                if showsPendingResponse {
-                    Button {
-                        proxy.scrollTo("agent-response-bottom", anchor: .bottom)
-                        showsPendingResponse = false
-                    } label: {
-                        Label("New response", systemImage: "arrow.down")
-                    }
-                    .buttonStyle(AtelierLuminarePrimaryButtonStyle())
-                    .padding(AtelierMetrics.spaceL)
-                    .accessibilityLabel("Show new agent response")
-                    .accessibilityHint("Scrolls to the latest response")
-                }
-            }
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.containerSize.height
-                    >= geometry.contentSize.height - 56
-            } action: { _, isPinned in
-                isPinnedToBottom = isPinned
-                if isPinned {
-                    showsPendingResponse = false
-                }
-            }
-            .onChange(of: model.selectedResponses.last?.readIdentity) { previous, current in
-                if AgentResponseTimelinePolicy.showsPendingResponse(
-                    previousLastID: previous,
-                    newLastID: current,
-                    isPinnedToBottom: isPinnedToBottom
-                ) {
-                    showsPendingResponse = true
-                }
-                if isPinnedToBottom {
-                    proxy.scrollTo("agent-response-bottom", anchor: .bottom)
-                    showsPendingResponse = false
-                }
-            }
-            .onChange(of: model.selectedSession) {
-                showsPendingResponse = false
-                proxy.scrollTo("agent-response-bottom", anchor: .bottom)
-            }
-            .task(id: model.selectedResponses.last?.readIdentity) {
-                guard profileScrollCycles > 0,
-                      let firstResponse = model.selectedResponses.first else { return }
+            .task(id: selectedResponse?.readIdentity) {
+                guard profileScrollCycles > 0, selectedResponse != nil else { return }
                 for _ in 0..<profileScrollCycles {
                     withAnimation(.linear(duration: 0.02)) {
-                        proxy.scrollTo(firstResponse.id, anchor: .top)
+                        proxy.scrollTo("agent-response-top", anchor: .top)
                     }
                     try? await Task.sleep(for: .milliseconds(40))
                     guard !Task.isCancelled else { return }
@@ -265,6 +229,38 @@ struct AgentResponsesView: View {
                     try? await Task.sleep(for: .milliseconds(40))
                     guard !Task.isCancelled else { return }
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        if let response = selectedResponse {
+            HStack(spacing: AtelierMetrics.spaceS) {
+                if let selectedResponseIndex {
+                    Text("\(selectedResponseIndex + 1) of \(model.selectedResponses.count)")
+                        .atelierFont(size: AtelierTypography.micro, design: .monospaced)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(response.markdown, forType: .string)
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(AtelierGhostButtonStyle())
+                .accessibilityLabel("Copy agent response")
+            }
+            .padding(.horizontal, AtelierMetrics.spaceM)
+            .frame(height: AtelierMetrics.sectionHeaderHeight)
+            .background(AtelierTheme.chrome)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(AtelierTheme.border)
+                    .frame(height: AtelierTheme.strokeHairline)
             }
         }
     }
@@ -356,6 +352,50 @@ struct AgentResponsesView: View {
         .onAppear {
             model.markRead(response)
         }
+    }
+
+    private var selectedResponseIndex: Int? {
+        guard !model.selectedResponses.isEmpty else { return nil }
+        if let selectedResponseID,
+           let index = model.selectedResponses.firstIndex(where: {
+               $0.readIdentity == selectedResponseID
+           }) {
+            return index
+        }
+        return model.selectedResponses.count - 1
+    }
+
+    private var selectedResponse: AgentResponse? {
+        guard let selectedResponseIndex else { return nil }
+        return model.selectedResponses[selectedResponseIndex]
+    }
+
+    private var previousResponseIndex: Int? {
+        AgentResponseNavigationPolicy.previousIndex(
+            currentIndex: selectedResponseIndex,
+            count: model.selectedResponses.count
+        )
+    }
+
+    private var nextResponseIndex: Int? {
+        AgentResponseNavigationPolicy.nextIndex(
+            currentIndex: selectedResponseIndex,
+            count: model.selectedResponses.count
+        )
+    }
+
+    private func showPreviousResponse() {
+        guard let previousResponseIndex else { return }
+        selectedResponseID = model.selectedResponses[previousResponseIndex].readIdentity
+    }
+
+    private func showNextResponse() {
+        guard let nextResponseIndex else { return }
+        selectedResponseID = model.selectedResponses[nextResponseIndex].readIdentity
+    }
+
+    private func selectLatestResponse() {
+        selectedResponseID = model.selectedResponses.last?.readIdentity
     }
 
     @ViewBuilder

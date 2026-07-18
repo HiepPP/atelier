@@ -267,8 +267,8 @@ struct AgentResponsesTests {
         #expect(model.sessionSummaries.first(where: { $0.session == codexFirst.session })?.unreadCount == 1)
     }
 
-    @Test("Opening preview does not clear hidden session unread state")
-    func previewOpenPreservesUnreadState() async {
+    @Test("Opening sidecar does not clear hidden session unread state")
+    func sidecarOpenPreservesUnreadState() async {
         let codex = response(id: "one", provider: .codex, sessionID: "codex", time: 1)
         let claude = response(id: "two", provider: .claude, sessionID: "claude", time: 2)
         let responses = AgentResponsesModel(source: StaticAgentResponseSource([codex, claude]))
@@ -281,9 +281,9 @@ struct AgentResponsesTests {
             rootURL: root,
             agentResponses: responses
         )
-        session.openResponses()
+        session.openAgentSidecar()
 
-        #expect(session.isAgentPreviewPresented)
+        #expect(session.isAgentSidecarPresented)
         #expect(responses.unreadCount == 2)
         responses.markRead(responses.selectedResponses)
         #expect(responses.unreadCount == 1)
@@ -439,37 +439,23 @@ struct AgentResponsesTests {
     }
 #endif
 
-    @Test("New response affordance only appears away from bottom")
-    func pendingResponsePolicy() {
-        let old = AgentResponseReadIdentity(
-            session: AgentSessionIdentity(provider: .codex, sessionID: "one"),
-            responseID: "old"
-        )
-        let new = AgentResponseReadIdentity(session: old.session, responseID: "new")
-        #expect(AgentResponseTimelinePolicy.showsPendingResponse(
-            previousLastID: old,
-            newLastID: new,
-            isPinnedToBottom: false
-        ))
-        #expect(!AgentResponseTimelinePolicy.showsPendingResponse(
-            previousLastID: old,
-            newLastID: new,
-            isPinnedToBottom: true
-        ))
-        #expect(!AgentResponseTimelinePolicy.showsPendingResponse(
-            previousLastID: old,
-            newLastID: old,
-            isPinnedToBottom: false
-        ))
+    @Test("Response navigation stays within the selected session")
+    func responseNavigationPolicy() {
+        #expect(AgentResponseNavigationPolicy.previousIndex(currentIndex: nil, count: 3) == 1)
+        #expect(AgentResponseNavigationPolicy.previousIndex(currentIndex: 0, count: 3) == nil)
+        #expect(AgentResponseNavigationPolicy.nextIndex(currentIndex: 1, count: 3) == 2)
+        #expect(AgentResponseNavigationPolicy.nextIndex(currentIndex: 2, count: 3) == nil)
+        #expect(AgentResponseNavigationPolicy.nextIndex(currentIndex: nil, count: 0) == nil)
     }
 
-    @Test("Preview pane preserves readable response and workspace heights")
-    func previewPanePolicy() {
-        #expect(AgentPreviewPanePolicy.preferredHeight(containerHeight: 550) == 253)
-        #expect(AgentPreviewPanePolicy.maximumHeight(containerHeight: 550) == 330)
-        #expect(AgentPreviewPanePolicy.preferredHeight(containerHeight: 900) == 414)
-        #expect(AgentPreviewPanePolicy.preferredHeight(containerHeight: 1_600) == 560)
-        #expect(AgentPreviewPanePolicy.maximumHeight(containerHeight: 1_600) == 560)
+    @Test("Agent sidecar preserves terminal width across breakpoints")
+    func agentSidecarLayoutPolicy() {
+        #expect(AgentSidecarLayoutPolicy.presentation(containerWidth: 899) == .overlay)
+        #expect(AgentSidecarLayoutPolicy.presentation(containerWidth: 900) == .split)
+        #expect(AgentSidecarLayoutPolicy.width(containerWidth: 650) == 300)
+        #expect(AgentSidecarLayoutPolicy.width(containerWidth: 760) == 350)
+        #expect(AgentSidecarLayoutPolicy.width(containerWidth: 1_000) == 320)
+        #expect(AgentSidecarLayoutPolicy.width(containerWidth: 2_000) == 480)
     }
 
     @Test("Response model exposes loading state during refresh")
@@ -515,9 +501,9 @@ struct AgentResponsesTests {
         )
 
         session.start()
-        session.openResponses()
+        session.openAgentSidecar()
         #expect(responses.isMonitoring)
-        #expect(session.isAgentPreviewPresented)
+        #expect(session.isAgentSidecarPresented)
         #expect(session.terminalTabs.terminalCount == 1)
 
         session.stop()

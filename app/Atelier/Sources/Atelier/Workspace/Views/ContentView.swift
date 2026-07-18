@@ -6,8 +6,21 @@ nonisolated enum WorkspaceLayoutMode: Equatable, Sendable {
     case standard
     case wide
 
-    var docksExplorer: Bool { self != .compact }
-    var docksSourceControl: Bool { self == .wide }
+    var docksSidebar: Bool { self != .compact }
+}
+
+nonisolated enum WorkspaceSidebarTab: String, CaseIterable, Identifiable, Sendable {
+    case explorer = "Explorer"
+    case sourceControl = "Git"
+
+    var id: Self { self }
+
+    var systemImage: String {
+        switch self {
+        case .explorer: "folder"
+        case .sourceControl: "arrow.triangle.branch"
+        }
+    }
 }
 
 nonisolated enum WorkspaceLayoutPolicy {
@@ -150,10 +163,9 @@ struct WorkspaceView: View {
     @State private var responderBeforeAgentPreview: NSResponder?
     @State private var responderBeforeProjectMenu: NSResponder?
     @State private var isProjectMenuPresented = false
-    @State private var isExplorerDockedHidden = false
-    @State private var isSourceControlDockedHidden = false
-    @State private var isExplorerOverlayPresented = false
-    @State private var isSourceControlOverlayPresented = false
+    @State private var selectedSidebarTab = WorkspaceSidebarTab.explorer
+    @State private var isSidebarDockedHidden = false
+    @State private var isSidebarOverlayPresented = false
     @FocusState private var isProjectMenuFocused: Bool
 
     var body: some View {
@@ -222,37 +234,28 @@ struct WorkspaceView: View {
     private func workspaceColumns(layout: WorkspaceLayoutMode) -> some View {
         HSplitView {
             if !zoom.isFocusMode,
-               layout.docksExplorer,
-               !isExplorerDockedHidden {
-                explorerColumn
+               layout.docksSidebar,
+               !isSidebarDockedHidden {
+                workspaceSidebar
                     .frame(
-                        minWidth: AtelierMetrics.explorerMinWidth,
-                        idealWidth: AtelierMetrics.explorerIdealWidth,
-                        maxWidth: AtelierMetrics.explorerMaxWidth
+                        minWidth: AtelierMetrics.workspaceSidebarMinWidth,
+                        idealWidth: AtelierMetrics.workspaceSidebarIdealWidth,
+                        maxWidth: AtelierMetrics.workspaceSidebarMaxWidth
                     )
             }
 
-            TerminalTabs(model: terminalTabs)
+            TerminalTabs(
+                model: terminalTabs,
+                agentResponses: session.agentResponses,
+                isAgentSidecarPresented: session.isAgentSidecarPresented,
+                onOpenAgentSidecar: openAgentSidecar,
+                onCloseAgentSidecar: closeAgentSidecar
+            )
                 .frame(
                     minWidth: AtelierMetrics.centerMinWidth,
                     idealWidth: AtelierMetrics.centerIdealWidth
                 )
                 .layoutPriority(2)
-
-            if !zoom.isFocusMode,
-               layout.docksSourceControl,
-               !isSourceControlDockedHidden {
-                ChangesView(
-                    model: gitModel,
-                    onOpenDiff: terminalTabs.openGitDiff
-                )
-                    .frame(
-                        minWidth: AtelierMetrics.sourceControlMinWidth,
-                        idealWidth: AtelierMetrics.sourceControlIdealWidth,
-                        maxWidth: AtelierMetrics.sourceControlMaxWidth
-                    )
-                    .layoutPriority(1)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .atelierSplitViewChrome()
@@ -263,139 +266,45 @@ struct WorkspaceView: View {
         containerHeight: CGFloat,
         workspaceLayout: WorkspaceLayoutMode
     ) -> some View {
-        primaryWorkspace(
-            containerHeight: containerHeight,
-            workspaceLayout: workspaceLayout
-        )
+        workspaceColumns(layout: workspaceLayout)
         .overlay(alignment: .leading) {
             if !zoom.isFocusMode,
-               !workspaceLayout.docksExplorer,
-               isExplorerOverlayPresented,
-               !session.isAgentPreviewPresented {
-                explorerColumn
+               !workspaceLayout.docksSidebar,
+               isSidebarOverlayPresented {
+                workspaceSidebar
                     .frame(width: WorkspaceLayoutPolicy.overlayWidth(containerWidth: containerWidth))
                     .atelierOverlayPanel(edge: .leading)
                     .onExitCommand {
-                        isExplorerOverlayPresented = false
+                        isSidebarOverlayPresented = false
                     }
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
         }
-        .overlay(alignment: .trailing) {
-            if !zoom.isFocusMode,
-               !workspaceLayout.docksSourceControl,
-               isSourceControlOverlayPresented,
-               !session.isAgentPreviewPresented {
-                ChangesView(
-                    model: gitModel,
-                    onOpenDiff: terminalTabs.openGitDiff,
-                    onClose: {
-                        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
-                            isSourceControlOverlayPresented = false
-                        }
-                    }
-                )
-                .frame(width: WorkspaceLayoutPolicy.overlayWidth(containerWidth: containerWidth))
-                .atelierOverlayPanel(edge: .trailing)
-                .onExitCommand {
-                    isSourceControlOverlayPresented = false
-                }
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-        }
     }
 
-    @ViewBuilder
-    private func primaryWorkspace(
-        containerHeight: CGFloat,
-        workspaceLayout: WorkspaceLayoutMode
-    ) -> some View {
-        if session.isAgentPreviewPresented {
-            VSplitView {
-                agentPreview
-                    .frame(
-                        minHeight: AgentPreviewPanePolicy.minimumHeight,
-                        idealHeight: AgentPreviewPanePolicy.preferredHeight(
-                            containerHeight: containerHeight
-                        ),
-                        maxHeight: AgentPreviewPanePolicy.maximumHeight(
-                            containerHeight: containerHeight
-                        )
-                    )
-
-                workspaceColumns(layout: workspaceLayout)
-                    .frame(minHeight: AgentPreviewPanePolicy.workspaceMinimumHeight)
-            }
-        } else {
-            workspaceColumns(layout: workspaceLayout)
-        }
-    }
-
-    private var agentPreview: some View {
-        AgentResponsesView(
-            model: session.agentResponses,
-            onClose: closeAgentPreview
-        )
-        .frame(maxHeight: .infinity)
-        .environment(\.atelierZoomScale, zoom.contentScale)
-        .onExitCommand(perform: closeAgentPreview)
-    }
-
-    private func openAgentPreview() {
+    private func openAgentSidecar() {
         responderBeforeAgentPreview = app.windowController.currentFirstResponder()
-        isSourceControlOverlayPresented = false
-        isExplorerOverlayPresented = false
-        session.openResponses()
+        session.openAgentSidecar()
     }
 
-    private func closeAgentPreview() {
-        session.closeAgentPreview()
+    private func closeAgentSidecar() {
+        session.closeAgentSidecar()
         app.windowController.restoreFirstResponder(responderBeforeAgentPreview)
         responderBeforeAgentPreview = nil
     }
 
-    private func toggleAgentPreview() {
-        if session.isAgentPreviewPresented {
-            closeAgentPreview()
-        } else {
-            openAgentPreview()
-        }
+    private func isSidebarVisible(layout: WorkspaceLayoutMode) -> Bool {
+        layout.docksSidebar ? !isSidebarDockedHidden : isSidebarOverlayPresented
     }
 
-    private func isExplorerVisible(layout: WorkspaceLayoutMode) -> Bool {
-        layout.docksExplorer ? !isExplorerDockedHidden : isExplorerOverlayPresented
-    }
-
-    private func isSourceControlVisible(layout: WorkspaceLayoutMode) -> Bool {
-        layout.docksSourceControl
-            ? !isSourceControlDockedHidden
-            : isSourceControlOverlayPresented
-    }
-
-    private func toggleExplorer(layout: WorkspaceLayoutMode) {
-        if session.isAgentPreviewPresented {
-            closeAgentPreview()
-        }
-        isSourceControlOverlayPresented = false
+    private func selectSidebar(_ tab: WorkspaceSidebarTab, layout: WorkspaceLayoutMode) {
+        let shouldHide = selectedSidebarTab == tab && isSidebarVisible(layout: layout)
+        selectedSidebarTab = tab
         withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
-            if layout.docksExplorer {
-                isExplorerDockedHidden.toggle()
+            if layout.docksSidebar {
+                isSidebarDockedHidden = shouldHide
             } else {
-                isExplorerOverlayPresented.toggle()
-            }
-        }
-    }
-
-    private func toggleSourceControl(layout: WorkspaceLayoutMode) {
-        if session.isAgentPreviewPresented {
-            closeAgentPreview()
-        }
-        isExplorerOverlayPresented = false
-        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
-            if layout.docksSourceControl {
-                isSourceControlDockedHidden.toggle()
-            } else {
-                isSourceControlOverlayPresented.toggle()
+                isSidebarOverlayPresented = !shouldHide
             }
         }
     }
@@ -413,22 +322,25 @@ struct WorkspaceView: View {
                     .frame(width: AtelierMetrics.trafficLightReserve, height: 1)
 
                 Button {
-                    toggleExplorer(layout: layout)
+                    selectSidebar(.explorer, layout: layout)
                 } label: {
                     Image(systemName: "sidebar.leading")
                 }
                 .buttonStyle(
                     AtelierToolbarButtonStyle(
-                        isSelected: isExplorerVisible(layout: layout)
+                        isSelected: isSidebarVisible(layout: layout)
+                            && selectedSidebarTab == .explorer
                     )
                 )
                 .accessibilityLabel(
-                    isExplorerVisible(layout: layout) ? "Hide Explorer" : "Show Explorer"
+                    isSidebarVisible(layout: layout) && selectedSidebarTab == .explorer
+                        ? "Hide Explorer"
+                        : "Show Explorer"
                 )
-                .help(isExplorerVisible(layout: layout) ? "Hide Explorer" : "Show Explorer")
+                .help("Show Explorer")
 
                 Button {
-                    toggleSourceControl(layout: layout)
+                    selectSidebar(.sourceControl, layout: layout)
                 } label: {
                     ZStack(alignment: .topTrailing) {
                         Image(systemName: "arrow.triangle.branch")
@@ -442,43 +354,23 @@ struct WorkspaceView: View {
                 }
                 .buttonStyle(
                     AtelierToolbarButtonStyle(
-                        isSelected: isSourceControlVisible(layout: layout)
+                        isSelected: isSidebarVisible(layout: layout)
+                            && selectedSidebarTab == .sourceControl
                     )
                 )
                 .accessibilityLabel(
-                    isSourceControlVisible(layout: layout)
+                    isSidebarVisible(layout: layout) && selectedSidebarTab == .sourceControl
                         ? "Hide Source Control"
                         : "Show Source Control"
                 )
                 .accessibilityValue("\(gitModel.snapshot.status.changes.count) changes")
                 .help(
-                    isSourceControlVisible(layout: layout)
+                    isSidebarVisible(layout: layout) && selectedSidebarTab == .sourceControl
                         ? "Hide Source Control"
                         : "Show Source Control"
                 )
 
                 Spacer(minLength: AtelierMetrics.spaceM)
-
-                Button {
-                    toggleAgentPreview()
-                } label: {
-                    Image(systemName: "sidebar.trailing")
-                        .foregroundStyle(
-                            session.agentResponses.unreadCount > 0
-                                ? AtelierTheme.accent
-                                : Color.primary
-                        )
-                }
-                .buttonStyle(
-                    AtelierToolbarButtonStyle(isSelected: session.isAgentPreviewPresented)
-                )
-                .accessibilityLabel(
-                    session.isAgentPreviewPresented
-                        ? "Close agent preview"
-                        : "Open agent preview"
-                )
-                .accessibilityValue("\(session.agentResponses.unreadCount) unread")
-                .help(session.isAgentPreviewPresented ? "Close agent preview" : "Open agent preview")
 
                 Button {
                     session.openGemma()
@@ -602,15 +494,6 @@ struct WorkspaceView: View {
 
             ProjectMenuSectionLabel(title: "Open")
 
-            ProjectMenuRow(
-                title: session.isAgentPreviewPresented
-                    ? "Close Agent Preview"
-                    : "Open Agent Preview",
-                systemImage: "sidebar.trailing"
-            ) {
-                performProjectCommand(toggleAgentPreview)
-            }
-
             ProjectMenuRow(title: "Open Gemma", systemImage: "sparkles") {
                 performProjectCommand {
                     session.openGemma()
@@ -710,10 +593,48 @@ struct WorkspaceView: View {
         responderBeforeProjectMenu = nil
     }
 
-    private var explorerColumn: some View {
+    private var workspaceSidebar: some View {
         VStack(spacing: 0) {
-            AtelierPanelHeader(title: "Explorer", subtitle: folderName) {
-                HStack(spacing: AtelierMetrics.spaceXS) {
+            HStack(spacing: AtelierMetrics.spaceXS) {
+                ForEach(WorkspaceSidebarTab.allCases) { tab in
+                    Button {
+                        selectedSidebarTab = tab
+                    } label: {
+                        HStack(spacing: AtelierMetrics.spaceXS) {
+                            Image(systemName: tab.systemImage)
+                            Text(tab.rawValue)
+                            if tab == .sourceControl,
+                               gitModel.snapshot.status.changes.count > 0 {
+                                AtelierCountBadge(
+                                    value: gitModel.snapshot.status.changes.count,
+                                    color: AtelierTheme.gitOrange
+                                )
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: AtelierMetrics.sectionHeaderHeight)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(
+                        selectedSidebarTab == tab ? Color.primary : Color.secondary
+                    )
+                    .background(
+                        selectedSidebarTab == tab
+                            ? AtelierTheme.selection
+                            : Color.clear
+                    )
+                    .overlay(alignment: .bottom) {
+                        if selectedSidebarTab == tab {
+                            Rectangle()
+                                .fill(AtelierTheme.accent)
+                                .frame(height: 2)
+                        }
+                    }
+                    .accessibilityValue(selectedSidebarTab == tab ? "Selected" : "Not selected")
+                }
+
+                if selectedSidebarTab == .explorer {
                     Button {
                         fileTreeCreationRequest = FileTreeCreationRequest(
                             kind: .file,
@@ -737,10 +658,47 @@ struct WorkspaceView: View {
                     .buttonStyle(AtelierLuminareIconButtonStyle())
                     .accessibilityLabel("New folder")
                     .help("New folder")
+                } else {
+                    Button {
+                        gitModel.refresh()
+                    } label: {
+                        if gitModel.isLoading {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(AtelierLuminareIconButtonStyle())
+                    .accessibilityLabel("Refresh Git status")
+                    .help("Refresh Git status")
                 }
+            }
+            .padding(.horizontal, AtelierMetrics.spaceS)
+            .frame(height: AtelierMetrics.panelHeaderHeight)
+            .background(AtelierTheme.chrome)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(AtelierTheme.border)
+                    .frame(height: AtelierTheme.strokeHairline)
             }
             .environment(\.atelierZoomScale, zoom.sidebarScale)
 
+            switch selectedSidebarTab {
+            case .explorer:
+                explorerContent
+            case .sourceControl:
+                ChangesView(
+                    model: gitModel,
+                    onOpenDiff: terminalTabs.openGitDiff,
+                    showsPanelHeader: false
+                )
+            }
+        }
+        .background(AtelierTheme.sidebar)
+    }
+
+    private var explorerContent: some View {
+        VStack(spacing: 0) {
             if let request = fileTreeCreationRequest {
                 ExplorerInlineCreationRow(
                     request: request,

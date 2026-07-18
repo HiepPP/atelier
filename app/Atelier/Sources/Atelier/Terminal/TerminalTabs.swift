@@ -2,6 +2,27 @@ import AppKit
 import Observation
 import SwiftUI
 
+nonisolated enum AgentSidecarPresentation: Equatable, Sendable {
+    case split
+    case overlay
+}
+
+nonisolated enum AgentSidecarLayoutPolicy {
+    static let splitBreakpoint: CGFloat = 900
+    static let minimumWidth: CGFloat = 300
+    static let maximumWidth: CGFloat = 480
+    static let minimumTerminalWidth: CGFloat = 480
+
+    static func presentation(containerWidth: CGFloat) -> AgentSidecarPresentation {
+        containerWidth >= splitBreakpoint ? .split : .overlay
+    }
+
+    static func width(containerWidth: CGFloat) -> CGFloat {
+        let ratio = presentation(containerWidth: containerWidth) == .split ? 0.32 : 0.46
+        return min(maximumWidth, max(minimumWidth, (containerWidth * ratio).rounded()))
+    }
+}
+
 final class TerminalSession: Identifiable {
     let id = UUID()
     let title: String
@@ -138,6 +159,12 @@ final class TerminalTabsModel {
         guard let selectedTab,
               case .gitDiff(let diff) = selectedTab.content else { return nil }
         return diff.selection
+    }
+
+    var isTerminalSelected: Bool {
+        guard let selectedTab,
+              case .terminal = selectedTab.content else { return false }
+        return true
     }
 
     func add() {
@@ -324,6 +351,10 @@ struct AtelierTabCommands: Commands {
 
 struct TerminalTabs: View {
     @Bindable var model: TerminalTabsModel
+    @Bindable var agentResponses: AgentResponsesModel
+    let isAgentSidecarPresented: Bool
+    let onOpenAgentSidecar: () -> Void
+    let onCloseAgentSidecar: () -> Void
     @Environment(AtelierZoomModel.self) private var zoom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var renameTargetID: UUID?
@@ -446,6 +477,60 @@ struct TerminalTabs: View {
                 }
                 .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.chrome)
 
+                if model.isTerminalSelected {
+                    Button {
+                        if isAgentSidecarPresented {
+                            onCloseAgentSidecar()
+                        } else {
+                            onOpenAgentSidecar()
+                        }
+                    } label: {
+                        HStack(spacing: AtelierMetrics.spaceXS) {
+                            Image(systemName: "text.bubble")
+                            Text("Response")
+                            if agentResponses.unreadCount > 0 {
+                                Circle()
+                                    .fill(AtelierTheme.accent)
+                                    .frame(width: 6, height: 6)
+                            }
+                        }
+                        .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+                        .padding(.horizontal, AtelierMetrics.spaceS)
+                        .frame(height: AtelierMetrics.controlHeight)
+                        .contentShape(
+                            RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(
+                        isAgentSidecarPresented ? AtelierTheme.accent : Color.primary
+                    )
+                    .glassEffect(
+                        .regular
+                            .tint(
+                                isAgentSidecarPresented
+                                    ? AtelierTheme.accent.opacity(0.16)
+                                    : nil
+                            )
+                            .interactive(),
+                        in: RoundedRectangle(
+                            cornerRadius: AtelierTheme.controlRadius,
+                            style: .continuous
+                        )
+                    )
+                    .accessibilityLabel(
+                        isAgentSidecarPresented
+                            ? "Close agent response sidecar"
+                            : "Open agent response sidecar"
+                    )
+                    .accessibilityValue("\(agentResponses.unreadCount) unread")
+                    .help(
+                        isAgentSidecarPresented
+                            ? "Close Agent Responses"
+                            : "Open Agent Responses"
+                    )
+                }
+
                 Button {
                     model.add()
                 } label: {
@@ -485,12 +570,13 @@ struct TerminalTabs: View {
             if let tab = model.selectedTab {
                 switch tab.content {
                 case .terminal(let session):
-                    TerminalView(
-                        controller: session.controller,
-                        scale: zoom.contentScale
+                    TerminalAgentSidecar(
+                        session: session,
+                        tabID: tab.id,
+                        agentResponses: agentResponses,
+                        isPresented: isAgentSidecarPresented,
+                        onClose: onCloseAgentSidecar
                     )
-                        .id(tab.id)
-                        .background(AtelierTheme.editor)
                 case .file(let file):
                     FileTabView(file: file)
                         .id(tab.id)
@@ -586,6 +672,76 @@ struct TerminalTabs: View {
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) {
             model.moveTab(id: id, over: targetID)
         }
+    }
+}
+
+private struct TerminalAgentSidecar: View {
+    let session: TerminalSession
+    let tabID: UUID
+    @Bindable var agentResponses: AgentResponsesModel
+    let isPresented: Bool
+    let onClose: () -> Void
+
+    @Environment(AtelierZoomModel.self) private var zoom
+
+    var body: some View {
+        GeometryReader { geometry in
+            let presentation = AgentSidecarLayoutPolicy.presentation(
+                containerWidth: geometry.size.width
+            )
+            let sidecarWidth = AgentSidecarLayoutPolicy.width(
+                containerWidth: geometry.size.width
+            )
+
+            switch presentation {
+            case .split:
+                if isPresented {
+                    HSplitView {
+                        terminal
+                            .frame(minWidth: AgentSidecarLayoutPolicy.minimumTerminalWidth)
+                        sidecar
+                            .frame(
+                                minWidth: AgentSidecarLayoutPolicy.minimumWidth,
+                                idealWidth: sidecarWidth,
+                                maxWidth: AgentSidecarLayoutPolicy.maximumWidth
+                            )
+                    }
+                    .atelierSplitViewChrome()
+                } else {
+                    terminal
+                }
+            case .overlay:
+                terminal
+                    .overlay(alignment: .trailing) {
+                        if isPresented {
+                            sidecar
+                                .frame(width: sidecarWidth)
+                                .atelierOverlayPanel(edge: .trailing)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
+            }
+        }
+        .id(tabID)
+        .background(AtelierTheme.editor)
+    }
+
+    private var terminal: some View {
+        TerminalView(
+            controller: session.controller,
+            scale: zoom.contentScale
+        )
+        .background(AtelierTheme.editor)
+    }
+
+    private var sidecar: some View {
+        AgentResponsesView(
+            model: agentResponses,
+            onClose: onClose
+        )
+        .frame(maxHeight: .infinity)
+        .environment(\.atelierZoomScale, zoom.contentScale)
+        .onExitCommand(perform: onClose)
     }
 }
 

@@ -184,6 +184,23 @@ struct AtelierTests {
         #expect(tabs.selectedGitDiffSelection == nil)
     }
 
+    @Test("Agent sidecar eligibility follows the selected center tab")
+    @MainActor
+    func agentSidecarTabEligibility() throws {
+        let root = temporaryDirectory("agent-sidecar-tabs")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let fileURL = root.appendingPathComponent("main.swift")
+        try Data("let value = 1\n".utf8).write(to: fileURL)
+        let tabs = TerminalTabsModel(workspacePath: root.path)
+        defer { tabs.closeAll() }
+
+        #expect(tabs.isTerminalSelected)
+        tabs.openFile(fileURL)
+        #expect(!tabs.isTerminalSelected)
+        tabs.closeSelectedTab()
+        #expect(tabs.isTerminalSelected)
+    }
+
     @Test("Editor documents use standardized URL identity")
     func editorDocumentIdentity() {
         let root = temporaryDirectory("editor-document")

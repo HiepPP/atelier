@@ -66,10 +66,11 @@ struct DisplaySizingTests {
         #expect(WorkspaceLayoutPolicy.mode(containerWidth: 1_279) == .standard)
         #expect(WorkspaceLayoutPolicy.mode(containerWidth: 1_280) == .wide)
 
-        #expect(!WorkspaceLayoutMode.compact.docksExplorer)
-        #expect(WorkspaceLayoutMode.standard.docksExplorer)
-        #expect(!WorkspaceLayoutMode.standard.docksSourceControl)
-        #expect(WorkspaceLayoutMode.wide.docksSourceControl)
+        #expect(!WorkspaceLayoutMode.compact.docksSidebar)
+        #expect(WorkspaceLayoutMode.standard.docksSidebar)
+        #expect(WorkspaceLayoutMode.wide.docksSidebar)
+
+        #expect(WorkspaceSidebarTab.allCases == [.explorer, .sourceControl])
 
         #expect(WorkspaceLayoutPolicy.overlayWidth(containerWidth: 760) == 350)
         #expect(WorkspaceLayoutPolicy.overlayWidth(containerWidth: 1_000) == 380)

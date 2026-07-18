@@ -11,7 +11,7 @@ final class WorkspaceSession {
     let gemmaAgent: GemmaAgentModel
     let agentResponses: AgentResponsesModel
     private(set) var fileTreeRevision = 0
-    private(set) var isAgentPreviewPresented = false
+    private(set) var isAgentSidecarPresented = false
 
     private let fileTreeService = FileTreeService()
     private var fileWatcher: FileWatcher?
@@ -90,16 +90,16 @@ final class WorkspaceSession {
         terminalTabs.openGemma(gemmaAgent)
     }
 
-    func openResponses() {
-        isAgentPreviewPresented = true
+    func openAgentSidecar() {
+        isAgentSidecarPresented = true
     }
 
-    func toggleAgentPreview() {
-        isAgentPreviewPresented.toggle()
+    func toggleAgentSidecar() {
+        isAgentSidecarPresented.toggle()
     }
 
-    func closeAgentPreview() {
-        isAgentPreviewPresented = false
+    func closeAgentSidecar() {
+        isAgentSidecarPresented = false
     }
 
     isolated deinit {

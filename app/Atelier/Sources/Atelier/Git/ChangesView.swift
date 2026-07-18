@@ -143,6 +143,7 @@ struct ChangesView: View {
     let model: GitWorkspaceModel
     let onOpenDiff: (DiffSelection) -> Void
     var onClose: (() -> Void)? = nil
+    var showsPanelHeader = true
     @Environment(AtelierZoomModel.self) private var zoom
     @State private var commitMessage = ""
     @State private var discardCandidate: GitChange?
@@ -171,8 +172,10 @@ struct ChangesView: View {
 
     private var sourceControlPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sourceControlHeader
-                .atelierGitErrorEffect(value: model.errorMessage)
+            if showsPanelHeader {
+                sourceControlHeader
+                    .atelierGitErrorEffect(value: model.errorMessage)
+            }
             repositoryHeader
 
             if let message = model.errorMessage {
