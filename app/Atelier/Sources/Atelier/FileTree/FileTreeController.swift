@@ -106,7 +106,6 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
                 as? NSTableCellView
             cell?.textField?.font = font
-            cell?.textField?.frame.size.height = rowHeight
         }
     }
 
@@ -142,13 +141,14 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     ) -> NSView? {
         guard let node = item as? FileTreeNode else { return nil }
         let identifier = NSUserInterfaceItemIdentifier("FileTreeCell")
-        let cell = (outlineView.makeView(withIdentifier: identifier, owner: nil) as? NSTableCellView)
+        let cell = (outlineView.makeView(withIdentifier: identifier, owner: nil) as? FileTreeCellView)
             ?? makeCell(identifier: identifier)
         cell.textField?.stringValue = node.name
         cell.textField?.font = font
         cell.textField?.textColor = AppKitThemeAdapter.foreground
         cell.imageView?.image = icon(for: node)
         cell.imageView?.contentTintColor = iconColor(for: node)
+        cell.setSymbolicLink(node.isSymbolicLink)
         return cell
     }
 
@@ -311,43 +311,13 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         )
     }
 
-    private func makeCell(identifier: NSUserInterfaceItemIdentifier) -> NSTableCellView {
-        let cell = NSTableCellView()
-        cell.identifier = identifier
-
-        let icon = NSImageView(
-            frame: NSRect(
-                x: AtelierMetrics.spaceXS,
-                y: AtelierMetrics.spaceXS,
-                width: AtelierMetrics.spaceL,
-                height: AtelierMetrics.spaceL
-            )
-        )
-        icon.imageScaling = .scaleProportionallyUpOrDown
-        icon.autoresizingMask = [.maxXMargin]
-
-        let label = NSTextField(labelWithString: "")
-        label.frame = NSRect(
-            x: AtelierMetrics.spaceXL,
-            y: 0,
-            width: 240,
-            height: rowHeight
-        )
-        label.controlSize = .regular
-        label.font = font
-        label.lineBreakMode = .byTruncatingMiddle
-        label.autoresizingMask = [.width]
-
-        cell.imageView = icon
-        cell.textField = label
-        cell.addSubview(icon)
-        cell.addSubview(label)
-        return cell
+    private func makeCell(identifier: NSUserInterfaceItemIdentifier) -> FileTreeCellView {
+        FileTreeCellView(identifier: identifier, font: font)
     }
 
     private func icon(for node: FileTreeNode) -> NSImage? {
         let symbol: String
-        if node.isDirectory {
+        if node.isDirectory || node.symbolicLinkTargetIsDirectory {
             symbol = "folder"
         } else {
             switch node.url.pathExtension.lowercased() {
@@ -364,7 +334,83 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     }
 
     private func iconColor(for node: FileTreeNode) -> NSColor {
-        node.isDirectory ? AppKitThemeAdapter.accent : AppKitThemeAdapter.secondary
+        node.isDirectory || node.symbolicLinkTargetIsDirectory
+            ? AppKitThemeAdapter.accent
+            : AppKitThemeAdapter.secondary
+    }
+}
+
+private final class FileTreeCellView: NSTableCellView {
+    private let symbolicLinkBadge = NSImageView()
+    private var badgeWidthConstraint: NSLayoutConstraint!
+    private var badgeSpacingConstraint: NSLayoutConstraint!
+
+    init(identifier: NSUserInterfaceItemIdentifier, font: NSFont) {
+        super.init(frame: .zero)
+        self.identifier = identifier
+
+        let icon = NSImageView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.imageScaling = .scaleProportionallyUpOrDown
+
+        let label = NSTextField(labelWithString: "")
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.controlSize = .regular
+        label.font = font
+        label.lineBreakMode = .byTruncatingMiddle
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        symbolicLinkBadge.translatesAutoresizingMaskIntoConstraints = false
+        symbolicLinkBadge.image = NSImage(
+            systemSymbolName: "arrow.turn.up.right",
+            accessibilityDescription: "Symbolic link"
+        )
+        symbolicLinkBadge.imageScaling = .scaleProportionallyDown
+        symbolicLinkBadge.contentTintColor = AppKitThemeAdapter.secondary
+
+        imageView = icon
+        textField = label
+        addSubview(icon)
+        addSubview(label)
+        addSubview(symbolicLinkBadge)
+
+        badgeWidthConstraint = symbolicLinkBadge.widthAnchor.constraint(equalToConstant: 0)
+        badgeSpacingConstraint = symbolicLinkBadge.leadingAnchor.constraint(
+            equalTo: label.trailingAnchor
+        )
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(
+                equalTo: leadingAnchor,
+                constant: AtelierMetrics.spaceXS
+            ),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: AtelierMetrics.spaceL),
+            icon.heightAnchor.constraint(equalToConstant: AtelierMetrics.spaceL),
+            label.leadingAnchor.constraint(
+                equalTo: icon.trailingAnchor,
+                constant: AtelierMetrics.spaceXS
+            ),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            badgeSpacingConstraint,
+            badgeWidthConstraint,
+            symbolicLinkBadge.heightAnchor.constraint(equalToConstant: AtelierTypography.micro),
+            symbolicLinkBadge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            symbolicLinkBadge.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingAnchor,
+                constant: -AtelierMetrics.spaceXS
+            )
+        ])
+        setSymbolicLink(false)
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func setSymbolicLink(_ isSymbolicLink: Bool) {
+        symbolicLinkBadge.isHidden = !isSymbolicLink
+        badgeSpacingConstraint.constant = isSymbolicLink ? AtelierMetrics.spaceXS : 0
+        badgeWidthConstraint.constant = isSymbolicLink ? AtelierTypography.micro : 0
     }
 }
 

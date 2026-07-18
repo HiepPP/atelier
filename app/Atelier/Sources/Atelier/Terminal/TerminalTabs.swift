@@ -711,7 +711,7 @@ struct TerminalTabs: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
                         ForEach(model.visibleTabs) { tab in
-                            ZStack(alignment: .trailing) {
+                            ZStack(alignment: .leading) {
                                 Button {
                                     withAnimation(
                                         reduceMotion
@@ -733,12 +733,12 @@ struct TerminalTabs: View {
                                             .lineLimit(1)
                                     }
                                     .padding(
-                                        .trailing,
+                                        .leading,
                                         model.canClose(tab)
                                             ? AtelierMetrics.space2XL
                                             : AtelierMetrics.spaceM
                                     )
-                                    .padding(.leading, AtelierMetrics.spaceM)
+                                    .padding(.trailing, AtelierMetrics.spaceM)
                                     .frame(
                                         minWidth: AtelierMetrics.tabMinWidth,
                                         idealWidth: AtelierMetrics.tabIdealWidth,

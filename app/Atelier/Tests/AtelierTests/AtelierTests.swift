@@ -58,6 +58,30 @@ struct AtelierTests {
         let entries = try await FileTreeService().children(of: root)
 
         #expect(entries.map { $0.url.lastPathComponent } == ["Sources", "README.md"])
+
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("README-link.md"),
+            withDestinationURL: root.appendingPathComponent("README.md")
+        )
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("Sources-link"),
+            withDestinationURL: root.appendingPathComponent("Sources", isDirectory: true)
+        )
+
+        let entriesWithLinks = try await FileTreeService().children(of: root)
+        let fileLink = try #require(
+            entriesWithLinks.first { $0.url.lastPathComponent == "README-link.md" }
+        )
+        let folderLink = try #require(
+            entriesWithLinks.first { $0.url.lastPathComponent == "Sources-link" }
+        )
+
+        #expect(fileLink.isSymbolicLink)
+        #expect(!fileLink.isDirectory)
+        #expect(!fileLink.symbolicLinkTargetIsDirectory)
+        #expect(folderLink.isSymbolicLink)
+        #expect(!folderLink.isDirectory)
+        #expect(folderLink.symbolicLinkTargetIsDirectory)
     }
 
     @Test("File tree service creates files and folders without overwriting")

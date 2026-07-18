@@ -40,9 +40,21 @@ actor FileTreeService {
         return try urls.compactMap { url in
             guard !IgnoreRules.shouldIgnore(url) else { return nil }
             let values = try url.resourceValues(forKeys: keys)
+            let isSymbolicLink = values.isSymbolicLink == true
+            let symbolicLinkTargetIsDirectory: Bool
+            if isSymbolicLink {
+                let targetValues = try? url.resolvingSymlinksInPath().resourceValues(
+                    forKeys: [.isDirectoryKey]
+                )
+                symbolicLinkTargetIsDirectory = targetValues?.isDirectory == true
+            } else {
+                symbolicLinkTargetIsDirectory = false
+            }
             return FileTreeEntry(
                 url: url,
-                isDirectory: values.isDirectory == true && values.isSymbolicLink != true
+                isDirectory: values.isDirectory == true && !isSymbolicLink,
+                isSymbolicLink: isSymbolicLink,
+                symbolicLinkTargetIsDirectory: symbolicLinkTargetIsDirectory
             )
         }.sorted {
             if $0.isDirectory != $1.isDirectory { return $0.isDirectory }

@@ -3,6 +3,8 @@ import Foundation
 nonisolated struct FileTreeEntry: Equatable, Sendable {
     let url: URL
     let isDirectory: Bool
+    let isSymbolicLink: Bool
+    let symbolicLinkTargetIsDirectory: Bool
 }
 
 enum FileTreeCreationKind: Equatable, Sendable {
@@ -24,14 +26,23 @@ struct FileTreeCreationRequest: Equatable, Identifiable {
 final class FileTreeNode {
     let url: URL
     let isDirectory: Bool
+    let isSymbolicLink: Bool
+    let symbolicLinkTargetIsDirectory: Bool
     private(set) var children: [FileTreeNode]?
     private(set) var isLoading = false
 
     var name: String { url.lastPathComponent }
 
-    init(url: URL, isDirectory: Bool) {
+    init(
+        url: URL,
+        isDirectory: Bool,
+        isSymbolicLink: Bool = false,
+        symbolicLinkTargetIsDirectory: Bool = false
+    ) {
         self.url = url
         self.isDirectory = isDirectory
+        self.isSymbolicLink = isSymbolicLink
+        self.symbolicLinkTargetIsDirectory = symbolicLinkTargetIsDirectory
     }
 
     func beginLoading() -> Bool {
@@ -43,10 +54,18 @@ final class FileTreeNode {
     func apply(_ entries: [FileTreeEntry]) {
         let existing = Dictionary(uniqueKeysWithValues: (children ?? []).map { ($0.url, $0) })
         children = entries.map { entry in
-            if let node = existing[entry.url], node.isDirectory == entry.isDirectory {
+            if let node = existing[entry.url],
+               node.isDirectory == entry.isDirectory,
+               node.isSymbolicLink == entry.isSymbolicLink,
+               node.symbolicLinkTargetIsDirectory == entry.symbolicLinkTargetIsDirectory {
                 return node
             }
-            return FileTreeNode(url: entry.url, isDirectory: entry.isDirectory)
+            return FileTreeNode(
+                url: entry.url,
+                isDirectory: entry.isDirectory,
+                isSymbolicLink: entry.isSymbolicLink,
+                symbolicLinkTargetIsDirectory: entry.symbolicLinkTargetIsDirectory
+            )
         }
         isLoading = false
     }

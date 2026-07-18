@@ -14,6 +14,16 @@ Atelier is a macOS 26+ SwiftUI application built with Swift 6.2 and Swift Packag
 
 Generated directories such as `.build/` and `dist/` must remain untracked.
 
+## Design System Contract
+
+Read `DESIGN.md` before changing code. Follow its current architecture, tokens, component contracts, interaction rules, accessibility rules, and verification requirements.
+
+- Treat `DESIGN.md` as the design contract for the shipped application.
+- If a new requirement changes the contract, update `DESIGN.md` before editing code.
+- If `DESIGN.md` is stale or conflicts with the requested behavior, reconcile and update it first.
+- Do not leave code and `DESIGN.md` describing different behavior after a change.
+- When the design contract stays unchanged, keep `DESIGN.md` unchanged and follow it during implementation.
+
 ## Build, Test, and Development Commands
 
 Run commands from the repository root:
