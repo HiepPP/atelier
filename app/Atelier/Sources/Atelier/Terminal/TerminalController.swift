@@ -90,6 +90,11 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
         applyAtelierAppearance()
     }
 
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
+
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow !== window, let scrollWheelMonitor {
             NSEvent.removeMonitor(scrollWheelMonitor)

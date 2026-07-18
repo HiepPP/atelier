@@ -222,6 +222,10 @@ nonisolated final class GitService: Sendable {
         _ = try await run(arguments: ["add", "--", path], workspacePath: workspacePath)
     }
 
+    func stageAll(workspacePath: String) async throws {
+        _ = try await run(arguments: ["add", "-A"], workspacePath: workspacePath)
+    }
+
     func unstage(path: String, originalPath: String?, workspacePath: String) async throws {
         var paths = [path]
         if let originalPath, originalPath != path {

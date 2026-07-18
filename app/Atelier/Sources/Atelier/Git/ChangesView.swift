@@ -14,6 +14,17 @@ nonisolated struct DiffSelection: Equatable, Sendable {
     }
 }
 
+nonisolated enum GitCommitPolicy {
+    static func canCommit(message: String, status: GitStatus) -> Bool {
+        !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !status.changes.isEmpty
+    }
+
+    static func shouldStageAll(status: GitStatus) -> Bool {
+        status.staged.isEmpty && !status.changes.isEmpty
+    }
+}
+
 @MainActor
 @Observable
 final class GitWorkspaceModel {
@@ -99,10 +110,17 @@ final class GitWorkspaceModel {
         }
     }
 
-    func commit(message: String, onSuccess: @escaping () -> Void) {
+    func commit(
+        message: String,
+        stageAll: Bool,
+        onSuccess: @escaping () -> Void
+    ) {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         perform(onSuccess: onSuccess) { service, path in
+            if stageAll {
+                try await service.stageAll(workspacePath: path)
+            }
             try await service.commit(message: trimmed, workspacePath: path)
         }
     }
@@ -290,6 +308,9 @@ struct ChangesView: View {
                 .frame(height: AtelierMetrics.fieldHeight)
                 .atelierField(isFocused: isCommitFieldFocused)
                 .onSubmit(commit)
+                .onExitCommand {
+                    isCommitFieldFocused = false
+                }
         }
         .padding(.horizontal, AtelierMetrics.spaceM)
         .environment(\.atelierZoomScale, zoom.sidebarScale)
@@ -377,12 +398,18 @@ struct ChangesView: View {
     }
 
     private var canCommit: Bool {
-        !commitMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !model.snapshot.status.staged.isEmpty
+        GitCommitPolicy.canCommit(
+            message: commitMessage,
+            status: model.snapshot.status
+        )
     }
 
     private func commit() {
-        model.commit(message: commitMessage) {
+        isCommitFieldFocused = false
+        model.commit(
+            message: commitMessage,
+            stageAll: GitCommitPolicy.shouldStageAll(status: model.snapshot.status)
+        ) {
             commitMessage = ""
         }
     }

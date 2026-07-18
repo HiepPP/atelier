@@ -116,6 +116,64 @@ struct AtelierTests {
         #expect(status.untracked.map(\.path) == ["new file.txt"])
     }
 
+    @Test("Git commit enables for working changes and stages all when needed")
+    func gitCommitPolicy() {
+        let workingOnly = GitStatus(changes: [
+            GitChange(
+                path: "main.swift",
+                originalPath: nil,
+                kind: .modified,
+                isStaged: false,
+                isUnstaged: true
+            )
+        ])
+        let staged = GitStatus(changes: [
+            GitChange(
+                path: "main.swift",
+                originalPath: nil,
+                kind: .modified,
+                isStaged: true,
+                isUnstaged: false
+            )
+        ])
+
+        #expect(GitCommitPolicy.canCommit(message: "Fix focus", status: workingOnly))
+        #expect(!GitCommitPolicy.canCommit(message: "   ", status: workingOnly))
+        #expect(GitCommitPolicy.shouldStageAll(status: workingOnly))
+        #expect(!GitCommitPolicy.shouldStageAll(status: staged))
+    }
+
+    @Test("Git service stages tracked and untracked changes together")
+    func gitStageAll() async throws {
+        let repository = temporaryDirectory("git-stage-all")
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+        let command = GitCommand()
+        func git(_ arguments: [String]) throws -> Data {
+            try command.run(arguments: arguments, workspacePath: repository.path)
+        }
+
+        _ = try git(["init", "-q"])
+        let tracked = repository.appendingPathComponent("tracked.txt")
+        try Data("before\n".utf8).write(to: tracked)
+        _ = try git(["add", "--", "tracked.txt"])
+        _ = try git([
+            "-c", "user.name=Atelier Tests",
+            "-c", "user.email=atelier-tests@example.invalid",
+            "commit", "-qm", "initial"
+        ])
+
+        try Data("after\n".utf8).write(to: tracked)
+        try Data("new\n".utf8).write(
+            to: repository.appendingPathComponent("untracked.txt")
+        )
+        try await GitService().stageAll(workspacePath: repository.path)
+
+        let stagedPaths = String(decoding: try git(["diff", "--cached", "--name-only"]), as: UTF8.self)
+            .split(whereSeparator: \Character.isNewline)
+            .map(String.init)
+        #expect(stagedPaths == ["tracked.txt", "untracked.txt"])
+    }
+
     @Test("Unified diff parser tracks old and new line numbers")
     func gitDiffParsing() throws {
         let document = GitDiffDocument(text: """
