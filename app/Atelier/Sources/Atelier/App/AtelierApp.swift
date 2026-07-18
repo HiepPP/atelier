@@ -6,29 +6,36 @@ import Observation
 struct AtelierApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model: AppModel
+#if DEBUG
+    private let responseMemoryFixtureSelection: Bool?
+    private let responseMemoryFixtureScrollCycles: Int
+#endif
 
     init() {
         if CommandLine.arguments.contains("--selftest") {
             SelfTest.run()
         }
+#if DEBUG
+        responseMemoryFixtureSelection = AgentResponseMemoryFixture.textSelectionEnabled(
+            arguments: CommandLine.arguments
+        )
+        responseMemoryFixtureScrollCycles = AgentResponseMemoryFixture.scrollCycleCount(
+            arguments: CommandLine.arguments
+        )
+#endif
         _model = State(initialValue: AppModel())
     }
 
     var body: some Scene {
         WindowGroup("Atelier") {
-            AtelierZoomContainer {
-                ContentView()
-                    .environment(model)
-                    .background(WorkspaceWindowBridge(controller: model.windowController))
-            }
-            .environment(model.zoom)
+            rootContent
             .frame(
                 minWidth: AtelierZoomModel.baseMinimumSize.width,
                 minHeight: AtelierZoomModel.baseMinimumSize.height
             )
             .onAppear {
                 appDelegate.model = model
-                model.start()
+                startModelIfNeeded()
             }
             .alert(item: presentedError) { error in
                 Alert(
@@ -48,6 +55,38 @@ struct AtelierApp: App {
             AtelierSettingsView()
                 .environment(model.zoom)
         }
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+#if DEBUG
+        if let responseMemoryFixtureSelection {
+            AgentResponseMemoryFixtureView(
+                textSelectionEnabled: responseMemoryFixtureSelection,
+                profileScrollCycles: responseMemoryFixtureScrollCycles
+            )
+        } else {
+            applicationContent
+        }
+#else
+        applicationContent
+#endif
+    }
+
+    private var applicationContent: some View {
+        AtelierZoomContainer {
+            ContentView()
+                .environment(model)
+                .background(WorkspaceWindowBridge(controller: model.windowController))
+        }
+        .environment(model.zoom)
+    }
+
+    private func startModelIfNeeded() {
+#if DEBUG
+        guard responseMemoryFixtureSelection == nil else { return }
+#endif
+        model.start()
     }
 
     private var presentedError: Binding<AppError?> {

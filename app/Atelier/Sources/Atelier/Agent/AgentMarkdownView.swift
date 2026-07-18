@@ -15,8 +15,19 @@ nonisolated enum AgentCodeBlockPolicy {
 }
 
 nonisolated enum MermaidResponsePresentationPolicy {
+    enum DisplayState: Equatable, Sendable {
+        case loading
+        case rendered
+        case failed(String)
+    }
+
     static func showsSource(userRequested: Bool, hasRenderError: Bool) -> Bool {
         userRequested || hasRenderError
+    }
+
+    static func displayState(hasImage: Bool, error: String?) -> DisplayState {
+        if let error { return .failed(error) }
+        return hasImage ? .rendered : .loading
     }
 }
 
@@ -40,14 +51,18 @@ struct AgentMarkdownView: View {
             inlineText(content)
                 .atelierFont(size: headingSize(level), weight: .semibold)
                 .padding(.top, level <= 2 ? AtelierMetrics.spaceXS : 0)
+                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
         case .paragraph(let content):
             inlineText(content)
                 .atelierFont(size: AtelierTypography.body)
                 .lineSpacing(AtelierMetrics.spaceXS)
+                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
         case .unorderedItem(let content):
             listRow(marker: "-", content: content)
+                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
         case .orderedItem(let number, let content):
             listRow(marker: "\(number).", content: content)
+                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
         case .quote(let content):
             inlineText(content)
                 .atelierFont(size: AtelierTypography.body)
@@ -58,10 +73,13 @@ struct AgentMarkdownView: View {
                         .fill(AtelierTheme.accent.opacity(0.72))
                         .frame(width: AtelierTheme.strokeFocus)
                 }
+                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
         case .code(let language, let content):
             codeBlock(language: language, content: content)
         case .mermaid(let source):
             MermaidResponseCard(source: source)
+        case .invalidMermaid(let source, let error):
+            MermaidResponseCard(source: source, parseError: error)
         case .table(let headers, let rows):
             table(headers: headers, rows: rows)
         case .divider:
@@ -209,6 +227,7 @@ struct AgentMarkdownView: View {
 
 struct MermaidResponseCard: View {
     let source: String
+    let parseError: String?
 
     @State private var image: NSImage?
     @State private var imageSource: String?
@@ -216,6 +235,11 @@ struct MermaidResponseCard: View {
     @State private var showsSource = false
     @State private var containerWidth: CGFloat = 480
     @State private var isRendering = false
+
+    init(source: String, parseError: String? = nil) {
+        self.source = source
+        self.parseError = parseError
+    }
 
     private var renderWidth: CGFloat {
         MermaidRenderingPolicy.widthBucket(containerWidth: containerWidth)
@@ -239,26 +263,33 @@ struct MermaidResponseCard: View {
                 .accessibilityLabel(showsSource ? "Hide Mermaid source" : "View Mermaid source")
             }
 
-            if let image {
-                ZStack(alignment: .topTrailing) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            switch MermaidResponsePresentationPolicy.displayState(
+                hasImage: image != nil,
+                error: parseError ?? renderError
+            ) {
+            case .rendered:
+                if let image {
+                    ZStack(alignment: .topTrailing) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
-                    if isRendering {
-                        ProgressView()
-                            .controlSize(.small)
-                            .padding(AtelierMetrics.spaceS)
-                            .background(.regularMaterial)
-                            .clipShape(Circle())
+                        if isRendering {
+                            ProgressView()
+                                .controlSize(.small)
+                                .padding(AtelierMetrics.spaceS)
+                                .background(.regularMaterial)
+                                .clipShape(Circle())
+                        }
                     }
                 }
-            } else if let renderError {
-                Label(renderError, systemImage: "exclamationmark.triangle")
+            case .failed(let message):
+                Label(message, systemImage: "exclamationmark.triangle")
                     .atelierFont(size: AtelierTypography.caption)
                     .foregroundStyle(.secondary)
-            } else {
+                    .fixedSize(horizontal: false, vertical: true)
+            case .loading:
                 ProgressView()
                     .controlSize(.small)
                     .frame(maxWidth: .infinity, minHeight: 120)
@@ -266,7 +297,7 @@ struct MermaidResponseCard: View {
 
             if MermaidResponsePresentationPolicy.showsSource(
                 userRequested: showsSource,
-                hasRenderError: renderError != nil
+                hasRenderError: parseError != nil || renderError != nil
             ) {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
@@ -312,7 +343,18 @@ struct MermaidResponseCard: View {
                     }
             }
         }
-        .task(id: MermaidRenderRequest(source: source, width: Int(renderWidth))) {
+        .task(id: MermaidRenderRequest(
+            source: source,
+            width: Int(renderWidth),
+            parseError: parseError
+        )) {
+            guard parseError == nil else {
+                image = nil
+                imageSource = nil
+                renderError = nil
+                isRendering = false
+                return
+            }
             do {
                 try await Task.sleep(for: .milliseconds(180))
             } catch {
@@ -335,7 +377,7 @@ struct MermaidResponseCard: View {
                 imageSource = source
             } catch {
                 guard !Task.isCancelled else { return }
-                renderError = "Diagram could not be rendered. Source is shown below."
+                renderError = "Mermaid syntax could not be rendered. Source is shown below."
             }
         }
     }
@@ -344,6 +386,7 @@ struct MermaidResponseCard: View {
 private struct MermaidRenderRequest: Hashable {
     let source: String
     let width: Int
+    let parseError: String?
 }
 
 nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
@@ -354,6 +397,7 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
     case quote(String)
     case code(language: String?, content: String)
     case mermaid(String)
+    case invalidMermaid(source: String, error: String)
     case table(headers: [String], rows: [[String]])
     case divider
 
@@ -370,10 +414,22 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
             paragraph.removeAll(keepingCapacity: true)
         }
 
-        func flushFence() {
+        func flushFence(isClosed: Bool) {
             let content = fencedLines.joined(separator: "\n")
             if fenceLanguage?.lowercased() == "mermaid" {
-                blocks.append(.mermaid(content))
+                if !isClosed {
+                    blocks.append(.invalidMermaid(
+                        source: content,
+                        error: "Mermaid block is missing its closing fence. Source is shown below."
+                    ))
+                } else if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    blocks.append(.invalidMermaid(
+                        source: content,
+                        error: "Mermaid block is empty. Source is shown below."
+                    ))
+                } else {
+                    blocks.append(.mermaid(content))
+                }
             } else {
                 blocks.append(.code(language: fenceLanguage, content: content))
             }
@@ -389,8 +445,8 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             if let fenceMarker {
-                if trimmed == fenceMarker {
-                    flushFence()
+                if isFenceClosing(trimmed, marker: fenceMarker) {
+                    flushFence(isClosed: true)
                 } else {
                     fencedLines.append(line)
                 }
@@ -468,23 +524,30 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
         }
 
         if fenceMarker != nil || !fencedLines.isEmpty {
-            flushFence()
+            flushFence(isClosed: false)
         }
         flushParagraph()
         return blocks
     }
 
     private static func fenceOpening(_ line: String) -> (marker: String, language: String?)? {
-        let marker: String
-        if line.hasPrefix("```") {
-            marker = "```"
-        } else if line.hasPrefix("~~~") {
-            marker = "~~~"
-        } else {
+        guard let markerCharacter = line.first, markerCharacter == "`" || markerCharacter == "~" else {
             return nil
         }
+        let markerLength = line.prefix(while: { $0 == markerCharacter }).count
+        guard markerLength >= 3 else { return nil }
+        let marker = String(repeating: markerCharacter, count: markerLength)
         let language = line.dropFirst(marker.count).trimmingCharacters(in: .whitespaces)
         return (marker, language.isEmpty ? nil : language)
+    }
+
+    private static func isFenceClosing(_ line: String, marker: String) -> Bool {
+        guard let markerCharacter = marker.first,
+              line.count >= marker.count,
+              line.allSatisfy({ $0 == markerCharacter }) else {
+            return false
+        }
+        return true
     }
 
     private static func heading(from line: String) -> (level: Int, content: String)? {

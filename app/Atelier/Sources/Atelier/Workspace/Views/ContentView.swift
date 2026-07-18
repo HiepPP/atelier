@@ -147,12 +147,9 @@ struct WorkspaceView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fileTreeCreationRequest: FileTreeCreationRequest?
     @State private var fileTreeTargetDirectory: URL?
-    @State private var agentPreviewWidth: CGFloat = 448
-    @State private var agentPreviewDragStartWidth: CGFloat?
     @State private var responderBeforeAgentPreview: NSResponder?
     @State private var responderBeforeProjectMenu: NSResponder?
     @State private var isProjectMenuPresented = false
-    @State private var isAgentResizeHandleHovered = false
     @State private var isExplorerDockedHidden = false
     @State private var isSourceControlDockedHidden = false
     @State private var isExplorerOverlayPresented = false
@@ -174,6 +171,7 @@ struct WorkspaceView: View {
                     GeometryReader { geometry in
                         workspaceSurface(
                             containerWidth: geometry.size.width,
+                            containerHeight: geometry.size.height,
                             workspaceLayout: workspaceLayout
                         )
                     }
@@ -221,15 +219,11 @@ struct WorkspaceView: View {
         URL(fileURLWithPath: state.path, isDirectory: true)
     }
 
-    private func workspaceColumns(
-        layout: WorkspaceLayoutMode,
-        hidesExplorerForAgent: Bool
-    ) -> some View {
+    private func workspaceColumns(layout: WorkspaceLayoutMode) -> some View {
         HSplitView {
             if !zoom.isFocusMode,
                layout.docksExplorer,
-               !isExplorerDockedHidden,
-               !hidesExplorerForAgent {
+               !isExplorerDockedHidden {
                 explorerColumn
                     .frame(
                         minWidth: AtelierMetrics.explorerMinWidth,
@@ -266,30 +260,13 @@ struct WorkspaceView: View {
 
     private func workspaceSurface(
         containerWidth: CGFloat,
+        containerHeight: CGFloat,
         workspaceLayout: WorkspaceLayoutMode
     ) -> some View {
-        let agentLayout = AgentPreviewLayoutPolicy.layout(containerWidth: containerWidth)
-        let hidesExplorerForAgent = session.isAgentPreviewPresented
-            && agentLayout == .overlay
-            && workspaceLayout != .wide
-
-        return HStack(spacing: 0) {
-            workspaceColumns(
-                layout: workspaceLayout,
-                hidesExplorerForAgent: hidesExplorerForAgent
-            )
-
-            if session.isAgentPreviewPresented, agentLayout == .docked {
-                agentPreviewResizeHandle(containerWidth: containerWidth)
-                agentPreview
-                    .frame(
-                        width: AgentPreviewLayoutPolicy.clampedDockedWidth(
-                            agentPreviewWidth,
-                            containerWidth: containerWidth
-                        )
-                    )
-            }
-        }
+        primaryWorkspace(
+            containerHeight: containerHeight,
+            workspaceLayout: workspaceLayout
+        )
         .overlay(alignment: .leading) {
             if !zoom.isFocusMode,
                !workspaceLayout.docksExplorer,
@@ -324,18 +301,33 @@ struct WorkspaceView: View {
                     isSourceControlOverlayPresented = false
                 }
                 .transition(.move(edge: .trailing).combined(with: .opacity))
-            } else if session.isAgentPreviewPresented, agentLayout == .overlay {
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func primaryWorkspace(
+        containerHeight: CGFloat,
+        workspaceLayout: WorkspaceLayoutMode
+    ) -> some View {
+        if session.isAgentPreviewPresented {
+            VSplitView {
                 agentPreview
                     .frame(
-                        width: AgentPreviewLayoutPolicy.panelWidth(
-                            containerWidth: containerWidth,
-                            layout: agentLayout
+                        minHeight: AgentPreviewPanePolicy.minimumHeight,
+                        idealHeight: AgentPreviewPanePolicy.preferredHeight(
+                            containerHeight: containerHeight
+                        ),
+                        maxHeight: AgentPreviewPanePolicy.maximumHeight(
+                            containerHeight: containerHeight
                         )
                     )
-                    .atelierOverlayPanel(edge: .trailing)
-                    .onExitCommand(perform: closeAgentPreview)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+
+                workspaceColumns(layout: workspaceLayout)
+                    .frame(minHeight: AgentPreviewPanePolicy.workspaceMinimumHeight)
             }
+        } else {
+            workspaceColumns(layout: workspaceLayout)
         }
     }
 
@@ -346,54 +338,7 @@ struct WorkspaceView: View {
         )
         .frame(maxHeight: .infinity)
         .environment(\.atelierZoomScale, zoom.contentScale)
-    }
-
-    private func agentPreviewResizeHandle(containerWidth: CGFloat) -> some View {
-        Rectangle()
-            .fill(
-                isAgentResizeHandleHovered
-                    ? AtelierTheme.controlFill(for: .hovered)
-                    : AtelierTheme.border
-            )
-            .frame(width: AtelierMetrics.spaceS)
-            .contentShape(Rectangle())
-            .overlay {
-                Capsule()
-                    .fill(
-                        isAgentResizeHandleHovered
-                            ? AtelierTheme.accent
-                            : Color.secondary.opacity(0.55)
-                    )
-                    .frame(width: 2, height: 36)
-            }
-            .onHover { isAgentResizeHandleHovered = $0 }
-            .help("Drag to resize agent preview")
-            .gesture(
-                DragGesture(minimumDistance: 1)
-                    .onChanged { value in
-                        let start = agentPreviewDragStartWidth ?? agentPreviewWidth
-                        if agentPreviewDragStartWidth == nil {
-                            agentPreviewDragStartWidth = start
-                        }
-                        agentPreviewWidth = AgentPreviewLayoutPolicy.clampedDockedWidth(
-                            start - value.translation.width,
-                            containerWidth: containerWidth
-                        )
-                    }
-                    .onEnded { _ in
-                        agentPreviewDragStartWidth = nil
-                    }
-            )
-            .accessibilityElement()
-            .accessibilityLabel("Resize agent preview")
-            .accessibilityValue("\(Int(agentPreviewWidth.rounded())) points wide")
-            .accessibilityAdjustableAction { direction in
-                let delta: CGFloat = direction == .increment ? 24 : -24
-                agentPreviewWidth = AgentPreviewLayoutPolicy.clampedDockedWidth(
-                    agentPreviewWidth + delta,
-                    containerWidth: containerWidth
-                )
-            }
+        .onExitCommand(perform: closeAgentPreview)
     }
 
     private func openAgentPreview() {

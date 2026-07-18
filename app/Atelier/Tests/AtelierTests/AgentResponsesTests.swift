@@ -314,6 +314,35 @@ struct AgentResponsesTests {
         ])
     }
 
+    @Test("Markdown distinguishes valid, empty, and unclosed Mermaid fences")
+    func mermaidFenceStates() {
+        let markdown = """
+        ````MERMAID
+        flowchart LR
+        A --> B
+        ````
+
+        ```mermaid
+        ```
+
+        ~~~mermaid
+        graph TD
+        A --> B
+        """
+
+        #expect(AgentMarkdownBlock.parse(markdown) == [
+            .mermaid("flowchart LR\nA --> B"),
+            .invalidMermaid(
+                source: "",
+                error: "Mermaid block is empty. Source is shown below."
+            ),
+            .invalidMermaid(
+                source: "graph TD\nA --> B",
+                error: "Mermaid block is missing its closing fence. Source is shown below."
+            )
+        ])
+    }
+
     @Test("Markdown parses tables without changing surrounding block order")
     func markdownTableBlocks() {
         let markdown = """
@@ -378,6 +407,38 @@ struct AgentResponsesTests {
         #expect(AgentCodeBlockPolicy.copiedContent(source) == source)
     }
 
+#if DEBUG
+    @Test("Memory fixture matches captured response shape")
+    func responseMemoryFixtureShape() {
+        let responses = AgentResponseMemoryFixture.responses
+        let blocks = responses.flatMap { AgentMarkdownBlock.parse($0.markdown) }
+        let tableRows = blocks.reduce(into: 0) { count, block in
+            if case .table(_, let rows) = block {
+                count += rows.count
+            }
+        }
+
+        #expect(responses.count == 3)
+        #expect(responses.reduce(0) { $0 + $1.markdown.utf8.count }
+            == AgentResponseMemoryFixture.totalByteCount)
+        #expect(tableRows == AgentResponseMemoryFixture.tableRowCount)
+        #expect(!blocks.contains { block in
+            if case .mermaid = block { return true }
+            return false
+        })
+        #expect(AgentResponseMemoryFixture.textSelectionEnabled(
+            arguments: ["Atelier", "--response-memory-fixture=selection-enabled"]
+        ) == true)
+        #expect(AgentResponseMemoryFixture.textSelectionEnabled(
+            arguments: ["Atelier", "--response-memory-fixture=selection-disabled"]
+        ) == false)
+        #expect(AgentResponseMemoryFixture.scrollCycleCount(
+            arguments: ["Atelier", "--response-memory-profile-scrolls=400"]
+        ) == 400)
+        #expect(!AgentResponseSelectionPolicy.defaultEnabled)
+    }
+#endif
+
     @Test("New response affordance only appears away from bottom")
     func pendingResponsePolicy() {
         let old = AgentResponseReadIdentity(
@@ -402,30 +463,28 @@ struct AgentResponsesTests {
         ))
     }
 
-    @Test("Preview layout docks wide and overlays narrow without replacing tabs")
-    func previewLayoutPolicy() {
-        #expect(AgentPreviewLayoutPolicy.layout(containerWidth: 1_000) == .overlay)
-        #expect(AgentPreviewLayoutPolicy.layout(containerWidth: 1_600) == .docked)
-        #expect(AgentPreviewLayoutPolicy.panelWidth(
-            containerWidth: 1_000,
-            layout: .overlay
-        ) == 460)
-        #expect(AgentPreviewLayoutPolicy.panelWidth(
-            containerWidth: 1_600,
-            layout: .docked
-        ) == 448)
-        #expect(AgentPreviewLayoutPolicy.clampedDockedWidth(
-            200,
-            containerWidth: 1_600
-        ) == 360)
-        #expect(AgentPreviewLayoutPolicy.clampedDockedWidth(
-            900,
-            containerWidth: 1_600
-        ) == 640)
-        #expect(AgentPreviewLayoutPolicy.clampedDockedWidth(
-            640,
-            containerWidth: 1_000
-        ) == 380)
+    @Test("Preview pane preserves readable response and workspace heights")
+    func previewPanePolicy() {
+        #expect(AgentPreviewPanePolicy.preferredHeight(containerHeight: 550) == 253)
+        #expect(AgentPreviewPanePolicy.maximumHeight(containerHeight: 550) == 330)
+        #expect(AgentPreviewPanePolicy.preferredHeight(containerHeight: 900) == 414)
+        #expect(AgentPreviewPanePolicy.preferredHeight(containerHeight: 1_600) == 560)
+        #expect(AgentPreviewPanePolicy.maximumHeight(containerHeight: 1_600) == 560)
+    }
+
+    @Test("Response model exposes loading state during refresh")
+    func responseLoadingState() async {
+        let source = SuspendingAgentResponseSource()
+        var starts = source.started.makeAsyncIterator()
+        let model = AgentResponsesModel(source: source)
+        let refresh = Task { await model.refresh() }
+
+        _ = await starts.next()
+        #expect(model.isRefreshing)
+
+        await source.resume([])
+        await refresh.value
+        #expect(!model.isRefreshing)
     }
 
     @Test("Workspace owns and stops response monitoring")
@@ -531,6 +590,18 @@ struct AgentResponsesTests {
             userRequested: false,
             hasRenderError: hasRenderError
         ))
+        #expect(MermaidResponsePresentationPolicy.displayState(
+            hasImage: false,
+            error: "Invalid syntax"
+        ) == .failed("Invalid syntax"))
+        #expect(MermaidResponsePresentationPolicy.displayState(
+            hasImage: false,
+            error: nil
+        ) == .loading)
+        #expect(MermaidResponsePresentationPolicy.displayState(
+            hasImage: true,
+            error: nil
+        ) == .rendered)
     }
 
     private func response(
@@ -580,6 +651,28 @@ nonisolated actor SequencedAgentResponseSource: AgentResponseSource {
         let snapshot = snapshots[min(index, snapshots.count - 1)]
         index += 1
         return snapshot
+    }
+}
+
+nonisolated actor SuspendingAgentResponseSource: AgentResponseSource {
+    nonisolated let started: AsyncStream<Void>
+    private let startedContinuation: AsyncStream<Void>.Continuation
+    private var continuation: CheckedContinuation<[AgentResponse], Never>?
+
+    init() {
+        var continuation: AsyncStream<Void>.Continuation!
+        started = AsyncStream { continuation = $0 }
+        startedContinuation = continuation
+    }
+
+    func loadResponses() async -> [AgentResponse] {
+        startedContinuation.yield()
+        return await withCheckedContinuation { continuation = $0 }
+    }
+
+    func resume(_ responses: [AgentResponse]) {
+        continuation?.resume(returning: responses)
+        continuation = nil
     }
 }
 

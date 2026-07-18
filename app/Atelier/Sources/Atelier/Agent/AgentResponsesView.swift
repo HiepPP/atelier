@@ -1,34 +1,25 @@
 import SwiftUI
 
-nonisolated enum AgentPreviewLayout: Equatable, Sendable {
-    case docked
-    case overlay
+nonisolated enum AgentResponseSelectionPolicy {
+    static let defaultEnabled = false
 }
 
-nonisolated enum AgentPreviewLayoutPolicy {
-    static let dockedBreakpoint: CGFloat = 1_400
-    static let minimumDockedWidth: CGFloat = 360
-    static let maximumDockedWidth: CGFloat = 640
+nonisolated enum AgentPreviewPanePolicy {
+    static let minimumHeight: CGFloat = 220
+    static let workspaceMinimumHeight: CGFloat = 220
+    static let preferredMaximumHeight: CGFloat = 560
 
-    static func layout(containerWidth: CGFloat) -> AgentPreviewLayout {
-        containerWidth >= dockedBreakpoint ? .docked : .overlay
+    static func preferredHeight(containerHeight: CGFloat) -> CGFloat {
+        min(
+            maximumHeight(containerHeight: containerHeight),
+            max(minimumHeight, (containerHeight * 0.46).rounded())
+        )
     }
 
-    static func panelWidth(containerWidth: CGFloat, layout: AgentPreviewLayout) -> CGFloat {
-        switch layout {
-        case .docked:
-            min(500, max(380, containerWidth * 0.28)).rounded()
-        case .overlay:
-            min(480, max(320, containerWidth * 0.46)).rounded()
-        }
-    }
-
-    static func clampedDockedWidth(_ proposedWidth: CGFloat, containerWidth: CGFloat) -> CGFloat {
-        let workspaceMinimumWidth: CGFloat = 620
-        let availableMaximum = max(minimumDockedWidth, containerWidth - workspaceMinimumWidth)
-        return min(
-            min(maximumDockedWidth, availableMaximum),
-            max(minimumDockedWidth, proposedWidth)
+    static func maximumHeight(containerHeight: CGFloat) -> CGFloat {
+        min(
+            preferredMaximumHeight,
+            max(minimumHeight, containerHeight - workspaceMinimumHeight)
         )
     }
 }
@@ -49,9 +40,23 @@ nonisolated enum AgentResponseTimelinePolicy {
 struct AgentResponsesView: View {
     @Bindable var model: AgentResponsesModel
     let onClose: () -> Void
+    let textSelectionEnabled: Bool
+    let profileScrollCycles: Int
 
     @State private var isPinnedToBottom = true
     @State private var showsPendingResponse = false
+
+    init(
+        model: AgentResponsesModel,
+        onClose: @escaping () -> Void,
+        textSelectionEnabled: Bool = AgentResponseSelectionPolicy.defaultEnabled,
+        profileScrollCycles: Int = 0
+    ) {
+        self.model = model
+        self.onClose = onClose
+        self.textSelectionEnabled = textSelectionEnabled
+        self.profileScrollCycles = max(0, profileScrollCycles)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -91,11 +96,20 @@ struct AgentResponsesView: View {
             Button {
                 Task { await model.refresh() }
             } label: {
-                Image(systemName: "arrow.clockwise")
-                    .frame(width: 24, height: 24)
+                ZStack {
+                    Image(systemName: "arrow.clockwise")
+                        .opacity(model.isRefreshing ? 0 : 1)
+                    if model.isRefreshing {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+                .frame(width: 24, height: 24)
             }
             .buttonStyle(.glass)
+            .disabled(model.isRefreshing)
             .accessibilityLabel("Refresh agent responses")
+            .accessibilityValue(model.isRefreshing ? "Loading" : "Ready")
             .help("Refresh agent responses")
 
             Button(action: onClose) {
@@ -175,7 +189,11 @@ struct AgentResponsesView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: AtelierMetrics.spaceL) {
                     if model.responses.isEmpty {
-                        emptyState
+                        if model.isRefreshing {
+                            loadingState
+                        } else {
+                            emptyState
+                        }
                     } else if model.selectedSession == nil {
                         noSelectionState
                     }
@@ -232,6 +250,22 @@ struct AgentResponsesView: View {
                 showsPendingResponse = false
                 proxy.scrollTo("agent-response-bottom", anchor: .bottom)
             }
+            .task(id: model.selectedResponses.last?.readIdentity) {
+                guard profileScrollCycles > 0,
+                      let firstResponse = model.selectedResponses.first else { return }
+                for _ in 0..<profileScrollCycles {
+                    withAnimation(.linear(duration: 0.02)) {
+                        proxy.scrollTo(firstResponse.id, anchor: .top)
+                    }
+                    try? await Task.sleep(for: .milliseconds(40))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.linear(duration: 0.02)) {
+                        proxy.scrollTo("agent-response-bottom", anchor: .bottom)
+                    }
+                    try? await Task.sleep(for: .milliseconds(40))
+                    guard !Task.isCancelled else { return }
+                }
+            }
         }
     }
 
@@ -250,6 +284,29 @@ struct AgentResponsesView: View {
         }
         .frame(maxWidth: AtelierMetrics.emptyStateMaxWidth, alignment: .leading)
         .padding(.vertical, AtelierMetrics.spaceXL)
+    }
+
+    private var loadingState: some View {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+            HStack(spacing: AtelierMetrics.spaceS) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Loading responses")
+                    .atelierFont(
+                        size: AtelierTypography.title,
+                        weight: .semibold,
+                        design: .serif
+                    )
+            }
+            Text("Checking Codex and Claude sessions for final responses.")
+                .atelierFont(size: AtelierTypography.body)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: AtelierMetrics.emptyStateMaxWidth, alignment: .leading)
+        .padding(.vertical, AtelierMetrics.spaceXL)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading agent responses")
     }
 
     private var noSelectionState: some View {
@@ -287,8 +344,7 @@ struct AgentResponsesView: View {
                     .lineLimit(1)
             }
 
-            AgentMarkdownView(source: response.markdown)
-                .textSelection(.enabled)
+            selectableMarkdown(response.markdown)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, AtelierMetrics.spaceM)
@@ -299,6 +355,16 @@ struct AgentResponsesView: View {
         }
         .onAppear {
             model.markRead(response)
+        }
+    }
+
+    @ViewBuilder
+    private func selectableMarkdown(_ source: String) -> some View {
+        if textSelectionEnabled {
+            AgentMarkdownView(source: source)
+                .textSelection(.enabled)
+        } else {
+            AgentMarkdownView(source: source)
         }
     }
 

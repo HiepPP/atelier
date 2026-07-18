@@ -513,6 +513,7 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
 final class AgentResponsesModel {
     private(set) var responses: [AgentResponse] = []
     private(set) var isMonitoring = false
+    private(set) var isRefreshing = false
     private(set) var selectedSession: AgentSessionIdentity?
 
     private let source: any AgentResponseSource
@@ -581,6 +582,10 @@ final class AgentResponsesModel {
     }
 
     func refresh() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
         let loaded = await source.loadResponses()
         guard !Task.isCancelled else { return }
         let newResponses = loaded.filter { responseIDs.insert($0.readIdentity).inserted }
