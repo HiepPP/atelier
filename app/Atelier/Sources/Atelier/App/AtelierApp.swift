@@ -48,6 +48,7 @@ struct AtelierApp: App {
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             AppCommands(model: model)
+            AtelierPaletteCommands()
             AtelierTabCommands()
         }
 

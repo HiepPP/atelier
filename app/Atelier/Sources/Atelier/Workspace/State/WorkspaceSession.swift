@@ -7,6 +7,7 @@ final class WorkspaceSession {
     let state: WorkspaceState
     let rootURL: URL
     let terminalTabs: TerminalTabsModel
+    let paletteModel: AtelierPaletteModel
     let gitModel: GitWorkspaceModel
     let gemmaAgent: GemmaAgentModel
     let agentResponses: AgentResponsesModel
@@ -27,6 +28,10 @@ final class WorkspaceSession {
         self.rootURL = rootURL
         let tabs = TerminalTabsModel(workspacePath: rootURL.path)
         terminalTabs = tabs
+        paletteModel = AtelierPaletteModel(
+            fileIndex: WorkspaceFileIndex(rootURL: rootURL),
+            recentFiles: { tabs.recentFileURLs }
+        )
         gitModel = GitWorkspaceModel(
             workspacePath: rootURL.path,
             onRepositoryChange: tabs.invalidateGitDiffs
@@ -53,7 +58,7 @@ final class WorkspaceSession {
 
         let watcher = FileWatcher(path: rootURL.path) { [weak self] in
             guard let self else { return }
-            fileTreeRevision &+= 1
+            invalidateFileTree()
             gitModel.invalidate()
         }
         fileWatcher = watcher
@@ -69,20 +74,21 @@ final class WorkspaceSession {
         gitModel.stop()
         gemmaAgent.close()
         agentResponses.stop()
+        paletteModel.stop()
         terminalTabs.closeAll()
         AppLogger.workspace.info("Stopped workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
     }
 
     func createFile(named name: String, in directory: URL) async throws {
         let url = try await fileTreeService.createFile(named: name, in: directory)
-        fileTreeRevision &+= 1
+        invalidateFileTree()
         terminalTabs.openFile(url)
         AppLogger.fileTree.info("Created file: \(url.lastPathComponent, privacy: .public)")
     }
 
     func createFolder(named name: String, in directory: URL) async throws {
         let url = try await fileTreeService.createFolder(named: name, in: directory)
-        fileTreeRevision &+= 1
+        invalidateFileTree()
         AppLogger.fileTree.info("Created folder: \(url.lastPathComponent, privacy: .public)")
     }
 
@@ -100,6 +106,11 @@ final class WorkspaceSession {
 
     func closeAgentSidecar() {
         isAgentSidecarPresented = false
+    }
+
+    private func invalidateFileTree() {
+        fileTreeRevision &+= 1
+        paletteModel.updateFileRevision(fileTreeRevision)
     }
 
     isolated deinit {

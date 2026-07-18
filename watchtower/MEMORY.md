@@ -43,3 +43,4 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 ## Learnings
 
 - 2026-07-18: Keep Codex and Claude interaction in SwiftTerm. Native response UI observes transcripts and never replaces or mutates terminal state.
+- 2026-07-18: Keep FocusedValue-only palette shortcuts in a separate Commands type. Mixing them into model-bearing AppCommands crashed SwiftUI during app launch.

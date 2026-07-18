@@ -126,6 +126,7 @@ private final class CenterTab: Identifiable {
 @Observable
 final class TerminalTabsModel {
     private var tabs: [CenterTab] = []
+    private var recentFiles = RecentFileHistory()
     var selectedID: UUID?
 
     fileprivate let workspacePath: String
@@ -186,6 +187,15 @@ final class TerminalTabsModel {
         guard let selectedTab,
               case .terminal = selectedTab.content else { return false }
         return true
+    }
+
+    var canCloseSelectedTab: Bool {
+        guard let selectedTab else { return false }
+        return canClose(selectedTab)
+    }
+
+    var recentFileURLs: [URL] {
+        recentFiles.urls
     }
 
     var selectedInspectorContext: TerminalTabInspectorContext? {
@@ -334,11 +344,13 @@ final class TerminalTabsModel {
             }
         }
         tabs.removeAll(keepingCapacity: false)
+        recentFiles.removeAll()
         selectedID = nil
     }
 
     func openFile(_ url: URL) {
         let standardizedURL = url.standardizedFileURL
+        recentFiles.record(standardizedURL)
 
         if let tab = tabs.first(where: { tab in
             guard case .file(let file) = tab.content else { return false }

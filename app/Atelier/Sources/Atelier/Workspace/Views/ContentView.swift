@@ -40,18 +40,104 @@ nonisolated enum WorkspaceLayoutPolicy {
 
 struct ContentView: View {
     @Environment(AppModel.self) private var app
+    @State private var commandPaletteModel = AtelierPaletteModel()
+    @State private var presentedPaletteMode: AtelierPaletteMode?
+    @State private var responderBeforePalette: NSResponder?
 
     var body: some View {
-        Group {
-            if let workspace = app.workspace {
-                WorkspaceView(session: workspace)
-                    .id(workspace.state.id)
-            } else {
-                EmptyStateView()
+        ZStack(alignment: .top) {
+            Group {
+                if let workspace = app.workspace {
+                    WorkspaceView(session: workspace)
+                        .id(workspace.state.id)
+                } else {
+                    EmptyStateView()
+                }
+            }
+
+            if let presentedPaletteMode {
+                paletteOverlay(mode: presentedPaletteMode)
+                    .zIndex(10)
             }
         }
         .background(AtelierTheme.canvas)
         .tint(AtelierTheme.accent)
+        .focusedSceneValue(\.showQuickOpen, quickOpenAction)
+        .focusedSceneValue(\.showCommandPalette) {
+            presentPalette(.commands)
+        }
+        .onChange(of: app.workspace?.state.id) { _, workspaceID in
+            if workspaceID == nil, presentedPaletteMode == .files {
+                dismissPalette(restoresResponder: true)
+            }
+        }
+    }
+
+    private var quickOpenAction: (() -> Void)? {
+        guard app.workspace != nil else { return nil }
+        return { presentPalette(.files) }
+    }
+
+    private var activePaletteModel: AtelierPaletteModel {
+        if presentedPaletteMode == .files, let workspace = app.workspace {
+            return workspace.paletteModel
+        }
+        return commandPaletteModel
+    }
+
+    private func paletteOverlay(mode: AtelierPaletteMode) -> some View {
+        ZStack(alignment: .top) {
+            AtelierTheme.scrim
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    dismissPalette(restoresResponder: true)
+                }
+
+            AtelierPaletteView(
+                model: activePaletteModel,
+                actionContext: AtelierActionRegistry.context(for: app),
+                onActivate: activate,
+                onDismiss: { dismissPalette(restoresResponder: true) }
+            )
+            .padding(.horizontal, AtelierMetrics.spaceL)
+            .padding(.top, 54)
+        }
+        .transition(.opacity)
+        .accessibilityAddTraits(.isModal)
+    }
+
+    private func presentPalette(_ mode: AtelierPaletteMode) {
+        responderBeforePalette = app.windowController.currentFirstResponder()
+        switch mode {
+        case .files:
+            guard let workspace = app.workspace else { return }
+            workspace.paletteModel.showFiles(revision: workspace.fileTreeRevision)
+        case .commands:
+            commandPaletteModel.showCommands(context: AtelierActionRegistry.context(for: app))
+        }
+        presentedPaletteMode = mode
+    }
+
+    private func activate(_ selection: AtelierPaletteSelection) {
+        dismissPalette(restoresResponder: false)
+        switch selection {
+        case .file(let url):
+            app.workspace?.terminalTabs.openFile(url)
+        case .action(let action):
+            let context = AtelierActionRegistry.context(for: app)
+            guard AtelierActionRegistry.isEnabled(action, context: context) else { return }
+            AtelierActionRegistry.perform(action, model: app)
+        }
+    }
+
+    private func dismissPalette(restoresResponder: Bool) {
+        activePaletteModel.dismiss()
+        presentedPaletteMode = nil
+        if restoresResponder {
+            app.windowController.restoreFirstResponder(responderBeforePalette)
+        }
+        responderBeforePalette = nil
     }
 }
 
