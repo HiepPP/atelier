@@ -487,6 +487,21 @@ struct AgentResponsesTests {
         #expect(!model.isRefreshing)
     }
 
+    @Test("Background monitoring does not show manual refresh progress")
+    func backgroundMonitoringLoadingState() async {
+        let source = SuspendingAgentResponseSource()
+        var starts = source.started.makeAsyncIterator()
+        let model = AgentResponsesModel(source: source)
+
+        model.start()
+        _ = await starts.next()
+        #expect(model.isMonitoring)
+        #expect(!model.isRefreshing)
+
+        await source.resume([])
+        model.stop()
+    }
+
     @Test("Workspace owns and stops response monitoring")
     func workspaceLifecycle() {
         let root = temporaryDirectory("workspace")

@@ -520,6 +520,7 @@ final class AgentResponsesModel {
     private var responseIDs: Set<AgentResponseReadIdentity> = []
     private var readResponseIDs: Set<AgentResponseReadIdentity> = []
     private var monitorTask: Task<Void, Never>?
+    private var isRefreshInFlight = false
 
     var unreadCount: Int {
         responses.reduce(into: 0) { count, response in
@@ -569,7 +570,7 @@ final class AgentResponsesModel {
         isMonitoring = true
         monitorTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refresh()
+                await self?.refresh(showProgress: false)
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -582,9 +583,17 @@ final class AgentResponsesModel {
     }
 
     func refresh() async {
-        guard !isRefreshing else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
+        await refresh(showProgress: true)
+    }
+
+    private func refresh(showProgress: Bool) async {
+        guard !isRefreshInFlight else { return }
+        isRefreshInFlight = true
+        if showProgress { isRefreshing = true }
+        defer {
+            isRefreshInFlight = false
+            if showProgress { isRefreshing = false }
+        }
 
         let loaded = await source.loadResponses()
         guard !Task.isCancelled else { return }
