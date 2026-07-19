@@ -37,8 +37,11 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("File"))
         column.title = "Files"
         column.minWidth = 160
+        column.resizingMask = .autoresizingMask
         outlineView.addTableColumn(column)
         outlineView.outlineTableColumn = column
+        outlineView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
+        outlineView.autoresizingMask = [.width]
         outlineView.headerView = nil
         outlineView.rowSizeStyle = .custom
         outlineView.rowHeight = rowHeight
@@ -427,18 +430,19 @@ private final class FileTreeRowView: NSTableRowView {
     private var hoverTrackingArea: NSTrackingArea?
     private var isHovering = false
 
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
-
     override func updateTrackingAreas() {
         if let hoverTrackingArea {
             removeTrackingArea(hoverTrackingArea)
         }
         let area = NSTrackingArea(
             rect: .zero,
-            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited],
+            options: [
+                .activeInKeyWindow,
+                .inVisibleRect,
+                .mouseEnteredAndExited,
+                .mouseMoved,
+                .cursorUpdate
+            ],
             owner: self,
             userInfo: nil
         )
@@ -450,11 +454,22 @@ private final class FileTreeRowView: NSTableRowView {
     override func mouseEntered(with event: NSEvent) {
         isHovering = true
         needsDisplay = true
+        NSCursor.pointingHand.set()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        NSCursor.pointingHand.set()
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.pointingHand.set()
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovering = false
         needsDisplay = true
+        NSCursor.arrow.set()
     }
 
     override func drawBackground(in dirtyRect: NSRect) {

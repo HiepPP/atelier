@@ -6,6 +6,7 @@ private struct AtelierPointerCursorModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .contentShape(Rectangle())
             .onContinuousHover { phase in
                 switch phase {
                 case .active:

@@ -280,7 +280,7 @@ Every interactive control must define these states where relevant:
 - Text entry and selectable text keep the I-beam cursor. Splitters keep resize cursors. Drag-only surfaces keep their native drag cursor.
 - System-owned window chrome, scroll bars, menu items, alerts, and sheets keep AppKit cursor behavior. Their in-app trigger still uses the pointing hand.
 - SwiftUI controls use `atelierPointerCursor()`, preferably through their shared button style.
-- AppKit controls use idempotent cursor rectangles that match the clickable region.
+- AppKit controls use idempotent tracking areas or cursor rectangles that match the clickable region.
 - Cursor and visual hover feedback must cover the same hit target.
 
 ## Surface Rules
