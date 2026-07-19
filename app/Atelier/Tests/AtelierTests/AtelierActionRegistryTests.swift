@@ -12,6 +12,7 @@ struct AtelierActionRegistryTests {
         #expect(ids == [
             .openFolder,
             .closeWorkspace,
+            .nextWorkspace,
             .newTerminal,
             .closeTab,
             .navigateBack,
@@ -31,6 +32,7 @@ struct AtelierActionRegistryTests {
         let empty = AtelierActionContext(
             hasWorkspace: false,
             canCloseWorkspace: false,
+            canCycleWorkspaces: false,
             canCloseTab: false,
             canNavigateBack: false,
             canNavigateForward: true,
@@ -56,6 +58,7 @@ struct AtelierActionRegistryTests {
         let unavailableSelection = AtelierActionContext(
             hasWorkspace: false,
             canCloseWorkspace: true,
+            canCycleWorkspaces: false,
             canCloseTab: false,
             canNavigateBack: false,
             canNavigateForward: false,
@@ -83,6 +86,7 @@ struct AtelierActionRegistryTests {
         let handlers = AtelierActionHandlers(
             openFolder: { recorded.append(.openFolder) },
             closeWorkspace: { recorded.append(.closeWorkspace) },
+            nextWorkspace: { recorded.append(.nextWorkspace) },
             newTerminal: { recorded.append(.newTerminal) },
             closeTab: { recorded.append(.closeTab) },
             navigateBack: { recorded.append(.navigateBack) },
@@ -167,6 +171,7 @@ struct AtelierActionRegistryTests {
         AtelierActionContext(
             hasWorkspace: true,
             canCloseWorkspace: true,
+            canCycleWorkspaces: true,
             canCloseTab: true,
             canNavigateBack: true,
             canNavigateForward: true,

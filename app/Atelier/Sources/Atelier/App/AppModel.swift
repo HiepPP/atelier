@@ -147,6 +147,17 @@ final class AppModel {
         persistCatalog()
     }
 
+    func selectNextWorkspace() {
+        guard !workspaceStates.isEmpty else { return }
+        guard let selectedWorkspaceID,
+              let currentIndex = workspaceStates.firstIndex(where: { $0.id == selectedWorkspaceID }) else {
+            selectWorkspace(id: workspaceStates[0].id)
+            return
+        }
+        let nextIndex = (currentIndex + 1) % workspaceStates.count
+        selectWorkspace(id: workspaceStates[nextIndex].id)
+    }
+
     func selectWorkspace(id: String) {
         guard workspaceStates.contains(where: { $0.id == id }) else { return }
         catalogMutationRevision &+= 1

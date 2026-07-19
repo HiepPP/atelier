@@ -511,6 +511,7 @@ Persistence boundaries:
 | `Cmd--` | Zoom Out |
 | `Cmd-0` | Actual Size |
 | `Cmd-Shift-F` | Toggle Focus Mode |
+| ``Cmd-` `` | Next Workspace (cycles, wraps to first) |
 | `Option-Z` | Toggle Word Wrap |
 
 Rules:

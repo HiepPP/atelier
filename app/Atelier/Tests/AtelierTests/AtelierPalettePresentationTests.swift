@@ -80,6 +80,7 @@ struct AtelierPalettePresentationTests {
         AtelierActionContext(
             hasWorkspace: hasWorkspace,
             canCloseWorkspace: hasWorkspace,
+            canCycleWorkspaces: hasWorkspace,
             canCloseTab: hasWorkspace,
             canNavigateBack: false,
             canNavigateForward: true,

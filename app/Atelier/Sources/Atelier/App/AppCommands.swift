@@ -20,6 +20,12 @@ struct AppCommands: Commands {
                 perform(.closeWorkspace)
             }
             .disabled(!isEnabled(.closeWorkspace))
+
+            Button(title(.nextWorkspace)) {
+                perform(.nextWorkspace)
+            }
+            .keyboardShortcut("`", modifiers: .command)
+            .disabled(!isEnabled(.nextWorkspace))
         }
 
         CommandGroup(after: .toolbar) {

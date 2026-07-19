@@ -3,6 +3,7 @@ import Foundation
 nonisolated enum AtelierActionID: String, CaseIterable, Identifiable, Sendable {
     case openFolder
     case closeWorkspace
+    case nextWorkspace
     case newTerminal
     case closeTab
     case navigateBack
@@ -28,6 +29,7 @@ nonisolated struct AtelierActionDescriptor: Identifiable, Equatable, Sendable {
 nonisolated struct AtelierActionContext: Equatable, Sendable {
     let hasWorkspace: Bool
     let canCloseWorkspace: Bool
+    let canCycleWorkspaces: Bool
     let canCloseTab: Bool
     let canNavigateBack: Bool
     let canNavigateForward: Bool
@@ -41,6 +43,7 @@ nonisolated struct AtelierActionContext: Equatable, Sendable {
 struct AtelierActionHandlers {
     let openFolder: () -> Void
     let closeWorkspace: () -> Void
+    let nextWorkspace: () -> Void
     let newTerminal: () -> Void
     let closeTab: () -> Void
     let navigateBack: () -> Void
@@ -56,6 +59,7 @@ struct AtelierActionHandlers {
         AtelierActionHandlers(
             openFolder: model.chooseWorkspace,
             closeWorkspace: model.closeWorkspace,
+            nextWorkspace: model.selectNextWorkspace,
             newTerminal: { model.workspace?.terminalTabs.add() },
             closeTab: { model.workspace?.terminalTabs.closeSelectedTab() },
             navigateBack: { model.workspace?.terminalTabs.navigateBack() },
@@ -88,6 +92,13 @@ nonisolated enum AtelierActionRegistry {
             category: "Workspace",
             systemImage: "xmark.rectangle",
             shortcutLabel: nil
+        ),
+        AtelierActionDescriptor(
+            id: .nextWorkspace,
+            title: "Next Workspace",
+            category: "Workspace",
+            systemImage: "arrow.right.square",
+            shortcutLabel: "Command-`"
         ),
         AtelierActionDescriptor(
             id: .newTerminal,
@@ -188,6 +199,8 @@ nonisolated enum AtelierActionRegistry {
             true
         case .closeWorkspace:
             context.canCloseWorkspace
+        case .nextWorkspace:
+            context.canCycleWorkspaces
         case .newTerminal, .openGemma:
             context.hasWorkspace
         case .closeTab:
@@ -210,6 +223,7 @@ nonisolated enum AtelierActionRegistry {
         AtelierActionContext(
             hasWorkspace: model.workspace != nil,
             canCloseWorkspace: model.selectedWorkspaceItem != nil,
+            canCycleWorkspaces: model.workspaceItems.count > 1,
             canCloseTab: model.workspace?.terminalTabs.canCloseSelectedTab == true,
             canNavigateBack: model.workspace?.terminalTabs.canNavigateBack == true,
             canNavigateForward: model.workspace?.terminalTabs.canNavigateForward == true,
@@ -232,6 +246,8 @@ nonisolated enum AtelierActionRegistry {
             handlers.openFolder()
         case .closeWorkspace:
             handlers.closeWorkspace()
+        case .nextWorkspace:
+            handlers.nextWorkspace()
         case .newTerminal:
             handlers.newTerminal()
         case .closeTab:
