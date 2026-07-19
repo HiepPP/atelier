@@ -450,6 +450,7 @@ struct AgentResponsesTests {
 
     @Test("Agent sidecar preserves terminal width across breakpoints")
     func agentSidecarLayoutPolicy() {
+        #expect(AgentSidecarLayoutPolicy.collapsedWidth == 1)
         #expect(AgentSidecarLayoutPolicy.presentation(containerWidth: 899) == .overlay)
         #expect(AgentSidecarLayoutPolicy.presentation(containerWidth: 900) == .split)
         #expect(AgentSidecarLayoutPolicy.width(containerWidth: 650) == 300)

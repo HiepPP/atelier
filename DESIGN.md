@@ -458,6 +458,7 @@ Persistence boundaries:
 - Promote a preview before the first edit is saved.
 - Preserve first responder across palette, zoom, inspector, and sidecar transitions.
 - Keep the terminal's structural parent stable while a sidecar opens or closes. Resize the existing sidecar slot instead of rebuilding the terminal container.
+- Keep a mounted native split slot at a positive collapsed width. An exact zero-width or empty `HSplitView` child is invalid for terminal presentation.
 
 ### Gemma and Agent Responses
 
@@ -561,6 +562,7 @@ Native checks:
 - Hover every visible clickable control and confirm the pointing hand covers its full hit target.
 - Confirm disabled controls use the arrow while text, resize, and drag surfaces keep their semantic cursors.
 - Treat AppKit constraint-loop and detached-responder warnings as failures.
+- For native terminal and editor transitions, capture a visible content sentinel before and after the action. A blank work surface fails even when the tab and process remain active.
 - Store screenshots outside tracked paths unless a task requests fixtures.
 
 ## Source of Truth

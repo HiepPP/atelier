@@ -71,6 +71,7 @@ These rules come from a shipped crash: zooming the window crossed a width breakp
 ### Persistent AppKit Tab Content
 
 - Never switch a long-lived `NSViewRepresentable` terminal, editor, web view, or Metal-backed surface in and out of the hierarchy when tab selection or adjacent panel visibility changes. Keep it mounted with stable identity and toggle allocated width, opacity, hit testing, and accessibility visibility.
+- Never collapse an `HSplitView` child to exactly zero or leave it structurally empty. Keep a positive placeholder width or use native split-item collapse, then verify every pane still renders.
 - An inactive native tab must release first responder. Pass explicit active state through the representable and controller, then restore focus only after the active view is attached.
 - For a native tab-switch fix, run `native tab -> image or SwiftUI tab -> native tab` once at each relevant zoom and sidecar state. Repeat only when the bug is intermittent or the first pass fails.
 
@@ -93,6 +94,7 @@ Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swi
 
 - Keep verification proportional to the change and its runtime risk. Start with targeted deterministic checks, then run the required full gates once.
 - Define the exact UI states and evidence needed before starting automation. Stop when those acceptance points are covered.
+- For native terminal, editor, web, or Metal surfaces, define a visible content sentinel before testing. The sentinel must remain visible after every transition; a selected tab, live process, or blank surface is not proof of success.
 - Confirm the target app, process, and window before every automated UI input. If another app becomes active, stop immediately and return to the target without interacting with the other app.
 - Use one controlled capture path for visual proof. After one capture method fails, switch methods once or report the limitation instead of retrying indefinitely.
 - Timebox UI automation. Run each acceptance path once by default, stop when evidence is sufficient, and repeat only for intermittent behavior or a failed pass.

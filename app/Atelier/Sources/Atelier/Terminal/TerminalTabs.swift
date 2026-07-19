@@ -35,6 +35,7 @@ nonisolated struct TerminalTabInspectorContext: Equatable, Sendable {
 
 nonisolated enum AgentSidecarLayoutPolicy {
     static let splitBreakpoint: CGFloat = 900
+    static let collapsedWidth: CGFloat = 1
     static let minimumWidth: CGFloat = 300
     static let maximumWidth: CGFloat = 480
     static let minimumTerminalWidth: CGFloat = 480
@@ -1049,14 +1050,21 @@ private struct TerminalAgentSidecar: View {
                     terminal
                         .frame(minWidth: AgentSidecarLayoutPolicy.minimumTerminalWidth)
                     ZStack {
+                        Color.clear
                         if isPresented {
                             sidecar
                         }
                     }
                     .frame(
-                        minWidth: isPresented ? AgentSidecarLayoutPolicy.minimumWidth : 0,
-                        idealWidth: isPresented ? sidecarWidth : 0,
-                        maxWidth: isPresented ? AgentSidecarLayoutPolicy.maximumWidth : 0
+                        minWidth: isPresented
+                            ? AgentSidecarLayoutPolicy.minimumWidth
+                            : AgentSidecarLayoutPolicy.collapsedWidth,
+                        idealWidth: isPresented
+                            ? sidecarWidth
+                            : AgentSidecarLayoutPolicy.collapsedWidth,
+                        maxWidth: isPresented
+                            ? AgentSidecarLayoutPolicy.maximumWidth
+                            : AgentSidecarLayoutPolicy.collapsedWidth
                     )
                     .opacity(isPresented ? 1 : 0)
                     .allowsHitTesting(isPresented)
