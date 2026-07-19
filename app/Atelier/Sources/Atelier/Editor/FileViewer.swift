@@ -11,6 +11,16 @@ enum FileHighlightPolicy {
     }
 }
 
+enum FileLayoutPolicy {
+    // TextKit 2 estimates document height while scrolling. Every previewable
+    // text file is small enough to measure once and keep its scroller stable.
+    static let maximumFullLayoutBytes = FileLoader.defaultLimit
+
+    static func usesFullLayout(byteCount: Int) -> Bool {
+        byteCount <= maximumFullLayoutBytes
+    }
+}
+
 struct FileViewer: NSViewRepresentable {
     @Environment(\.atelierZoomScale) private var scale
     @Environment(\.displayScale) private var displayScale
@@ -41,7 +51,7 @@ struct FileViewer: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = ResponsiveFileTextView.scrollableTextView()
+        let scrollView = StableFileTextView.scrollableTextView()
         guard let textView = scrollView.documentView as? STTextView else {
             return scrollView
         }
@@ -386,6 +396,7 @@ struct FileViewer: NSViewRepresentable {
             isApplyingText = true
             textView.attributedText = text
             isApplyingText = false
+            ensureStableDocumentHeight()
             if selection.location <= text.length {
                 textView.textSelection = NSRange(
                     location: selection.location,
@@ -394,6 +405,14 @@ struct FileViewer: NSViewRepresentable {
             }
             scrollView.contentView.scroll(to: origin)
             scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+
+        @MainActor
+        private func ensureStableDocumentHeight() {
+            guard let textView = textView as? StableFileTextView,
+                  let text = textView.text,
+                  FileLayoutPolicy.usesFullLayout(byteCount: text.utf8.count) else { return }
+            textView.stabilizeDocumentHeight()
         }
 
         @MainActor
@@ -407,6 +426,7 @@ struct FileViewer: NSViewRepresentable {
                     displayScale: backingScale
                 )
             )
+            ensureStableDocumentHeight()
         }
 
         @MainActor
@@ -422,6 +442,7 @@ struct FileViewer: NSViewRepresentable {
             }
             textView.needsLayout = true
             textView.needsDisplay = true
+            ensureStableDocumentHeight()
         }
 
         @MainActor
@@ -449,9 +470,60 @@ struct FileViewer: NSViewRepresentable {
     }
 }
 
-private final class ResponsiveFileTextView: STTextView {
-    override class var isCompatibleWithResponsiveScrolling: Bool {
-        true
+private final class StableFileTextView: STTextView {
+    private var stabilizedDocumentHeight: CGFloat?
+    private var stabilizationTask: Task<Void, Never>?
+
+    override func setFrameSize(_ newSize: NSSize) {
+        guard let stabilizedDocumentHeight else {
+            super.setFrameSize(newSize)
+            return
+        }
+
+        let widthChanged = abs(newSize.width - frame.width) > 0.5
+        if widthChanged, !isHorizontallyResizable {
+            self.stabilizedDocumentHeight = nil
+            super.setFrameSize(newSize)
+            scheduleDocumentHeightStabilization()
+            return
+        }
+
+        var stableSize = newSize
+        stableSize.height = stabilizedDocumentHeight
+        super.setFrameSize(stableSize)
+    }
+
+    func stabilizeDocumentHeight() {
+        guard let attributedText else { return }
+
+        let textStorage = NSTextStorage(attributedString: attributedText)
+        let layoutManager = NSLayoutManager()
+        let measurementContainer = NSTextContainer(
+            size: NSSize(
+                width: textContainer.size.width,
+                height: .greatestFiniteMagnitude
+            )
+        )
+        measurementContainer.lineFragmentPadding = textContainer.lineFragmentPadding
+        layoutManager.addTextContainer(measurementContainer)
+        textStorage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: measurementContainer)
+
+        let measuredHeight = ceil(layoutManager.usedRect(for: measurementContainer).height)
+        let viewportHeight = enclosingScrollView?.contentView.bounds.height ?? 0
+        let stableHeight = max(measuredHeight, viewportHeight)
+        stabilizedDocumentHeight = stableHeight
+        super.setFrameSize(NSSize(width: frame.width, height: stableHeight))
+    }
+
+    private func scheduleDocumentHeightStabilization() {
+        guard stabilizationTask == nil else { return }
+        stabilizationTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            stabilizationTask = nil
+            stabilizeDocumentHeight()
+        }
     }
 }
 

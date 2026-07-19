@@ -42,6 +42,13 @@ struct AtelierTests {
         #expect(FileLoader.load(url: imageURL, imageLimit: 8) == .tooLarge(imageData.count))
     }
 
+    @Test("Editor fully lays out every previewable text file")
+    func editorLayoutPolicy() {
+        #expect(FileLayoutPolicy.maximumFullLayoutBytes == FileLoader.defaultLimit)
+        #expect(FileLayoutPolicy.usesFullLayout(byteCount: FileLoader.defaultLimit))
+        #expect(!FileLayoutPolicy.usesFullLayout(byteCount: FileLoader.defaultLimit + 1))
+    }
+
     @Test("File tree filters ignored paths and sorts directories first")
     func fileTree() async throws {
         let root = temporaryDirectory("file-tree")
