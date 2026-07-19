@@ -1,3 +1,4 @@
+import CoreServices
 import Foundation
 import Observation
 
@@ -51,6 +52,13 @@ nonisolated struct AgentSessionSummary: Identifiable, Equatable, Sendable {
 
 nonisolated protocol AgentResponseSource: Sendable {
     func loadResponses() async -> [AgentResponse]
+    func watchedRoots() async -> [URL]
+    func watchedPathPrefixes() async -> [String]
+}
+
+nonisolated extension AgentResponseSource {
+    func watchedRoots() async -> [URL] { [] }
+    func watchedPathPrefixes() async -> [String] { [] }
 }
 
 nonisolated enum AgentTranscriptParser {
@@ -359,6 +367,7 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     private let workspacePath: String
     private let modifiedAfter: Date
     private let roots: [URL]
+    private let watchRoots: [URL]
     private var discoveredURLs: [URL] = []
     private var cache: [URL: CachedTranscript] = [:]
     private var nextDiscoveryDate = Date.distantPast
@@ -373,13 +382,40 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
         self.modifiedAfter = modifiedAfter
         if let roots {
             self.roots = roots
+            self.watchRoots = roots
         } else {
             let home = FileManager.default.homeDirectoryForCurrentUser
+            let codexSessions = home.appendingPathComponent(".codex/sessions", isDirectory: true)
+            let claudeProjects = home.appendingPathComponent(".claude/projects", isDirectory: true)
+            // Claude Code stores transcripts per workspace in a directory named
+            // after the workspace path with non-alphanumeric characters mapped
+            // to "-". Scanning only that directory avoids enumerating every
+            // project's transcripts on each refresh.
+            let munged = Self.mungedProjectDirectoryName(for: workspacePath)
             self.roots = [
-                home.appendingPathComponent(".codex/sessions", isDirectory: true),
-                home.appendingPathComponent(".claude/projects", isDirectory: true)
+                codexSessions,
+                claudeProjects.appendingPathComponent(munged, isDirectory: true)
             ]
+            // Watch the parent so transcripts for a brand-new workspace
+            // directory still trigger a refresh.
+            self.watchRoots = [codexSessions, claudeProjects]
         }
+    }
+
+    private static func mungedProjectDirectoryName(for workspacePath: String) -> String {
+        let standardized = URL(fileURLWithPath: workspacePath)
+            .standardizedFileURL.resolvingSymlinksInPath().path
+        return String(standardized.map { character in
+            character.isLetter || character.isNumber ? character : "-"
+        })
+    }
+
+    func watchedRoots() async -> [URL] {
+        watchRoots.filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    func watchedPathPrefixes() async -> [String] {
+        roots.map(\.path)
     }
 
     func loadResponses() async -> [AgentResponse] {
@@ -508,6 +544,73 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     }
 }
 
+nonisolated final class TranscriptDirectoryWatcher: @unchecked Sendable {
+    private var stream: FSEventStreamRef?
+    private let queue = DispatchQueue(label: "atelier.agent-transcript-watcher")
+    private let handler: @Sendable () -> Void
+    private let pathPrefixes: [String]
+
+    init?(roots: [URL], pathPrefixes: [String], handler: @escaping @Sendable () -> Void) {
+        self.handler = handler
+        self.pathPrefixes = pathPrefixes.map { $0.hasSuffix("/") ? $0 : $0 + "/" }
+        var context = FSEventStreamContext()
+        context.info = Unmanaged.passUnretained(self).toOpaque()
+        let callback: FSEventStreamCallback = { _, info, eventCount, eventPaths, _, _ in
+            guard let info else { return }
+            let watcher = Unmanaged<TranscriptDirectoryWatcher>
+                .fromOpaque(info)
+                .takeUnretainedValue()
+            guard let paths = unsafeBitCast(eventPaths, to: CFArray.self) as? [String] else {
+                watcher.handler()
+                return
+            }
+            guard eventCount > 0 else { return }
+            if watcher.matches(paths) {
+                watcher.handler()
+            }
+        }
+        guard let stream = FSEventStreamCreate(
+            kCFAllocatorDefault,
+            callback,
+            &context,
+            roots.map(\.path) as CFArray,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+            1.0,
+            FSEventStreamCreateFlags(
+                kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents
+            )
+        ) else { return nil }
+        FSEventStreamSetDispatchQueue(stream, queue)
+        guard FSEventStreamStart(stream) else {
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+            return nil
+        }
+        self.stream = stream
+    }
+
+    private func matches(_ paths: [String]) -> Bool {
+        guard !pathPrefixes.isEmpty else { return true }
+        return paths.contains { path in
+            pathPrefixes.contains { prefix in
+                path.hasPrefix(prefix) || path + "/" == prefix
+            }
+        }
+    }
+
+    func stop() {
+        guard let stream else { return }
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
+        self.stream = nil
+    }
+
+    deinit {
+        stop()
+    }
+}
+
 @MainActor
 @Observable
 final class AgentResponsesModel {
@@ -520,6 +623,8 @@ final class AgentResponsesModel {
     private var responseIDs: Set<AgentResponseReadIdentity> = []
     private var readResponseIDs: Set<AgentResponseReadIdentity> = []
     private var monitorTask: Task<Void, Never>?
+    private var watcher: TranscriptDirectoryWatcher?
+    private var trailingRefreshTask: Task<Void, Never>?
     private var isRefreshInFlight = false
 
     var unreadCount: Int {
@@ -569,16 +674,46 @@ final class AgentResponsesModel {
         guard monitorTask == nil else { return }
         isMonitoring = true
         monitorTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.refresh(showProgress: false)
-                try? await Task.sleep(for: .seconds(1))
+            await self?.refresh(showProgress: false)
+            guard !Task.isCancelled else { return }
+            await self?.startWatching()
+        }
+    }
+
+    private func startWatching() async {
+        let roots = await source.watchedRoots()
+        let prefixes = await source.watchedPathPrefixes()
+        guard isMonitoring, watcher == nil, !roots.isEmpty else { return }
+        watcher = TranscriptDirectoryWatcher(roots: roots, pathPrefixes: prefixes) { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleWatcherEvent()
             }
+        }
+    }
+
+    private func handleWatcherEvent() {
+        guard isMonitoring else { return }
+        Task { [weak self] in
+            await self?.refresh(showProgress: false)
+        }
+        // Transcript discovery inside the source is throttled; a trailing
+        // refresh picks up files created during the throttle window when no
+        // further filesystem event follows.
+        trailingRefreshTask?.cancel()
+        trailingRefreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await self?.refresh(showProgress: false)
         }
     }
 
     func stop() {
         monitorTask?.cancel()
         monitorTask = nil
+        trailingRefreshTask?.cancel()
+        trailingRefreshTask = nil
+        watcher?.stop()
+        watcher = nil
         isMonitoring = false
     }
 
