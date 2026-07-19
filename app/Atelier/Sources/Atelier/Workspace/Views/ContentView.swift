@@ -26,6 +26,52 @@ nonisolated enum WorkspaceSidebarTab: String, CaseIterable, Identifiable, Sendab
     }
 }
 
+private struct WorkspaceSidebarTabButtonStyle: ButtonStyle {
+    let isSelected: Bool
+    let selectionNamespace: Namespace.ID
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(maxWidth: .infinity)
+            .frame(height: AtelierMetrics.sectionHeaderHeight)
+            .background(tabFill(isPressed: configuration.isPressed))
+            .overlay(alignment: .bottom) {
+                if isSelected {
+                    Capsule()
+                        .fill(AtelierTheme.accent)
+                        .frame(height: 2)
+                        .padding(.horizontal, AtelierMetrics.spaceM)
+                        .matchedGeometryEffect(
+                            id: "workspace-sidebar-selection",
+                            in: selectionNamespace
+                        )
+                }
+            }
+            .contentShape(Rectangle())
+            .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : 0.985)
+            .onHover { isHovering = $0 }
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: AtelierMotionTokens.quick),
+                value: isHovering
+            )
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: AtelierMotionTokens.quick),
+                value: configuration.isPressed
+            )
+            .atelierPointerCursor()
+    }
+
+    private func tabFill(isPressed: Bool) -> Color {
+        if isPressed { return AtelierTheme.pressedFill }
+        if isSelected { return AtelierTheme.selection }
+        if isHovering { return AtelierTheme.hoverFill }
+        return .clear
+    }
+}
+
 nonisolated enum WorkspaceLayoutPolicy {
     static let compactBreakpoint: CGFloat = 900
     static let wideBreakpoint: CGFloat = 1_280
@@ -348,6 +394,7 @@ struct WorkspaceView: View {
     @Environment(AppModel.self) private var app
     @Environment(AtelierZoomModel.self) private var zoom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var sidebarTabSelectionNamespace
     @State private var fileTreeCreationRequest: FileTreeCreationRequest?
     @State private var fileTreeTargetDirectory: URL?
     @State private var responderBeforeAgentPreview: NSResponder?
@@ -381,9 +428,9 @@ struct WorkspaceView: View {
                     .onTapGesture {
                         dismissProjectMenu()
                     }
-                    .allowsHitTesting(isProjectMenuPresented)
                     .atelierPointerCursor()
                     .accessibilityHidden(true)
+                    .allowsHitTesting(isProjectMenuPresented)
 
                 ProjectCommandMenuView(
                     session: session,
@@ -667,45 +714,63 @@ struct WorkspaceView: View {
         VStack(spacing: 0) {
             HStack(spacing: AtelierMetrics.spaceXS) {
                 ForEach(WorkspaceSidebarTab.allCases) { tab in
+                    let isSelected = selectedSidebarTab == tab
+                    let changeCount = tab == .sourceControl
+                        ? gitModel.snapshot.status.changes.count
+                        : 0
+
                     Button {
-                        selectedSidebarTab = tab
+                        withAnimation(reduceMotion ? nil : AtelierMotionTokens.selection) {
+                            selectedSidebarTab = tab
+                        }
                     } label: {
-                        HStack(spacing: AtelierMetrics.spaceXS) {
+                        HStack(spacing: 6) {
                             Image(systemName: tab.systemImage)
+                                .symbolRenderingMode(.hierarchical)
+                                .atelierFont(
+                                    size: AtelierTypography.uiSize,
+                                    weight: .semibold
+                                )
+                                .foregroundStyle(
+                                    isSelected ? AtelierTheme.accent : Color.secondary
+                                )
+                                .frame(width: AtelierMetrics.regularIconSize)
+
                             Text(tab.rawValue)
-                            if tab == .sourceControl,
-                               gitModel.snapshot.status.changes.count > 0 {
+                                .atelierFont(
+                                    size: AtelierTypography.body,
+                                    weight: isSelected ? .semibold : .medium
+                                )
+                                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                                .lineLimit(1)
+
+                            if changeCount > 0 {
                                 AtelierCountBadge(
-                                    value: gitModel.snapshot.status.changes.count,
+                                    value: changeCount,
                                     color: AtelierTheme.gitOrange
                                 )
+                                .accessibilityHidden(true)
                             }
                         }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: AtelierMetrics.sectionHeaderHeight)
-                        .contentShape(Rectangle())
+                        .padding(.horizontal, AtelierMetrics.spaceM)
                     }
-                    .buttonStyle(.plain)
-                    .atelierPointerCursor()
-                    .foregroundStyle(
-                        selectedSidebarTab == tab ? Color.primary : Color.secondary
+                    .buttonStyle(
+                        WorkspaceSidebarTabButtonStyle(
+                            isSelected: isSelected,
+                            selectionNamespace: sidebarTabSelectionNamespace
+                        )
+                    )
+                    .accessibilityLabel(
+                        changeCount > 0
+                            ? "\(tab.rawValue), \(changeCount) changes"
+                            : tab.rawValue
                     )
                     .accessibilityValue(
-                        selectedSidebarTab == tab ? "Selected" : "Not selected"
+                        isSelected ? "Selected" : "Not selected"
                     )
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                    .help(tab.rawValue)
                     .frame(maxWidth: .infinity)
-                    .background(
-                        selectedSidebarTab == tab
-                            ? AtelierTheme.selection
-                            : Color.clear
-                    )
-                    .overlay(alignment: .bottom) {
-                        if selectedSidebarTab == tab {
-                            Rectangle()
-                                .fill(AtelierTheme.accent)
-                                .frame(height: 2)
-                        }
-                    }
                 }
             }
             .padding(.horizontal, AtelierMetrics.spaceS)
