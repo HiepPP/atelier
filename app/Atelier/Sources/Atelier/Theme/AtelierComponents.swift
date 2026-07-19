@@ -47,6 +47,72 @@ extension View {
     }
 }
 
+private struct AtelierSelectionGlassModifier<SelectionShape: InsettableShape>: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    let isSelected: Bool
+    let tint: Color
+    let fallbackFill: Color
+    let shape: SelectionShape
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(
+                isSelected ? fallbackFill : Color.clear,
+                in: shape
+            )
+        } else {
+            content
+                .glassEffect(
+                    isSelected
+                        ? .regular.tint(tint).interactive()
+                        : .identity,
+                    in: shape
+                )
+                .overlay {
+                    if isSelected {
+                        shape.strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.55),
+                                    Color.white.opacity(0.06),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                    }
+                }
+                .shadow(
+                    color: isSelected ? Color.black.opacity(0.12) : .clear,
+                    radius: 3,
+                    y: 1
+                )
+        }
+    }
+}
+
+extension View {
+    func atelierSelectionGlass<SelectionShape: InsettableShape>(
+        isSelected: Bool,
+        tint: Color = AtelierTheme.accent.opacity(0.14),
+        fallbackFill: Color = AtelierTheme.selection,
+        in shape: SelectionShape
+    ) -> some View {
+        modifier(
+            AtelierSelectionGlassModifier(
+                isSelected: isSelected,
+                tint: tint,
+                fallbackFill: fallbackFill,
+                shape: shape
+            )
+        )
+    }
+
+}
+
 struct AtelierChromeBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 

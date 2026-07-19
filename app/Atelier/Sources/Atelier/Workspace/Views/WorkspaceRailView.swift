@@ -367,17 +367,23 @@ private struct WorkspaceRailItemButtonStyle: ButtonStyle {
         }
 
         configuration.label
-            .background(AtelierTheme.workspaceRailControlFill(for: interactionState))
+            .background(
+                isSelected
+                    ? Color.clear
+                    : AtelierTheme.workspaceRailControlFill(for: interactionState)
+            )
             .clipShape(
                 RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
             )
-            .overlay(alignment: .leading) {
-                if isSelected {
-                    Rectangle()
-                        .fill(AtelierTheme.accent)
-                        .frame(width: 2, height: 24)
-                }
-            }
+            .atelierSelectionGlass(
+                isSelected: isSelected,
+                tint: Color.white.opacity(0.22),
+                fallbackFill: AtelierTheme.workspaceRailSelection,
+                in: RoundedRectangle(
+                    cornerRadius: AtelierTheme.rowRadius,
+                    style: .continuous
+                )
+            )
             .overlay {
                 if isFocused || isDropTargeted {
                     RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)

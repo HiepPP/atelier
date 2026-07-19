@@ -433,8 +433,35 @@ private final class FileTreeOutlineView: NSOutlineView {
 }
 
 private final class FileTreeRowView: NSTableRowView {
+    private let selectionEffect = FileTreeSelectionEffectView()
     private var hoverTrackingArea: NSTrackingArea?
     private var isHovering = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureSelectionEffect()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureSelectionEffect()
+    }
+
+    override var isSelected: Bool {
+        didSet {
+            selectionEffect.isHidden = !isSelected
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        selectionEffect.frame = selectionRect
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateSelectionTint()
+    }
 
     override func updateTrackingAreas() {
         if let hoverTrackingArea {
@@ -485,27 +512,44 @@ private final class FileTreeRowView: NSTableRowView {
     }
 
     override func drawSelection(in dirtyRect: NSRect) {
-        guard selectionHighlightStyle != .none else { return }
-        AppKitThemeAdapter.selection.setFill()
-        rowShape.fill()
-        AppKitThemeAdapter.accent.setFill()
-        NSBezierPath(
-            roundedRect: NSRect(
-                x: bounds.minX + AtelierMetrics.spaceXS,
-                y: bounds.minY + 4,
-                width: 2,
-                height: bounds.height - 8
-            ),
-            xRadius: 1,
-            yRadius: 1
-        ).fill()
+        // Selection is rendered by the material view behind the cell content.
+    }
+
+    private func configureSelectionEffect() {
+        selectionEffect.material = .underWindowBackground
+        selectionEffect.blendingMode = .withinWindow
+        selectionEffect.state = .followsWindowActiveState
+        selectionEffect.isHidden = true
+        selectionEffect.wantsLayer = true
+        selectionEffect.layer?.cornerRadius = AtelierTheme.rowRadius
+        selectionEffect.layer?.masksToBounds = true
+        addSubview(selectionEffect, positioned: .below, relativeTo: nil)
+        updateSelectionTint()
+    }
+
+    private func updateSelectionTint() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            selectionEffect.layer?.backgroundColor = AppKitThemeAdapter.accent
+                .withAlphaComponent(0.16)
+                .cgColor
+        }
     }
 
     private var rowShape: NSBezierPath {
         NSBezierPath(
-            roundedRect: bounds.insetBy(dx: AtelierMetrics.spaceXS, dy: 2),
+            roundedRect: selectionRect,
             xRadius: AtelierTheme.rowRadius,
             yRadius: AtelierTheme.rowRadius
         )
+    }
+
+    private var selectionRect: NSRect {
+        bounds.insetBy(dx: AtelierMetrics.spaceXS, dy: 2)
+    }
+}
+
+private final class FileTreeSelectionEffectView: NSVisualEffectView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
     }
 }

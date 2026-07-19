@@ -704,7 +704,7 @@ struct TerminalTabs: View {
                                         idealWidth: AtelierMetrics.tabIdealWidth,
                                         maxWidth: AtelierMetrics.tabMaxWidth
                                     )
-                                    .frame(height: AtelierMetrics.tabBarHeight)
+                                    .frame(height: AtelierMetrics.tabBarHeight - 10)
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -724,21 +724,28 @@ struct TerminalTabs: View {
                                 }
                             }
                             .foregroundStyle(
-                                model.selectedID == tab.id ? Color.primary : Color.secondary
+                                model.selectedID == tab.id
+                                    ? AtelierTheme.chromeSelectionInk
+                                    : Color.secondary
                             )
-                            .background(tabBackground(tab))
-                            .overlay(alignment: .top) {
-                                if model.selectedID == tab.id {
-                                    Rectangle()
-                                        .fill(AtelierTheme.accent)
-                                        .frame(height: 2)
-                                }
-                            }
-                            .overlay(alignment: .trailing) {
-                                Rectangle()
-                                    .fill(AtelierTheme.border)
-                                    .frame(width: AtelierTheme.strokeHairline)
-                            }
+                            .background(
+                                tabBackground(tab),
+                                in: RoundedRectangle(
+                                    cornerRadius: AtelierTheme.rowRadius,
+                                    style: .continuous
+                                )
+                            )
+                            .atelierSelectionGlass(
+                                isSelected: model.selectedID == tab.id,
+                                tint: AtelierTheme.chromeSelection.opacity(0.5),
+                                fallbackFill: AtelierTheme.chromeSelection,
+                                in: RoundedRectangle(
+                                    cornerRadius: AtelierTheme.rowRadius,
+                                    style: .continuous
+                                )
+                            )
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 5)
                             .overlay {
                                 PointingHandCursorRegion()
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -973,7 +980,7 @@ struct TerminalTabs: View {
             return AtelierTheme.controlFill(for: .pressed)
         }
         if model.selectedID == tab.id {
-            return AtelierTheme.controlFill(for: .selected)
+            return .clear
         }
         if hoveredTabID == tab.id {
             return AtelierTheme.controlFill(for: .hovered)
@@ -1071,7 +1078,10 @@ private struct TabCloseButton: View {
                             AtelierTheme.controlFill(for: isHovering ? .hovered : .normal)
                         )
                 }
-                .frame(width: AtelierMetrics.iconButtonSize, height: AtelierMetrics.tabBarHeight)
+                .frame(
+                    width: AtelierMetrics.iconButtonSize,
+                    height: AtelierMetrics.tabBarHeight - 10
+                )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)

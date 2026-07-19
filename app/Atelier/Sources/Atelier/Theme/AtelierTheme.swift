@@ -29,6 +29,8 @@ enum AtelierTheme {
     static let gitDeleted = Color(nsColor: AppKitThemeAdapter.gitDeleted)
     static let gitUntracked = Color(nsColor: AppKitThemeAdapter.gitUntracked)
     static let selection = Color(nsColor: AppKitThemeAdapter.selection)
+    static let chromeSelection = Color(nsColor: AppKitThemeAdapter.chromeSelection)
+    static let chromeSelectionInk = Color(nsColor: AppKitThemeAdapter.chromeSelectionInk)
     static let workspaceRailTop = Color(nsColor: AppKitThemeAdapter.workspaceRailTop)
     static let workspaceRailBottom = Color(nsColor: AppKitThemeAdapter.workspaceRailBottom)
     static let workspaceRailSolid = Color(nsColor: AppKitThemeAdapter.workspaceRailSolid)

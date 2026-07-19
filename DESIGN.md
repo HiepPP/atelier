@@ -21,7 +21,8 @@ Atelier is a native macOS workspace tool. It should feel focused, dense, calm, a
 - Use an executive-alloy hierarchy: smoked graphite navigation, titanium chrome, porcelain work surfaces, and one terracotta accent.
 - Use compact controls and clear hierarchy instead of decorative chrome.
 - Show state through fill, weight, opacity, and thin rules.
-- Keep the editor matte. Reserve glass and the signature gradient for navigation and compact chrome.
+- Keep the editor matte. Reserve glass for navigation, compact chrome, and selected interactive
+  surfaces only.
 - Keep motion short and useful. Never block work with animation.
 - Preserve text clarity at every display scale.
 
@@ -129,6 +130,8 @@ All palette colors are dynamic `sRGB` colors. Foreground text uses native label 
 | `tabInactive` | `#E5E1DB` | `#25282C` | Inactive tabs |
 | `border` | `#BFBAB2` | `#42474D` | Dividers and control outlines |
 | `selection` | `#DED1C6` | `#4B3730` | Selected rows and tabs |
+| `chromeSelection` | `#F7F3EE` | `#4D4742` | Bright warm glass selection for chrome tabs |
+| `chromeSelectionInk` | `#2B2724` | `#F2EFEA` | Text and icons on selected chrome tabs |
 | `hover` | `#D8D4CD` | `#383C41` | Hover state |
 | `pressed` | `#CCC7BF` | `#44494F` | Pressed state |
 | `accent` | `#A44F32` | `#D79570` | Primary emphasis and focus |
@@ -138,7 +141,7 @@ All palette colors are dynamic `sRGB` colors. Foreground text uses native label 
 | `workspaceRailSolid` | `#252D35` | `#1D252C` | Reduce Transparency rail fallback |
 | `workspaceRailForeground` | `#F3F1EC` | `#F3F1EC` | Primary text and icons on the rail |
 | `workspaceRailSecondary` | `#B6BEC3` | `#ADB7BD` | Rail metadata and inactive icons |
-| `workspaceRailSelection` | `#3B444C` | `#343E46` | Active rail row fill |
+| `workspaceRailSelection` | `#4C565F` | `#46505A` | Active rail row fill and Reduce Transparency fallback |
 | `workspaceRailHover` | `#333C44` | `#2D373F` | Rail hover fill |
 | `workspaceRailPressed` | `#46515A` | `#404B54` | Rail pressed fill |
 | `workspaceRailBorder` | `#59636B` | `#4C575F` | Rail edge and focused control outline |
@@ -150,7 +153,8 @@ All palette colors are dynamic `sRGB` colors. Foreground text uses native label 
 
 Color rules:
 
-- Reserve accent for selection, focus, primary action, and active indicators.
+- Reserve accent for focus, primary action, and active indicators.
+- Use bright warm `chromeSelection` glass and dark-ink `chromeSelectionInk` for selected sidebar and center tabs.
 - Reserve Git colors for file and diff meaning.
 - Use native primary and secondary labels for normal text.
 - Use dedicated rail foreground tokens because the rail remains dark in both appearances.
@@ -193,7 +197,8 @@ Depth rules:
 - Use the `0.12` black scrim behind blocking overlays.
 - Allow one signature gradient on the workspace rail and a restrained directional sheen on shared chrome.
 - Keep editor, terminal, Explorer, Git, and inspector content matte and gradient-free.
-- Do not add broad glow, deep drop shadows, or decorative glass layers.
+- Do not add broad glow, deep drop shadows, or decorative glass layers. A selected interactive
+  surface may use one native glass layer with a top-lit hairline highlight and one soft shadow.
 
 ## Typography
 
@@ -295,7 +300,8 @@ Every interactive control must define these states where relevant:
 - Normal: clear fill and normal opacity.
 - Hovered: semantic hover fill.
 - Pressed: stronger pressed fill. Scale only isolated compact controls when motion is allowed.
-- Selected: selection fill or accent indicator.
+- Selected: one native tinted glass surface with stable geometry. Do not add an accent border,
+  underline, or leading rule.
 - Focused: accent-tinted fill and 1.5-point focus ring.
 - Disabled: visible control with `0.45` opacity.
 
@@ -358,7 +364,7 @@ Interaction geometry rules:
 - Support drag-and-drop reordering within the rail and persist the new order.
 - Give every workspace row a native context menu for activation, Finder, path copy, ordering, and close.
 - A context-menu close targets that item. It must not switch or close the active workspace first.
-- Mark the active workspace with label weight, restrained selection fill, a checkmark, and a 2-point leading accent rule.
+- Mark the active workspace with label weight, a restrained tinted glass surface, and a checkmark.
 - Show loading, unavailable, and error accessories without replacing project identity.
 - Show the full path in help and accessibility text.
 - Use rail-specific hover, pressed, focused, selected, and disabled fills so contrast stays stable.
@@ -371,7 +377,7 @@ Workspace item states:
 
 | State | Visual treatment | Interaction | Accessibility value |
 |---|---|---|---|
-| Active | Semibold name, secondary path, selection fill, checkmark, leading rule | Selecting again keeps current session | `Selected, available` |
+| Active | Semibold name, secondary path, tinted glass surface, checkmark | Selecting again keeps current session | `Selected, available` |
 | Inactive | Primary name, secondary path, clear fill | Selects existing live session | `Available` |
 | Loading | Secondary name and path, native progress indicator | Disabled until restore finishes | `Loading` |
 | Unavailable | Primary name, secondary path, `questionmark.folder` accessory | Selects item and presents recovery context | `Unavailable` |
@@ -405,17 +411,20 @@ Persistence boundaries:
 - Make every sidebar tab cell occupy the full 40-point `panelHeaderHeight` envelope.
 - Make the Explorer and Git tab strip span the full sidebar width edge-to-edge.
 - Use zero outer horizontal padding and zero spacing between sidebar tab cells.
-- Let adjacent tab fills meet directly. Use an overlay hairline when separation is required, never layout spacing.
+- Separate tab cells with the pill insets themselves. Do not draw hairline dividers between tabs.
 - Put a compact contextual toolbar at the top of the selected tab body, directly below the tab bar.
 - Right-align New File and New Folder in the Explorer toolbar. Right-align Refresh in the Git toolbar.
 - Render only the selected body's actions. Keep the tab label, count, selection target, help, and accessibility text intact.
-- Align every sidebar tab fill and hit target to all four edges of the header envelope.
-- Pin the 2-point accent underline to the bottom edge with no inset or exposed header fill.
+- Keep every sidebar tab hit target aligned to all four edges of the header envelope.
+- Render the selected sidebar tab as an inset `rowRadius` rounded pill of translucent `chromeSelection` glass with a
+  top-lit hairline highlight. Keep the full header envelope as the hit target. Use
+  `chromeSelectionInk` for its label and icon.
 - Use one native label line box so each tab icon and title share a baseline.
 - Show the Git change count as a trailing semantic badge that never shifts the centered label.
 - Keep sidebar tab geometry stable across normal, hovered, pressed, selected, and count-change states.
 - Keep body toolbar actions at 24 points, with quiet hover and pressed fills.
-- Keep selected file labels in the primary text color. Use selection fill, a thin accent edge, and no inverted text.
+- Keep selected file labels in the primary text color. Use one rounded, warm-tinted native material
+  surface with no accent edge and no inverted text.
 - Vertically center the disclosure, icon, and label within every file-tree row.
 - Keep the base file or folder icon and add an `arrow.turn.up.right` badge after symlink names.
 - Do not expand directory symlinks from Explorer.
@@ -428,7 +437,9 @@ Persistence boundaries:
 - Use titanium chrome for the strip and porcelain for the selected editor surface.
 - Keep Back and Forward available through menus and shortcuts, not inside the tab strip.
 - Keep tab widths between 112 and 220 points, with 152 ideal.
-- Mark selection with primary text and a 2-point accent top rule.
+- Render the selected center tab as an inset `rowRadius` rounded pill of translucent `chromeSelection` glass with a
+  top-lit hairline highlight. Keep the full strip-cell envelope as the hit target. Use
+  `chromeSelectionInk` for its label and icon. Do not add an accent top rule or selection border.
 - Mark preview with regular label weight and `0.72` opacity. Do not add another icon.
 - Place the close control at the left edge of every closable tab.
 - Show close only on the selected or hovered tab.

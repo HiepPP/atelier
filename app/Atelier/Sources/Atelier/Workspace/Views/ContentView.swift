@@ -35,15 +35,20 @@ private struct WorkspaceSidebarTabButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .frame(maxWidth: .infinity)
+            .frame(height: AtelierMetrics.panelHeaderHeight - 8)
+            .background(
+                tabFill(isPressed: configuration.isPressed),
+                in: RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+            )
+            .atelierSelectionGlass(
+                isSelected: isSelected,
+                tint: AtelierTheme.chromeSelection.opacity(0.5),
+                fallbackFill: AtelierTheme.chromeSelection,
+                in: RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+            )
+            .padding(.horizontal, AtelierMetrics.spaceXS)
+            .padding(.vertical, 4)
             .frame(height: AtelierMetrics.panelHeaderHeight)
-            .background(tabFill(isPressed: configuration.isPressed))
-            .overlay(alignment: .bottom) {
-                if isSelected {
-                    Rectangle()
-                        .fill(AtelierTheme.accent)
-                        .frame(height: 2)
-                }
-            }
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }
             .animation(
@@ -55,7 +60,7 @@ private struct WorkspaceSidebarTabButtonStyle: ButtonStyle {
 
     private func tabFill(isPressed: Bool) -> Color {
         if isPressed { return AtelierTheme.pressedFill }
-        if isSelected { return AtelierTheme.selection }
+        if isSelected { return .clear }
         if isHovering { return AtelierTheme.hoverFill }
         return .clear
     }
@@ -764,7 +769,11 @@ struct WorkspaceView: View {
                                     weight: isSelected ? .semibold : .regular
                                 )
                             )
-                            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                            .foregroundStyle(
+                                isSelected
+                                    ? AtelierTheme.chromeSelectionInk
+                                    : Color.secondary
+                            )
                             .lineLimit(1)
                             .frame(maxWidth: .infinity)
                             .overlay(alignment: .trailing) {
