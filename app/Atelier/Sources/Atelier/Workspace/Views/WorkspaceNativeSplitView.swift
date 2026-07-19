@@ -2,15 +2,21 @@ import AppKit
 import SwiftUI
 
 nonisolated enum WorkspaceSplitAnimationPolicy {
-    static let sidebarDuration = 0.32
+    static let panelDuration = 0.32
 
     static func animates(
-        sidebarChanged: Bool,
+        panelChanged: Bool,
         reduceMotion: Bool,
         requestsAnimation: Bool
     ) -> Bool {
-        sidebarChanged && !reduceMotion && requestsAnimation
+        panelChanged && !reduceMotion && requestsAnimation
     }
+}
+
+nonisolated enum WorkspaceSplitLayoutPolicy {
+    static let sidePanelHoldingPriority = NSLayoutConstraint.Priority(
+        rawValue: NSLayoutConstraint.Priority.defaultLow.rawValue + 1
+    )
 }
 
 struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
@@ -21,6 +27,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
     let showsSidebar: Bool
     let showsInspector: Bool
     let sidebarAnimationRequestID: Int
+    let inspectorAnimationRequestID: Int
     let reduceMotion: Bool
 
     func makeCoordinator() -> Coordinator {
@@ -39,6 +46,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         sidebarItem.canCollapse = true
         sidebarItem.canCollapseFromWindowResize = false
         sidebarItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+        sidebarItem.holdingPriority = WorkspaceSplitLayoutPolicy.sidePanelHoldingPriority
         sidebarItem.isCollapsed = !showsSidebar
 
         let detailController = NSHostingController(rootView: detail)
@@ -46,12 +54,13 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         detailItem.minimumThickness = AtelierMetrics.centerMinWidth
 
         let inspectorController = NSHostingController(rootView: inspector)
-        let inspectorItem = NSSplitViewItem(inspectorWithViewController: inspectorController)
+        let inspectorItem = NSSplitViewItem(viewController: inspectorController)
         inspectorItem.minimumThickness = AtelierMetrics.inspectorMinWidth
         inspectorItem.maximumThickness = AtelierMetrics.inspectorMaxWidth
         inspectorItem.canCollapse = true
         inspectorItem.canCollapseFromWindowResize = false
         inspectorItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+        inspectorItem.holdingPriority = WorkspaceSplitLayoutPolicy.sidePanelHoldingPriority
         inspectorItem.isCollapsed = !showsInspector
 
         controller.addSplitViewItem(sidebarItem)
@@ -67,7 +76,8 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             inspectorItem: inspectorItem,
             showsSidebar: showsSidebar,
             showsInspector: showsInspector,
-            sidebarAnimationRequestID: sidebarAnimationRequestID
+            sidebarAnimationRequestID: sidebarAnimationRequestID,
+            inspectorAnimationRequestID: inspectorAnimationRequestID
         )
         return controller
     }
@@ -82,12 +92,17 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
 
         let sidebarChanged = context.coordinator.showsSidebar != showsSidebar
         let inspectorChanged = context.coordinator.showsInspector != showsInspector
-        let requestsAnimation = context.coordinator.sidebarAnimationRequestID
-            != sidebarAnimationRequestID
-        let animates = WorkspaceSplitAnimationPolicy.animates(
-            sidebarChanged: sidebarChanged,
+        let animatesSidebar = WorkspaceSplitAnimationPolicy.animates(
+            panelChanged: sidebarChanged,
             reduceMotion: reduceMotion,
-            requestsAnimation: requestsAnimation
+            requestsAnimation: context.coordinator.sidebarAnimationRequestID
+                != sidebarAnimationRequestID
+        )
+        let animatesInspector = WorkspaceSplitAnimationPolicy.animates(
+            panelChanged: inspectorChanged,
+            reduceMotion: reduceMotion,
+            requestsAnimation: context.coordinator.inspectorAnimationRequestID
+                != inspectorAnimationRequestID
         )
 
         context.coordinator.update(
@@ -96,7 +111,9 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             sidebarChanged: sidebarChanged,
             inspectorChanged: inspectorChanged,
             sidebarAnimationRequestID: sidebarAnimationRequestID,
-            animates: animates
+            inspectorAnimationRequestID: inspectorAnimationRequestID,
+            animatesSidebar: animatesSidebar,
+            animatesInspector: animatesInspector
         )
     }
 
@@ -110,6 +127,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         var showsSidebar = false
         var showsInspector = false
         var sidebarAnimationRequestID = 0
+        var inspectorAnimationRequestID = 0
         private var updateGeneration = 0
 
         func install(
@@ -121,7 +139,8 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             inspectorItem: NSSplitViewItem,
             showsSidebar: Bool,
             showsInspector: Bool,
-            sidebarAnimationRequestID: Int
+            sidebarAnimationRequestID: Int,
+            inspectorAnimationRequestID: Int
         ) {
             self.controller = controller
             self.sidebarController = sidebarController
@@ -132,6 +151,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             self.showsSidebar = showsSidebar
             self.showsInspector = showsInspector
             self.sidebarAnimationRequestID = sidebarAnimationRequestID
+            self.inspectorAnimationRequestID = inspectorAnimationRequestID
         }
 
         func update(
@@ -140,13 +160,16 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             sidebarChanged: Bool,
             inspectorChanged: Bool,
             sidebarAnimationRequestID: Int,
-            animates: Bool
+            inspectorAnimationRequestID: Int,
+            animatesSidebar: Bool,
+            animatesInspector: Bool
         ) {
             guard sidebarChanged || inspectorChanged else { return }
 
             self.showsSidebar = showsSidebar
             self.showsInspector = showsInspector
             self.sidebarAnimationRequestID = sidebarAnimationRequestID
+            self.inspectorAnimationRequestID = inspectorAnimationRequestID
             updateGeneration += 1
             let generation = updateGeneration
 
@@ -154,22 +177,20 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
                 await Task.yield()
                 guard let self, generation == updateGeneration else { return }
 
-                guard animates else {
-                    if inspectorChanged {
-                        inspectorItem?.isCollapsed = !showsInspector
-                    }
-                    if sidebarChanged {
-                        sidebarItem?.isCollapsed = !showsSidebar
-                    }
-                    return
+                if inspectorChanged && !animatesInspector {
+                    inspectorItem?.isCollapsed = !showsInspector
                 }
+                if sidebarChanged && !animatesSidebar {
+                    sidebarItem?.isCollapsed = !showsSidebar
+                }
+                guard animatesSidebar || animatesInspector else { return }
 
                 await NSAnimationContext.runAnimationGroup { animationContext in
-                    animationContext.duration = WorkspaceSplitAnimationPolicy.sidebarDuration
-                    if inspectorChanged {
+                    animationContext.duration = WorkspaceSplitAnimationPolicy.panelDuration
+                    if inspectorChanged && animatesInspector {
                         inspectorItem?.animator().isCollapsed = !showsInspector
                     }
-                    if sidebarChanged {
+                    if sidebarChanged && animatesSidebar {
                         sidebarItem?.animator().isCollapsed = !showsSidebar
                     }
                 }

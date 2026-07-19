@@ -38,6 +38,16 @@ nonisolated enum WorkspaceLayoutPolicy {
 
 }
 
+nonisolated enum ProjectCommandLayoutPolicy {
+    static func workspaceHorizontalOffset(workspaceRailWidth: CGFloat) -> CGFloat {
+        -workspaceRailWidth / 2
+    }
+
+    static func toolbarCorrection(windowWidth: CGFloat, itemFrame: CGRect) -> CGFloat {
+        windowWidth / 2 - itemFrame.midX
+    }
+}
+
 nonisolated struct WorkspacePanelPresentation: Equatable, Sendable {
     var showsSidebar: Bool
     var showsInspector: Bool
@@ -348,7 +358,9 @@ struct WorkspaceView: View {
     @State private var hasAppliedInitialLayout = false
     @State private var currentLayoutMode = WorkspaceLayoutMode.standard
     @State private var isProjectMenuPresented = false
+    @State private var projectCommandToolbarOffset: CGFloat = 0
     @State private var sidebarAnimationRequestID = 0
+    @State private var inspectorAnimationRequestID = 0
     @State private var responderBeforeProjectMenu: NSResponder?
     @State private var projectMenuTransitionID = 0
 
@@ -364,23 +376,34 @@ struct WorkspaceView: View {
                     statusBar
                 }
 
-                if isProjectMenuPresented {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            dismissProjectMenu()
-                        }
-                        .atelierPointerCursor()
-                        .accessibilityHidden(true)
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dismissProjectMenu()
+                    }
+                    .allowsHitTesting(isProjectMenuPresented)
+                    .atelierPointerCursor()
+                    .accessibilityHidden(true)
 
-                    ProjectCommandMenuView(
-                        session: session,
-                        workspaceURL: workspaceURL,
-                        onDismiss: { dismissProjectMenu() }
+                ProjectCommandMenuView(
+                    session: session,
+                    workspaceURL: workspaceURL,
+                    isPresented: isProjectMenuPresented,
+                    onDismiss: { dismissProjectMenu() }
+                )
+                .modifier(
+                    ProjectMenuRevealModifier(
+                        progress: isProjectMenuPresented ? 1 : 0
                     )
-                    .transition(reduceMotion ? .identity : .projectMenuReveal)
-                    .zIndex(1)
-                }
+                )
+                .offset(
+                    x: ProjectCommandLayoutPolicy.workspaceHorizontalOffset(
+                        workspaceRailWidth: AtelierMetrics.workspaceRailWidth
+                    )
+                )
+                .allowsHitTesting(isProjectMenuPresented)
+                .accessibilityHidden(!isProjectMenuPresented)
+                .zIndex(1)
             }
             .background(AtelierTheme.editor)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -444,6 +467,7 @@ struct WorkspaceView: View {
             showsSidebar: panels.showsSidebar && !zoom.isFocusMode,
             showsInspector: panels.showsInspector && !zoom.isFocusMode,
             sidebarAnimationRequestID: sidebarAnimationRequestID,
+            inspectorAnimationRequestID: inspectorAnimationRequestID,
             reduceMotion: reduceMotion
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -504,6 +528,11 @@ struct WorkspaceView: View {
                 ProjectMenuLabel(projectName: folderName)
                     .frame(width: AtelierMetrics.projectMenuWidth)
                     .atelierGlassControl(isSelected: isProjectMenuPresented)
+                    .background {
+                        ProjectCommandToolbarCenterBridge { correction in
+                            projectCommandToolbarOffset += correction
+                        }
+                    }
             }
             .buttonStyle(.plain)
             .contentShape(
@@ -513,7 +542,9 @@ struct WorkspaceView: View {
             .accessibilityLabel("Project commands for \(folderName)")
             .accessibilityValue(isProjectMenuPresented ? "Open" : "Closed")
             .atelierPointerCursor()
+            .offset(x: projectCommandToolbarOffset)
         }
+        .sharedBackgroundVisibility(.hidden)
 
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
@@ -619,6 +650,7 @@ struct WorkspaceView: View {
     private func toggleInspector() {
         guard currentLayoutMode.supportsInspector else { return }
         responderBeforeInspector = app.windowController.currentFirstResponder()
+        inspectorAnimationRequestID += 1
         panels = panels.togglingInspector(layout: currentLayoutMode)
         Task { @MainActor in
             await Task.yield()
@@ -859,6 +891,7 @@ private struct ProjectCommandMenuView: View {
 
     let session: WorkspaceSession
     let workspaceURL: URL
+    let isPresented: Bool
     let onDismiss: () -> Void
 
     @Environment(AppModel.self) private var app
@@ -940,16 +973,21 @@ private struct ProjectCommandMenuView: View {
         }
         .shadow(color: AtelierTheme.shadowFloating, radius: 20, y: 10)
         .allowsHitTesting(!isClosing)
-        .onAppear {
-            Task { @MainActor in
-                await Task.yield()
-                focusedCommand = .openFolder
+        .task(id: isPresented) {
+            guard isPresented else {
+                focusedCommand = nil
+                isClosing = false
+                return
             }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            focusedCommand = .openFolder
         }
         .onMoveCommand(perform: moveFocus)
         .onExitCommand(perform: onDismiss)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Project commands")
+        .accessibilityElement(children: isPresented ? .contain : .ignore)
+        .accessibilityLabel(isPresented ? "Project commands" : "")
+        .accessibilityHidden(!isPresented)
     }
 
     private var menuShape: UnevenRoundedRectangle {
@@ -992,6 +1030,7 @@ private struct ProjectCommandMenuView: View {
         .buttonStyle(ProjectCommandRowButtonStyle(isDestructive: role == .destructive))
         .disabled(!isEnabled || isClosing)
         .focused($focusedCommand, equals: command)
+        .focusEffectDisabled()
     }
 
     private func dismissThenPerform(_ action: @escaping () -> Void) {
@@ -1049,19 +1088,14 @@ private struct ProjectMenuRevealModifier: AnimatableModifier {
     }
 
     func body(content: Content) -> some View {
-        content.mask(alignment: .top) {
-            Rectangle()
-                .scaleEffect(x: 1, y: progress, anchor: .top)
-        }
-    }
-}
-
-private extension AnyTransition {
-    static var projectMenuReveal: AnyTransition {
-        .modifier(
-            active: ProjectMenuRevealModifier(progress: 0),
-            identity: ProjectMenuRevealModifier(progress: 1)
-        )
+        content
+            .visualEffect { content, geometry in
+                content.offset(y: -(1 - progress) * geometry.size.height)
+            }
+            .mask(alignment: .top) {
+                Rectangle()
+                    .scaleEffect(x: 1, y: progress, anchor: .top)
+            }
     }
 }
 

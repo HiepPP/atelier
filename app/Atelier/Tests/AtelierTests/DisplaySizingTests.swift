@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import Atelier
@@ -147,36 +148,82 @@ struct DisplaySizingTests {
         #expect(compact.adapting(from: .compact, to: .wide) == wide)
     }
 
-    @Test("Workspace sidebar animation policy respects geometry and Reduce Motion")
-    func workspaceSidebarAnimationPolicy() {
-        #expect(WorkspaceSplitAnimationPolicy.sidebarDuration == 0.32)
+    @Test("Workspace split animation policy respects geometry and Reduce Motion")
+    func workspaceSplitAnimationPolicy() {
+        #expect(WorkspaceSplitAnimationPolicy.panelDuration == 0.32)
         #expect(
             WorkspaceSplitAnimationPolicy.animates(
-                sidebarChanged: true,
+                panelChanged: true,
                 reduceMotion: false,
                 requestsAnimation: true
             )
         )
         #expect(
             !WorkspaceSplitAnimationPolicy.animates(
-                sidebarChanged: false,
+                panelChanged: false,
                 reduceMotion: false,
                 requestsAnimation: true
             )
         )
         #expect(
             !WorkspaceSplitAnimationPolicy.animates(
-                sidebarChanged: true,
+                panelChanged: true,
                 reduceMotion: true,
                 requestsAnimation: true
             )
         )
         #expect(
             !WorkspaceSplitAnimationPolicy.animates(
-                sidebarChanged: true,
+                panelChanged: true,
                 reduceMotion: false,
                 requestsAnimation: false
             )
+        )
+    }
+
+    @Test("Inspector animation request does not animate its sidebar companion")
+    func inspectorAnimationRequestTargetsInspectorOnly() {
+        let sidebarAnimates = WorkspaceSplitAnimationPolicy.animates(
+            panelChanged: true,
+            reduceMotion: false,
+            requestsAnimation: false
+        )
+        let inspectorAnimates = WorkspaceSplitAnimationPolicy.animates(
+            panelChanged: true,
+            reduceMotion: false,
+            requestsAnimation: true
+        )
+
+        #expect(!sidebarAnimates)
+        #expect(inspectorAnimates)
+    }
+
+    @Test("Workspace side panels hold width ahead of the center pane")
+    func workspaceSidePanelHoldingPriority() {
+        #expect(
+            WorkspaceSplitLayoutPolicy.sidePanelHoldingPriority.rawValue
+                > NSLayoutConstraint.Priority.defaultLow.rawValue
+        )
+    }
+
+    @Test("Project command menu centers against the full app window")
+    func projectCommandWindowCentering() {
+        #expect(
+            ProjectCommandLayoutPolicy.workspaceHorizontalOffset(
+                workspaceRailWidth: AtelierMetrics.workspaceRailWidth
+            ) == -88
+        )
+        #expect(
+            ProjectCommandLayoutPolicy.toolbarCorrection(
+                windowWidth: 900,
+                itemFrame: CGRect(x: 293, y: 0, width: 420, height: 28)
+            ) == -53
+        )
+        #expect(
+            ProjectCommandLayoutPolicy.toolbarCorrection(
+                windowWidth: 900,
+                itemFrame: CGRect(x: 240, y: 0, width: 420, height: 28)
+            ) == 0
         )
     }
 }

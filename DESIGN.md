@@ -73,7 +73,9 @@ Rules:
 
 - Use one native `NSSplitViewController` with thin dividers.
 - Keep split items mounted and use native item collapse for panel visibility.
-- Animate sidebar collapse by changing its allocated split width, not view opacity.
+- Animate sidebar and inspector collapse by changing allocated split width, not opacity.
+- Animate only the panel explicitly toggled. Keep companion policy changes atomic.
+- Keep side-panel holding priority above center so center absorbs reclaimed width.
 - Keep panel transitions atomic through `WorkspacePanelPresentation`.
 - Standard mode shows either sidebar or inspector, not both.
 - Wide mode may keep sidebar and inspector visible together.
@@ -309,15 +311,20 @@ Every interactive control must define these states where relevant:
 - Put project commands in the principal menu.
 - Show the active project name in the menu and expose the full path as help text.
 - Give the project menu a 420-point command-center width in the principal toolbar position.
-- Keep the project identity centered, readable, and middle-truncated inside the full-width hit target.
+- Center the project command trigger against the full app window, independent of split widths.
+- Keep the project identity readable and middle-truncated inside the full-width hit target.
 - Keep the project command trigger text-only. Do not show a folder or disclosure icon.
 - Preserve every existing project command in a 420-point top-anchored dropdown that matches the trigger width.
+- Align the dropdown edges exactly with the project command trigger.
 - Clicking any part of the project menu opens the existing project commands menu.
 - Show the pointing-hand cursor across the full 420-point trigger.
 - Keep the dropdown flush with the workspace content edge. Use a straight top edge with no callout arrow.
-- Reveal the dropdown downward from its fixed top edge. Dismiss it by clipping the same surface upward into that edge.
+- Keep the dropdown mounted while animating its clipped reveal geometry.
+- Reveal it downward from its fixed top edge. Dismiss it by sliding and clipping upward into that edge.
 - Keep project-menu motion reversible and bounce-free. Do not use whole-surface scale, blur, or fade-only transitions.
 - Show and dismiss the dropdown without decorative reveal when Reduce Motion is enabled.
+- Keep project command rows keyboard-focusable without drawing the native accent focus ring.
+- Draw one project-command glass surface. Hide the toolbar item's shared background.
 - Use a quiet native label inside the system toolbar material. Do not add a tinted icon tile, nested pill, glow, or heavy shadow.
 - Put Gemma, focus mode, and inspector in primary actions.
 - Keep branch, focus state, and zoom in the 26-point status bar.
