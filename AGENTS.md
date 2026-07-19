@@ -14,6 +14,10 @@ Atelier is a macOS 26+ SwiftUI application built with Swift 6.2 and Swift Packag
 
 Generated directories such as `.build/` and `dist/` must remain untracked.
 
+## Required SwiftUI Skill
+
+Before writing, editing, reviewing, or refactoring code in this repository, always invoke and follow `$swiftui-expert-skill` from `.agents/skills/swiftui-expert-skill/SKILL.md`.
+
 ## Design System Contract
 
 Read `DESIGN.md` before changing code. Follow its current architecture, tokens, component contracts, interaction rules, accessibility rules, and verification requirements.
@@ -78,6 +82,17 @@ These rules come from a shipped crash: zooming the window crossed a width breakp
 ## Testing Guidelines
 
 Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swift` for packaged binary checks. Every change must pass build, tests, and self-test. UI changes also require native checks at narrow and wide window sizes. Record exact failures and screenshots when relevant.
+
+### Test Scope and UI Automation
+
+- Keep verification proportional to the change and its runtime risk. Start with targeted deterministic checks, then run the required full gates once.
+- Define the exact UI states and evidence needed before starting automation. Stop when those acceptance points are covered.
+- Confirm the target app, process, and window before every automated UI input. If another app becomes active, stop immediately and return to the target without interacting with the other app.
+- Use one controlled capture path for visual proof. After one capture method fails, switch methods once or report the limitation instead of retrying indefinitely.
+- Timebox flaky UI automation. Do not turn a small change into an open-ended test session.
+- Do not repeat builds, tests, self-tests, or launch scripts unless code changed or the prior result was incomplete.
+- Separate product failures from automation, environment, window-focus, and capture failures in the final report.
+- Prefer read-only system checks. Change accessibility or system settings only when required, then restore the original value.
 
 ## Commit & Pull Request Guidelines
 

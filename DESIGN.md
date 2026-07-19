@@ -39,7 +39,7 @@ AtelierApp
     |   |-- Empty catalog
     |   `-- WorkspaceView
     |       |-- Toolbar
-    |       |-- HSplitView
+    |       |-- Native split controller
     |       |   |-- Sidebar: Explorer or Git
     |       |   |-- Center: terminal, file, diff, or Gemma tabs
     |       |   `-- Inspector
@@ -71,7 +71,9 @@ The workspace rail stays at the outer-left edge in every mode. Its fixed width i
 
 Rules:
 
-- Use native `HSplitView` with thin dividers.
+- Use one native `NSSplitViewController` with thin dividers.
+- Keep split items mounted and use native item collapse for panel visibility.
+- Animate sidebar collapse by changing its allocated split width, not view opacity.
 - Keep panel transitions atomic through `WorkspacePanelPresentation`.
 - Standard mode shows either sidebar or inspector, not both.
 - Wide mode may keep sidebar and inspector visible together.
@@ -309,10 +311,13 @@ Every interactive control must define these states where relevant:
 - Give the project menu a 420-point command-center width in the principal toolbar position.
 - Keep the project identity centered, readable, and middle-truncated inside the full-width hit target.
 - Keep the project command trigger text-only. Do not show a folder or disclosure icon.
-- Preserve every existing project command in a 420-point popover that matches the trigger width.
+- Preserve every existing project command in a 420-point top-anchored dropdown that matches the trigger width.
 - Clicking any part of the project menu opens the existing project commands menu.
 - Show the pointing-hand cursor across the full 420-point trigger.
-- Animate popover presentation with restrained opacity, scale, blur, and vertical movement. Use native dismissal animation and disable decorative motion under Reduce Motion.
+- Keep the dropdown flush with the workspace content edge. Use a straight top edge with no callout arrow.
+- Reveal the dropdown downward from its fixed top edge. Dismiss it by clipping the same surface upward into that edge.
+- Keep project-menu motion reversible and bounce-free. Do not use whole-surface scale, blur, or fade-only transitions.
+- Show and dismiss the dropdown without decorative reveal when Reduce Motion is enabled.
 - Use a quiet native label inside the system toolbar material. Do not add a tinted icon tile, nested pill, glow, or heavy shadow.
 - Put Gemma, focus mode, and inspector in primary actions.
 - Keep branch, focus state, and zoom in the 26-point status bar.

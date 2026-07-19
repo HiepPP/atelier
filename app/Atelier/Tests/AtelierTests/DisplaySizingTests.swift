@@ -146,4 +146,37 @@ struct DisplaySizingTests {
         #expect(standard.adapting(from: .standard, to: .compact) == compact)
         #expect(compact.adapting(from: .compact, to: .wide) == wide)
     }
+
+    @Test("Workspace sidebar animation policy respects geometry and Reduce Motion")
+    func workspaceSidebarAnimationPolicy() {
+        #expect(WorkspaceSplitAnimationPolicy.sidebarDuration == 0.32)
+        #expect(
+            WorkspaceSplitAnimationPolicy.animates(
+                sidebarChanged: true,
+                reduceMotion: false,
+                requestsAnimation: true
+            )
+        )
+        #expect(
+            !WorkspaceSplitAnimationPolicy.animates(
+                sidebarChanged: false,
+                reduceMotion: false,
+                requestsAnimation: true
+            )
+        )
+        #expect(
+            !WorkspaceSplitAnimationPolicy.animates(
+                sidebarChanged: true,
+                reduceMotion: true,
+                requestsAnimation: true
+            )
+        )
+        #expect(
+            !WorkspaceSplitAnimationPolicy.animates(
+                sidebarChanged: true,
+                reduceMotion: false,
+                requestsAnimation: false
+            )
+        )
+    }
 }

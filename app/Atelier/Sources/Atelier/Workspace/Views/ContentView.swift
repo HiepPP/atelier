@@ -348,6 +348,9 @@ struct WorkspaceView: View {
     @State private var hasAppliedInitialLayout = false
     @State private var currentLayoutMode = WorkspaceLayoutMode.standard
     @State private var isProjectMenuPresented = false
+    @State private var sidebarAnimationRequestID = 0
+    @State private var responderBeforeProjectMenu: NSResponder?
+    @State private var projectMenuTransitionID = 0
 
     var body: some View {
         GeometryReader { outerGeometry in
@@ -355,9 +358,29 @@ struct WorkspaceView: View {
                 containerWidth: outerGeometry.size.width
             )
 
-            VStack(spacing: 0) {
-                workspaceSurface
-                statusBar
+            ZStack(alignment: .top) {
+                VStack(spacing: 0) {
+                    workspaceSurface
+                    statusBar
+                }
+
+                if isProjectMenuPresented {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            dismissProjectMenu()
+                        }
+                        .atelierPointerCursor()
+                        .accessibilityHidden(true)
+
+                    ProjectCommandMenuView(
+                        session: session,
+                        workspaceURL: workspaceURL,
+                        onDismiss: { dismissProjectMenu() }
+                    )
+                    .transition(reduceMotion ? .identity : .projectMenuReveal)
+                    .zIndex(1)
+                }
             }
             .background(AtelierTheme.editor)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -384,8 +407,11 @@ struct WorkspaceView: View {
             }
             .onChange(of: isActive) { _, isActive in
                 if !isActive {
-                    isProjectMenuPresented = false
+                    dismissProjectMenu(restoresResponder: false)
                 }
+            }
+            .onExitCommand {
+                dismissProjectMenu()
             }
         }
     }
@@ -403,32 +429,24 @@ struct WorkspaceView: View {
     }
 
     private var workspaceSurface: some View {
-        HSplitView {
-            if panels.showsSidebar, !zoom.isFocusMode {
-                workspaceSidebar
-                    .frame(
-                        minWidth: AtelierMetrics.workspaceSidebarMinWidth,
-                        idealWidth: AtelierMetrics.workspaceSidebarIdealWidth,
-                        maxWidth: AtelierMetrics.workspaceSidebarMaxWidth
-                    )
-                    .clipped()
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-            }
-
-            workspaceDetail
-
-            if panels.showsInspector, !zoom.isFocusMode {
-                WorkspaceInspectorView(context: terminalTabs.selectedInspectorContext)
-                    .frame(
-                        minWidth: AtelierMetrics.inspectorMinWidth,
-                        idealWidth: AtelierMetrics.inspectorIdealWidth,
-                        maxWidth: AtelierMetrics.inspectorMaxWidth
-                    )
-                    .layoutPriority(1)
-            }
-        }
+        WorkspaceNativeSplitView(
+            sidebar: workspaceSidebar
+                .environment(app)
+                .environment(zoom),
+            detail: workspaceDetail
+                .environment(app)
+                .environment(zoom),
+            inspector: WorkspaceInspectorView(
+                context: terminalTabs.selectedInspectorContext
+            )
+            .environment(app)
+            .environment(zoom),
+            showsSidebar: panels.showsSidebar && !zoom.isFocusMode,
+            showsInspector: panels.showsInspector && !zoom.isFocusMode,
+            sidebarAnimationRequestID: sidebarAnimationRequestID,
+            reduceMotion: reduceMotion
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .atelierSplitViewChrome()
     }
 
     private var workspaceDetail: some View {
@@ -467,9 +485,9 @@ struct WorkspaceView: View {
     private var workspaceToolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             Button {
-                withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
-                    panels = panels.togglingSidebar(layout: currentLayoutMode)
-                }
+                dismissProjectMenu(restoresResponder: false)
+                sidebarAnimationRequestID += 1
+                panels = panels.togglingSidebar(layout: currentLayoutMode)
             } label: {
                 Image(systemName: "sidebar.leading")
             }
@@ -481,9 +499,7 @@ struct WorkspaceView: View {
 
         ToolbarItem(placement: .principal) {
             Button {
-                withAnimation(reduceMotion ? nil : AtelierMotionTokens.selection) {
-                    isProjectMenuPresented.toggle()
-                }
+                toggleProjectMenu()
             } label: {
                 ProjectMenuLabel(projectName: folderName)
                     .frame(width: AtelierMetrics.projectMenuWidth)
@@ -497,24 +513,11 @@ struct WorkspaceView: View {
             .accessibilityLabel("Project commands for \(folderName)")
             .accessibilityValue(isProjectMenuPresented ? "Open" : "Closed")
             .atelierPointerCursor()
-            .popover(
-                isPresented: $isProjectMenuPresented,
-                attachmentAnchor: .rect(.bounds),
-                arrowEdge: .top
-            ) {
-                ProjectCommandMenuView(
-                    session: session,
-                    workspaceURL: workspaceURL,
-                    onDismiss: { isProjectMenuPresented = false }
-                )
-                .frame(width: AtelierMetrics.projectMenuWidth)
-                .presentationCompactAdaptation(.popover)
-                .presentationBackground(.clear)
-            }
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
+                dismissProjectMenu(restoresResponder: false)
                 session.openGemma()
             } label: {
                 Image(systemName: "sparkles")
@@ -524,6 +527,7 @@ struct WorkspaceView: View {
             .atelierPointerCursor()
 
             Button {
+                dismissProjectMenu(restoresResponder: false)
                 zoom.toggleFocusMode()
             } label: {
                 Image(
@@ -537,6 +541,7 @@ struct WorkspaceView: View {
             .atelierPointerCursor()
 
             Button {
+                dismissProjectMenu(restoresResponder: false)
                 toggleInspector()
             } label: {
                 Image(systemName: "sidebar.trailing")
@@ -545,6 +550,44 @@ struct WorkspaceView: View {
             .help(panels.showsInspector ? "Hide Inspector" : "Show Inspector")
             .disabled(zoom.isFocusMode || !currentLayoutMode.supportsInspector)
             .atelierPointerCursor()
+        }
+    }
+
+    private func toggleProjectMenu() {
+        if isProjectMenuPresented {
+            dismissProjectMenu()
+            return
+        }
+
+        projectMenuTransitionID += 1
+        responderBeforeProjectMenu = app.windowController.currentFirstResponder()
+        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+            isProjectMenuPresented = true
+        }
+    }
+
+    private func dismissProjectMenu(restoresResponder: Bool = true) {
+        guard isProjectMenuPresented else { return }
+
+        projectMenuTransitionID += 1
+        let transitionID = projectMenuTransitionID
+        let responder = responderBeforeProjectMenu
+        responderBeforeProjectMenu = nil
+
+        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+            isProjectMenuPresented = false
+        }
+
+        guard restoresResponder, let responder else { return }
+        Task { @MainActor in
+            if reduceMotion {
+                await Task.yield()
+            } else {
+                try? await Task.sleep(for: .seconds(AtelierMotionTokens.deliberate))
+            }
+            guard transitionID == projectMenuTransitionID,
+                  !isProjectMenuPresented else { return }
+            app.windowController.restoreFirstResponder(responder)
         }
     }
 
@@ -802,6 +845,18 @@ private struct ProjectMenuLabel: View {
 }
 
 private struct ProjectCommandMenuView: View {
+    private enum Command: CaseIterable, Hashable {
+        case openFolder
+        case showInFinder
+        case copyProjectPath
+        case newTerminal
+        case openGemma
+        case closeWorkspace
+        case zoomIn
+        case zoomOut
+        case actualSize
+    }
+
     let session: WorkspaceSession
     let workspaceURL: URL
     let onDismiss: () -> Void
@@ -809,31 +864,40 @@ private struct ProjectCommandMenuView: View {
     @Environment(AppModel.self) private var app
     @Environment(AtelierZoomModel.self) private var zoom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isVisible = false
     @State private var isClosing = false
+    @FocusState private var focusedCommand: Command?
 
     var body: some View {
         VStack(spacing: 0) {
-            commandButton("Open Folder...", systemImage: "folder") {
+            commandButton(.openFolder, "Open Folder...", systemImage: "folder") {
                 AtelierActionRegistry.perform(.openFolder, model: app)
             }
-            commandButton("Show in Finder", systemImage: "folder.badge.magnifyingglass") {
+            commandButton(
+                .showInFinder,
+                "Show in Finder",
+                systemImage: "folder.badge.magnifyingglass"
+            ) {
                 NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
             }
-            commandButton("Copy Project Path", systemImage: "doc.on.doc") {
+            commandButton(
+                .copyProjectPath,
+                "Copy Project Path",
+                systemImage: "doc.on.doc"
+            ) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(session.state.path, forType: .string)
             }
 
             commandDivider
 
-            commandButton("New Terminal", systemImage: "terminal") {
+            commandButton(.newTerminal, "New Terminal", systemImage: "terminal") {
                 AtelierActionRegistry.perform(.newTerminal, model: app)
             }
-            commandButton("Open Gemma", systemImage: "sparkles") {
+            commandButton(.openGemma, "Open Gemma", systemImage: "sparkles") {
                 session.openGemma()
             }
             commandButton(
+                .closeWorkspace,
                 "Close Workspace",
                 systemImage: "xmark.rectangle",
                 role: .destructive
@@ -844,6 +908,7 @@ private struct ProjectCommandMenuView: View {
             commandDivider
 
             commandButton(
+                .zoomIn,
                 "Zoom In",
                 systemImage: "plus.magnifyingglass",
                 isEnabled: zoom.canZoomIn
@@ -852,13 +917,14 @@ private struct ProjectCommandMenuView: View {
                 zoom.zoomIn()
             }
             commandButton(
+                .zoomOut,
                 "Zoom Out",
                 systemImage: "minus.magnifyingglass",
                 isEnabled: zoom.canZoomOut
             ) {
                 zoom.zoomOut()
             }
-            commandButton("Actual Size", systemImage: "1.magnifyingglass") {
+            commandButton(.actualSize, "Actual Size", systemImage: "1.magnifyingglass") {
                 zoom.reset()
             }
         }
@@ -867,30 +933,33 @@ private struct ProjectCommandMenuView: View {
         .background {
             AtelierChromeBackground()
         }
-        .clipShape(
-            RoundedRectangle(cornerRadius: AtelierTheme.panelRadius, style: .continuous)
-        )
+        .clipShape(menuShape)
         .overlay {
-            RoundedRectangle(cornerRadius: AtelierTheme.panelRadius, style: .continuous)
+            menuShape
                 .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
         }
         .shadow(color: AtelierTheme.shadowFloating, radius: 20, y: 10)
-        .opacity(isVisible ? 1 : 0)
-        .scaleEffect(isVisible ? 1 : 0.96, anchor: .top)
-        .blur(radius: isVisible ? 0 : 6)
-        .offset(y: isVisible ? 0 : -6)
         .allowsHitTesting(!isClosing)
         .onAppear {
-            if reduceMotion {
-                isVisible = true
-            } else {
-                withAnimation(AtelierMotionTokens.panel) {
-                    isVisible = true
-                }
+            Task { @MainActor in
+                await Task.yield()
+                focusedCommand = .openFolder
             }
         }
+        .onMoveCommand(perform: moveFocus)
+        .onExitCommand(perform: onDismiss)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Project commands")
+    }
+
+    private var menuShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: 0,
+            bottomLeadingRadius: AtelierTheme.panelRadius,
+            bottomTrailingRadius: AtelierTheme.panelRadius,
+            topTrailingRadius: 0,
+            style: .continuous
+        )
     }
 
     private var commandDivider: some View {
@@ -900,6 +969,7 @@ private struct ProjectCommandMenuView: View {
     }
 
     private func commandButton(
+        _ command: Command,
         _ title: String,
         systemImage: String,
         role: ButtonRole? = nil,
@@ -921,6 +991,7 @@ private struct ProjectCommandMenuView: View {
         }
         .buttonStyle(ProjectCommandRowButtonStyle(isDestructive: role == .destructive))
         .disabled(!isEnabled || isClosing)
+        .focused($focusedCommand, equals: command)
     }
 
     private func dismissThenPerform(_ action: @escaping () -> Void) {
@@ -932,14 +1003,65 @@ private struct ProjectCommandMenuView: View {
         }
 
         isClosing = true
-        withAnimation(.easeIn(duration: AtelierMotionTokens.quick)) {
-            isVisible = false
-        }
+        onDismiss()
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(AtelierMotionTokens.quick))
-            onDismiss()
+            try? await Task.sleep(for: .seconds(AtelierMotionTokens.deliberate))
             action()
         }
+    }
+
+    private func moveFocus(_ direction: MoveCommandDirection) {
+        let commands = enabledCommands
+        guard !commands.isEmpty else { return }
+
+        let currentIndex = focusedCommand.flatMap { commands.firstIndex(of: $0) }
+        switch direction {
+        case .up:
+            let index = currentIndex ?? 0
+            focusedCommand = commands[(index - 1 + commands.count) % commands.count]
+        case .down:
+            focusedCommand = commands[((currentIndex ?? -1) + 1) % commands.count]
+        default:
+            break
+        }
+    }
+
+    private var enabledCommands: [Command] {
+        Command.allCases.filter { command in
+            switch command {
+            case .zoomIn:
+                zoom.canZoomIn
+            case .zoomOut:
+                zoom.canZoomOut
+            default:
+                true
+            }
+        }
+    }
+}
+
+private struct ProjectMenuRevealModifier: AnimatableModifier {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content.mask(alignment: .top) {
+            Rectangle()
+                .scaleEffect(x: 1, y: progress, anchor: .top)
+        }
+    }
+}
+
+private extension AnyTransition {
+    static var projectMenuReveal: AnyTransition {
+        .modifier(
+            active: ProjectMenuRevealModifier(progress: 0),
+            identity: ProjectMenuRevealModifier(progress: 1)
+        )
     }
 }
 
