@@ -470,9 +470,19 @@ struct WorkspaceView: View {
                 Button("Show in Finder", systemImage: "folder.badge.magnifyingglass") {
                     NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
                 }
+                Button("Copy Project Path", systemImage: "doc.on.doc") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(state.path, forType: .string)
+                }
                 Divider()
+                Button("New Terminal", systemImage: "terminal") {
+                    AtelierActionRegistry.perform(.newTerminal, model: app)
+                }
                 Button("Open Gemma", systemImage: "sparkles") {
                     session.openGemma()
+                }
+                Button("Close Workspace", systemImage: "xmark.rectangle", role: .destructive) {
+                    app.closeWorkspace(id: state.id)
                 }
                 Divider()
                 Button("Zoom In", systemImage: "plus.magnifyingglass") {
@@ -488,9 +498,11 @@ struct WorkspaceView: View {
                     zoom.reset()
                 }
             } label: {
-                Label(folderName, systemImage: "square.stack.3d.up")
+                ProjectMenuLabel(projectName: folderName)
             }
-            .help("Project commands")
+            .menuStyle(.borderlessButton)
+            .frame(width: AtelierMetrics.projectMenuWidth)
+            .help("\(folderName)\n\(state.path)\nProject commands")
             .accessibilityLabel("Project commands for \(folderName)")
             .atelierPointerCursor()
         }
@@ -736,6 +748,34 @@ struct WorkspaceView: View {
                 .fill(AtelierTheme.border)
                 .frame(height: AtelierTheme.strokeHairline)
         }
+    }
+}
+
+private struct ProjectMenuLabel: View {
+    let projectName: String
+
+    var body: some View {
+        HStack(spacing: AtelierMetrics.spaceS) {
+            Image(systemName: "folder")
+                .atelierFont(size: AtelierTypography.body, weight: .medium)
+                .foregroundStyle(.secondary)
+
+            Text(projectName)
+                .atelierFont(size: AtelierTypography.body, weight: .semibold)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: AtelierMetrics.spaceM)
+
+            Image(systemName: "chevron.down")
+                .atelierFont(size: AtelierTypography.micro, weight: .medium)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, AtelierMetrics.spaceM)
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: AtelierMetrics.controlHeight)
+        .contentShape(Rectangle())
     }
 }
 

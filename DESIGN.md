@@ -32,7 +32,7 @@ SwiftUI owns composition and observable presentation state. AppKit owns native v
 AtelierApp
 `-- ContentView
     |-- Workspace rail
-    |   |-- Ordered live workspace items
+    |   |-- Ordered live workspace rows
     |   `-- Add workspace action
     |-- Selected workspace content
     |   |-- Empty catalog
@@ -83,7 +83,7 @@ Rules:
 
 | Surface | Minimum | Ideal | Maximum |
 |---|---:|---:|---:|
-| Workspace rail | 56 | 56 | 56 |
+| Workspace rail | 176 | 176 | 176 |
 | Workspace sidebar | 300 | 340 | 420 |
 | Center | 420 | 660 | Flexible |
 | Inspector | 220 | 260 | 320 |
@@ -102,9 +102,10 @@ Rules:
 | `controlHeight` | 28 | Regular controls |
 | `compactControlHeight` | 24 | Inline and code controls |
 | `rowHeight` | 28 | Dense list rows |
-| `workspaceRailWidth` | 56 | Persistent outer workspace rail |
-| `workspaceRailItemSize` | 36 | Workspace identity target |
-| `workspaceRailItemGap` | 8 | Vertical space between identities |
+| `workspaceRailWidth` | 176 | Persistent labeled workspace rail |
+| `workspaceRailItemHeight` | 44 | Two-line workspace row target |
+| `workspaceRailItemGap` | 4 | Vertical space between workspace rows |
+| `projectMenuWidth` | 420 | Principal project menu command-center width |
 
 ## Color Tokens
 
@@ -290,6 +291,12 @@ Every interactive control must define these states where relevant:
 - Use the unified compact macOS toolbar.
 - Put sidebar toggle in navigation placement.
 - Put project commands in the principal menu.
+- Show the active project name in the menu and expose the full path as help text.
+- Give the project menu a 420-point command-center width in the principal toolbar position.
+- Keep the project identity centered, readable, and middle-truncated inside the full-width hit target.
+- Preserve the existing project command menu. The wider label must not imply search or palette behavior.
+- Clicking any part of the project menu opens the existing project commands menu.
+- Use a quiet native label. Do not add a tinted icon tile, nested pill, gradient, glow, or heavy shadow.
 - Put Gemma, focus mode, and inspector in primary actions.
 - Keep branch, focus state, and zoom in the 26-point status bar.
 - Use thin dividers between sidebar, center, inspector, and status bar.
@@ -297,27 +304,31 @@ Every interactive control must define these states where relevant:
 ### Workspace Rail
 
 - Keep the rail outside `WorkspaceView`, its toolbar, split view, and status bar.
-- Use a fixed 56-point rail with one hairline divider on its trailing edge.
-- Place 36-point workspace items in one vertical column with 8-point gaps and 10-point horizontal insets.
-- Derive each identity from the first meaningful character of the workspace folder name. Use native text, not invented logos.
-- Show the full workspace name and path in help text. Never truncate identity without this alternate text.
-- Put one 36-point `plus` action after the workspace list. It opens the existing folder picker.
-- Keep the add action quiet. Use the same item anatomy without selected emphasis.
-- Scroll only the workspace item column when it exceeds available height. Keep the add action reachable.
-- Use selection fill and a 2-point leading accent rule for the active workspace.
-- Use semantic hover and pressed fills. Do not use glow, gradients, heavy shadows, pills, or dock magnification.
+- Use a fixed 176-point rail with one hairline divider on its trailing edge.
+- Show full project names as primary identity. Never use initials or monograms as primary identity.
+- Show an abbreviated parent path below every project name in monospaced secondary text.
+- Use the parent path to disambiguate duplicate project names.
+- Place 44-point workspace rows in one vertical column with 4-point gaps and 8-point horizontal insets.
+- Put one labeled `Add Workspace` action below the scrollable workspace list.
+- Support drag-and-drop reordering within the rail and persist the new order.
+- Give every workspace row a native context menu for activation, Finder, path copy, ordering, and close.
+- A context-menu close targets that item. It must not switch or close the active workspace first.
+- Mark the active workspace with label weight, restrained selection fill, a checkmark, and a 2-point leading accent rule.
+- Show loading, unavailable, and error accessories without replacing project identity.
+- Show the full path in help and accessibility text.
+- Use semantic hover, pressed, focused, selected, and disabled fills from existing interaction-state primitives.
 - Keep optional motion limited to quick opacity and scale feedback. Disable it under Reduce Motion.
-- Use the sidebar surface color for the rail and the existing border token for separation.
+- Use the sidebar surface color and existing border token. Do not add glow, gradients, heavy shadows, pills, or dock magnification.
 
 Workspace item states:
 
 | State | Visual treatment | Interaction | Accessibility value |
 |---|---|---|---|
-| Active | Selection fill, primary label, leading accent rule | Selecting again keeps current session | `Selected, available` |
-| Inactive | Clear fill, secondary label | Selects existing live session | `Available` |
-| Loading | Raised fill, secondary label, native progress indicator | Disabled until restore finishes | `Loading` |
-| Unavailable | Clear fill, tertiary label, `questionmark.folder` status | Selects item and presents recovery context | `Unavailable` |
-| Error | Clear fill, primary label, semantic error status | Selects item and presents error context | `Error` |
+| Active | Semibold name, secondary path, selection fill, checkmark, leading rule | Selecting again keeps current session | `Selected, available` |
+| Inactive | Primary name, secondary path, clear fill | Selects existing live session | `Available` |
+| Loading | Secondary name and path, native progress indicator | Disabled until restore finishes | `Loading` |
+| Unavailable | Primary name, secondary path, `questionmark.folder` accessory | Selects item and presents recovery context | `Unavailable` |
+| Error | Primary name, secondary path, semantic error accessory | Selects item and presents error context | `Error` |
 | Disabled | Clear fill at disabled opacity | No action | `Disabled` |
 
 Catalog states:
@@ -476,10 +487,16 @@ Native checks:
 
 - Test narrow layout at exactly `760 x 512`.
 - Test wide layout at exactly `1440 x 900`.
+- Test duplicate project names and confirm rail parent paths disambiguate them.
+- Test one long project name and confirm the rail and project menu preserve readable identity.
+- Test the rail with Explorer and Inspector hidden.
 - Check light and dark appearance when colors change.
 - Check keyboard focus after opening and closing overlays.
+- Open and close the project menu with pointer and keyboard.
 - Check Reduce Motion and Reduce Transparency when effects change.
 - Switch between two workspaces ten times and confirm tabs and terminals remain isolated and alive.
+- Reorder three workspaces, relaunch, and confirm the order persists.
+- Close an inactive workspace from its context menu and confirm the active session stays selected.
 - Select the same standardized folder twice and confirm the existing session activates.
 - Restore one valid and one missing workspace and confirm the valid workspace remains usable.
 - Stress sidebar, inspector, preview, and window-size transitions.

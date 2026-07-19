@@ -92,6 +92,51 @@ struct WorkspaceLifecycleTests {
         #expect(!first.isStarted)
     }
 
+    @Test("Closing an inactive workspace preserves active selection")
+    func closeInactiveWorkspace() throws {
+        let firstRoot = temporaryDirectory("close-inactive-first")
+        let secondRoot = temporaryDirectory("close-inactive-second")
+        try FileManager.default.createDirectory(at: firstRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondRoot, withIntermediateDirectories: true)
+        let model = makeModel("close-inactive")
+        defer { model.stop() }
+
+        try model.openWorkspace(workspaceState(firstRoot))
+        let first = try #require(model.workspace)
+        try model.openWorkspace(workspaceState(secondRoot))
+        let second = try #require(model.workspace)
+
+        model.closeWorkspace(id: first.state.id)
+
+        #expect(!first.isStarted)
+        #expect(second.isStarted)
+        #expect(model.workspace === second)
+        #expect(model.workspaceStates.map(\.id) == [second.state.id])
+    }
+
+    @Test("Workspace reorder preserves sessions and selection")
+    func reorderWorkspaces() throws {
+        let firstRoot = temporaryDirectory("reorder-first")
+        let secondRoot = temporaryDirectory("reorder-second")
+        let thirdRoot = temporaryDirectory("reorder-third")
+        for root in [firstRoot, secondRoot, thirdRoot] {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        }
+        let model = makeModel("reorder")
+        defer { model.stop() }
+
+        try model.openWorkspace(workspaceState(firstRoot))
+        try model.openWorkspace(workspaceState(secondRoot))
+        try model.openWorkspace(workspaceState(thirdRoot))
+        let selectedID = try #require(model.selectedWorkspaceID)
+
+        model.moveWorkspace(id: firstRoot.path, relativeTo: thirdRoot.path, insertAfter: true)
+
+        #expect(model.workspaceStates.map(\.id) == [secondRoot.path, thirdRoot.path, firstRoot.path])
+        #expect(model.selectedWorkspaceID == selectedID)
+        #expect(model.liveSessions.count == 3)
+    }
+
     @Test("Missing workspace remains unavailable without blocking valid session")
     func unavailableRestore() async throws {
         let validRoot = temporaryDirectory("valid")

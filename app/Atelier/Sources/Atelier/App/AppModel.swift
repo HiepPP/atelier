@@ -104,23 +104,46 @@ final class AppModel {
     }
 
     func closeWorkspace() {
-        guard let selectedWorkspaceID,
-              let index = workspaceStates.firstIndex(where: { $0.id == selectedWorkspaceID }) else {
-            return
-        }
+        guard let selectedWorkspaceID else { return }
+        closeWorkspace(id: selectedWorkspaceID)
+    }
+
+    func closeWorkspace(id workspaceID: String) {
+        guard let index = workspaceStates.firstIndex(where: { $0.id == workspaceID }) else { return }
+        let wasSelected = workspaceID == selectedWorkspaceID
         catalogMutationRevision &+= 1
-        sessionsByID.removeValue(forKey: selectedWorkspaceID)?.stop()
-        workspaceFailures.removeValue(forKey: selectedWorkspaceID)
-        loadingWorkspaceIDs.remove(selectedWorkspaceID)
+        sessionsByID.removeValue(forKey: workspaceID)?.stop()
+        workspaceFailures.removeValue(forKey: workspaceID)
+        loadingWorkspaceIDs.remove(workspaceID)
         workspaceStates.remove(at: index)
 
-        if workspaceStates.indices.contains(index), sessionsByID[workspaceStates[index].id] != nil {
-            self.selectedWorkspaceID = workspaceStates[index].id
-        } else if index > 0, sessionsByID[workspaceStates[index - 1].id] != nil {
-            self.selectedWorkspaceID = workspaceStates[index - 1].id
-        } else {
-            self.selectedWorkspaceID = workspaceStates.first { sessionsByID[$0.id] != nil }?.id
+        if wasSelected {
+            if workspaceStates.indices.contains(index), sessionsByID[workspaceStates[index].id] != nil {
+                selectedWorkspaceID = workspaceStates[index].id
+            } else if index > 0, sessionsByID[workspaceStates[index - 1].id] != nil {
+                selectedWorkspaceID = workspaceStates[index - 1].id
+            } else {
+                selectedWorkspaceID = workspaceStates.first { sessionsByID[$0.id] != nil }?.id
+            }
         }
+        persistCatalog()
+    }
+
+    func moveWorkspace(id workspaceID: String, relativeTo targetID: String, insertAfter: Bool) {
+        guard workspaceID != targetID,
+              let sourceIndex = workspaceStates.firstIndex(where: { $0.id == workspaceID }),
+              workspaceStates.contains(where: { $0.id == targetID }) else {
+            return
+        }
+
+        catalogMutationRevision &+= 1
+        let state = workspaceStates.remove(at: sourceIndex)
+        guard let targetIndex = workspaceStates.firstIndex(where: { $0.id == targetID }) else {
+            workspaceStates.insert(state, at: sourceIndex)
+            return
+        }
+        let insertionIndex = insertAfter ? targetIndex + 1 : targetIndex
+        workspaceStates.insert(state, at: insertionIndex)
         persistCatalog()
     }
 

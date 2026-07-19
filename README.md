@@ -10,7 +10,7 @@ Atelier is a native macOS IDE for browsing, editing, running, and reviewing a lo
 - Git status, diff, staging, commit, and branch controls.
 - Workspace restoration and security-scoped folder access.
 - Concurrent workspaces with isolated tabs, terminals, navigation, Git, agent, and palette state.
-- Persistent outer workspace rail for adding and switching live sessions.
+- Persistent labeled workspace rail for adding and switching live sessions.
 - File-system monitoring with incremental UI refreshes.
 - Keyboard shortcuts, focus mode, zoom, and native window behavior.
 

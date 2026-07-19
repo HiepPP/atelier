@@ -98,12 +98,12 @@ enum AtelierMetrics {
     static let controlHeight: CGFloat = 28
     static let fieldHeight: CGFloat = 32
     static let rowHeight: CGFloat = 28
-    static let workspaceRailWidth: CGFloat = 56
-    static let workspaceRailItemSize: CGFloat = 36
-    static let workspaceRailItemGap: CGFloat = 8
     static let transcriptMaxWidth: CGFloat = 680
     static let emptyStateMaxWidth: CGFloat = 460
-    static let projectMenuWidth: CGFloat = 280
+    static let workspaceRailWidth: CGFloat = 176
+    static let workspaceRailItemHeight: CGFloat = 44
+    static let workspaceRailItemGap: CGFloat = 4
+    static let projectMenuWidth: CGFloat = 420
     static let dialogWidth: CGFloat = 340
     static let settingsWidth: CGFloat = 460
     static let settingsMinHeight: CGFloat = 400

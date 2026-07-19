@@ -83,18 +83,40 @@ struct DisplaySizingTests {
         #expect(WorkspaceSidebarTab.allCases == [.explorer, .sourceControl])
 
         #expect(AtelierMetrics.tabBarHeight == 34)
-        #expect(AtelierMetrics.workspaceRailWidth == 56)
-        #expect(AtelierMetrics.workspaceRailItemSize == 36)
-        #expect(AtelierMetrics.workspaceRailItemGap == 8)
+        #expect(AtelierMetrics.workspaceRailWidth == 176)
+        #expect(AtelierMetrics.workspaceRailItemHeight == 44)
+        #expect(AtelierMetrics.workspaceRailItemGap == 4)
+        #expect(AtelierMetrics.projectMenuWidth == 420)
         #expect(AtelierMetrics.workspaceRailWidth == WorkspaceRailPolicy.railWidth)
-        #expect(WorkspaceRailPolicy.contentWidth(containerWidth: 760) == 704)
-        #expect(WorkspaceRailPolicy.contentWidth(containerWidth: 1_440) == 1_384)
+        #expect(WorkspaceRailPolicy.contentWidth(containerWidth: 760) == 584)
+        #expect(WorkspaceRailPolicy.contentWidth(containerWidth: 1_440) == 1_264)
         #expect(AtelierTypography.micro == 11)
         #expect(AtelierTypography.caption == 11)
         #expect(AtelierTypography.uiSize == 13)
         #expect(AtelierTypography.editorSize == 13)
         #expect(AtelierTypography.terminalSize == 14)
         #expect(AtelierZoomModel.baseMinimumSize == CGSize(width: 760, height: 512))
+    }
+
+    @Test("Workspace rail uses readable names and distinct parent paths")
+    func workspaceRailIdentity() {
+        let firstPath = "/Users/hiep/Projects/client-a/atelier"
+        let secondPath = "/Users/hiep/Projects/client-b/atelier"
+
+        #expect(WorkspaceRailIdentityPolicy.workspaceName(path: firstPath) == "atelier")
+        #expect(WorkspaceRailIdentityPolicy.workspaceName(path: secondPath) == "atelier")
+        #expect(
+            WorkspaceRailIdentityPolicy.abbreviatedParentPath(
+                path: firstPath,
+                homePath: "/Users/hiep"
+            ) == "~/Projects/client-a"
+        )
+        #expect(
+            WorkspaceRailIdentityPolicy.abbreviatedParentPath(
+                path: secondPath,
+                homePath: "/Users/hiep"
+            ) == "~/Projects/client-b"
+        )
     }
 
     @Test("Workspace panel transitions stay atomic across layout modes")
