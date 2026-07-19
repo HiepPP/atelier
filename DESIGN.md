@@ -80,7 +80,8 @@ Rules:
 - Standard mode shows either sidebar or inspector, not both.
 - Wide mode may keep sidebar and inspector visible together.
 - Compact mode keeps the center surface only.
-- Focus mode hides both side panels and restores their prior state on exit.
+- The focus control is the master side-panel visibility control. It hides every panel together
+  and restores the current layout's complete default panel set instead of a partial snapshot.
 - Never rebuild this layout with dynamic `NavigationSplitView` and `.inspector` composition.
 - Restore a saved responder only when it still belongs to the target window.
 
@@ -246,11 +247,16 @@ Rules:
 | `standard` | 0.20s | Normal transitions |
 | `deliberate` | 0.32s | Larger state changes |
 | `panel` | Smooth 0.32 / no bounce | Panel movement |
+| `panelCollapse` | Ease-out 0.20 / no bounce | Native side-panel collapse and reveal |
 | `selection` | Spring 0.24 / 0.86 | Selection movement |
 
 Motion rules:
 
 - Disable optional motion when Reduce Motion is enabled.
+- Start side-panel feedback on the interaction frame. Collapse width over 0.20 seconds with an
+  ease-out curve so the transition never feels queued or delayed.
+- While hiding, roll sidebar and inspector content toward their owning outer edge and clip it to
+  the shrinking pane. Do not fade, blur, scale, snapshot, or animate the center native surface.
 - Use a short shine after refresh, shake for Git error, and small jump for a new terminal.
 - Keep tab selection responsive through fill or indicator changes inside fixed bounds.
 - Never animate or transform the outer geometry of sidebar tabs.
@@ -335,6 +341,8 @@ Interaction geometry rules:
 - Draw one project-command glass surface. Hide the toolbar item's shared background.
 - Use a quiet native label inside the system toolbar material. Do not add a tinted icon tile, nested pill, glow, or heavy shadow.
 - Put Gemma, focus mode, and inspector in primary actions.
+- Synchronize the focus control with effective side-panel visibility. Its master transition must
+  animate every split item whose visibility changes with the same duration.
 - Keep branch, focus state, and zoom in the 26-point status bar.
 - Use thin dividers between sidebar, center, inspector, and status bar.
 

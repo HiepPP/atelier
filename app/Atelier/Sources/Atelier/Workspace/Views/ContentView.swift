@@ -88,6 +88,8 @@ nonisolated struct WorkspacePanelPresentation: Equatable, Sendable {
     var showsInspector: Bool
     var restoresSidebarAfterInspector: Bool
 
+    var hasVisiblePanel: Bool { showsSidebar || showsInspector }
+
     static func initial(for layout: WorkspaceLayoutMode) -> WorkspacePanelPresentation {
         WorkspacePanelPresentation(
             showsSidebar: layout.docksSidebar,
@@ -155,6 +157,17 @@ nonisolated struct WorkspacePanelPresentation: Equatable, Sendable {
             showsInspector: true,
             restoresSidebarAfterInspector: showsSidebar
         )
+    }
+
+    func settingAllPanelsPresented(
+        _ isPresented: Bool,
+        layout: WorkspaceLayoutMode
+    ) -> WorkspacePanelPresentation {
+        isPresented ? .initial(for: layout) : .initial(for: .compact)
+    }
+
+    func togglingAllPanels(layout: WorkspaceLayoutMode) -> WorkspacePanelPresentation {
+        settingAllPanelsPresented(!hasVisiblePanel, layout: layout)
     }
 }
 
@@ -388,7 +401,6 @@ struct WorkspaceView: View {
     @State private var responderBeforeAgentPreview: NSResponder?
     @State private var selectedSidebarTab = WorkspaceSidebarTab.explorer
     @State private var panels = WorkspacePanelPresentation.initial(for: .standard)
-    @State private var panelsBeforeFocus = WorkspacePanelPresentation.initial(for: .standard)
     @State private var responderBeforeInspector: NSResponder?
     @State private var hasAppliedInitialLayout = false
     @State private var currentLayoutMode = WorkspaceLayoutMode.standard
@@ -594,16 +606,24 @@ struct WorkspaceView: View {
 
             Button {
                 dismissProjectMenu(restoresResponder: false)
-                zoom.toggleFocusMode()
+                toggleAllWorkspacePanels()
             } label: {
                 Image(
-                    systemName: zoom.isFocusMode
-                        ? "rectangle.split.3x1"
-                        : "rectangle.center.inset.filled"
+                    systemName: workspacePanelsArePresented
+                        ? "rectangle.center.inset.filled"
+                        : "rectangle.split.3x1"
                 )
             }
-            .accessibilityLabel(zoom.isFocusMode ? "Exit focus mode" : "Enter focus mode")
-            .help(zoom.isFocusMode ? "Exit focus mode" : "Enter focus mode")
+            .accessibilityLabel(
+                workspacePanelsArePresented
+                    ? "Hide workspace panels"
+                    : "Show workspace panels"
+            )
+            .help(
+                workspacePanelsArePresented
+                    ? "Hide Workspace Panels"
+                    : "Show Workspace Panels"
+            )
             .atelierPointerCursor()
 
             Button {
@@ -617,6 +637,35 @@ struct WorkspaceView: View {
             .disabled(zoom.isFocusMode || !currentLayoutMode.supportsInspector)
             .atelierPointerCursor()
         }
+    }
+
+    private var workspacePanelsArePresented: Bool {
+        !zoom.isFocusMode && panels.hasVisiblePanel
+    }
+
+    private func toggleAllWorkspacePanels() {
+        if workspacePanelsArePresented || zoom.isFocusMode {
+            zoom.toggleFocusMode()
+            return
+        }
+
+        applyPanelPresentation(
+            panels.togglingAllPanels(layout: currentLayoutMode),
+            requestsAnimation: true
+        )
+    }
+
+    private func applyPanelPresentation(
+        _ nextPanels: WorkspacePanelPresentation,
+        requestsAnimation: Bool
+    ) {
+        if requestsAnimation && panels.showsSidebar != nextPanels.showsSidebar {
+            sidebarAnimationRequestID += 1
+        }
+        if requestsAnimation && panels.showsInspector != nextPanels.showsInspector {
+            inspectorAnimationRequestID += 1
+        }
+        panels = nextPanels
     }
 
     private func toggleProjectMenu() {
@@ -674,12 +723,10 @@ struct WorkspaceView: View {
     }
 
     private func updateFocusMode(_ isFocused: Bool) {
-        if isFocused {
-            panelsBeforeFocus = panels
-            panels = .initial(for: .compact)
-        } else {
-            panels = panelsBeforeFocus
-        }
+        applyPanelPresentation(
+            panels.settingAllPanelsPresented(!isFocused, layout: currentLayoutMode),
+            requestsAnimation: true
+        )
     }
 
     private func toggleInspector() {

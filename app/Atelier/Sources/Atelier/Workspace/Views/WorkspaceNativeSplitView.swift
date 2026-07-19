@@ -2,7 +2,9 @@ import AppKit
 import SwiftUI
 
 nonisolated enum WorkspaceSplitAnimationPolicy {
-    static let panelDuration = 0.32
+    static let panelDuration = 0.20
+    static let panelRollDistance: CGFloat = 24
+    static let frameCount = 12
 
     static func animates(
         panelChanged: Bool,
@@ -13,10 +15,44 @@ nonisolated enum WorkspaceSplitAnimationPolicy {
     }
 }
 
+nonisolated enum WorkspacePanelMotionEdge: Sendable {
+    case leading
+    case trailing
+
+    var hiddenOffset: CGFloat {
+        switch self {
+        case .leading: -WorkspaceSplitAnimationPolicy.panelRollDistance
+        case .trailing: WorkspaceSplitAnimationPolicy.panelRollDistance
+        }
+    }
+}
+
 nonisolated enum WorkspaceSplitLayoutPolicy {
     static let sidePanelHoldingPriority = NSLayoutConstraint.Priority(
         rawValue: NSLayoutConstraint.Priority.defaultLow.rawValue + 1
     )
+    static let panelCollapseBehavior = NSSplitViewItem.CollapseBehavior.useConstraints
+}
+
+struct WorkspacePanelMotionContainer<Content: View>: View {
+    let content: Content
+    let isPresented: Bool
+    let edge: WorkspacePanelMotionEdge
+    let reduceMotion: Bool
+
+    var body: some View {
+        content
+            .offset(
+                x: isPresented || reduceMotion ? 0 : edge.hiddenOffset
+            )
+            .animation(
+                reduceMotion
+                    ? nil
+                    : .easeOut(duration: WorkspaceSplitAnimationPolicy.panelDuration),
+                value: isPresented
+            )
+            .clipped()
+    }
 }
 
 struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
@@ -39,13 +75,20 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         controller.splitView.isVertical = true
         controller.splitView.dividerStyle = .thin
 
-        let sidebarController = NSHostingController(rootView: sidebar)
+        let sidebarController = NSHostingController(
+            rootView: WorkspacePanelMotionContainer(
+                content: sidebar,
+                isPresented: showsSidebar,
+                edge: .leading,
+                reduceMotion: reduceMotion
+            )
+        )
         let sidebarItem = NSSplitViewItem(viewController: sidebarController)
         sidebarItem.minimumThickness = AtelierMetrics.workspaceSidebarMinWidth
         sidebarItem.maximumThickness = AtelierMetrics.workspaceSidebarMaxWidth
         sidebarItem.canCollapse = true
         sidebarItem.canCollapseFromWindowResize = false
-        sidebarItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+        sidebarItem.collapseBehavior = WorkspaceSplitLayoutPolicy.panelCollapseBehavior
         sidebarItem.holdingPriority = WorkspaceSplitLayoutPolicy.sidePanelHoldingPriority
         sidebarItem.isCollapsed = !showsSidebar
 
@@ -53,13 +96,20 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         let detailItem = NSSplitViewItem(viewController: detailController)
         detailItem.minimumThickness = AtelierMetrics.centerMinWidth
 
-        let inspectorController = NSHostingController(rootView: inspector)
+        let inspectorController = NSHostingController(
+            rootView: WorkspacePanelMotionContainer(
+                content: inspector,
+                isPresented: showsInspector,
+                edge: .trailing,
+                reduceMotion: reduceMotion
+            )
+        )
         let inspectorItem = NSSplitViewItem(viewController: inspectorController)
         inspectorItem.minimumThickness = AtelierMetrics.inspectorMinWidth
         inspectorItem.maximumThickness = AtelierMetrics.inspectorMaxWidth
         inspectorItem.canCollapse = true
         inspectorItem.canCollapseFromWindowResize = false
-        inspectorItem.collapseBehavior = .preferResizingSiblingsWithFixedSplitView
+        inspectorItem.collapseBehavior = WorkspaceSplitLayoutPolicy.panelCollapseBehavior
         inspectorItem.holdingPriority = WorkspaceSplitLayoutPolicy.sidePanelHoldingPriority
         inspectorItem.isCollapsed = !showsInspector
 
@@ -86,9 +136,19 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         _ controller: NSSplitViewController,
         context: Context
     ) {
-        context.coordinator.sidebarController?.rootView = sidebar
+        context.coordinator.sidebarController?.rootView = WorkspacePanelMotionContainer(
+            content: sidebar,
+            isPresented: showsSidebar,
+            edge: .leading,
+            reduceMotion: reduceMotion
+        )
         context.coordinator.detailController?.rootView = detail
-        context.coordinator.inspectorController?.rootView = inspector
+        context.coordinator.inspectorController?.rootView = WorkspacePanelMotionContainer(
+            content: inspector,
+            isPresented: showsInspector,
+            edge: .trailing,
+            reduceMotion: reduceMotion
+        )
 
         let sidebarChanged = context.coordinator.showsSidebar != showsSidebar
         let inspectorChanged = context.coordinator.showsInspector != showsInspector
@@ -119,10 +179,10 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
 
     final class Coordinator {
         weak var controller: NSSplitViewController?
-        var sidebarController: NSHostingController<Sidebar>?
+        var sidebarController: NSHostingController<WorkspacePanelMotionContainer<Sidebar>>?
         weak var sidebarItem: NSSplitViewItem?
         var detailController: NSHostingController<Detail>?
-        var inspectorController: NSHostingController<Inspector>?
+        var inspectorController: NSHostingController<WorkspacePanelMotionContainer<Inspector>>?
         weak var inspectorItem: NSSplitViewItem?
         var showsSidebar = false
         var showsInspector = false
@@ -132,10 +192,10 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
 
         func install(
             controller: NSSplitViewController,
-            sidebarController: NSHostingController<Sidebar>,
+            sidebarController: NSHostingController<WorkspacePanelMotionContainer<Sidebar>>,
             sidebarItem: NSSplitViewItem,
             detailController: NSHostingController<Detail>,
-            inspectorController: NSHostingController<Inspector>,
+            inspectorController: NSHostingController<WorkspacePanelMotionContainer<Inspector>>,
             inspectorItem: NSSplitViewItem,
             showsSidebar: Bool,
             showsInspector: Bool,
@@ -177,24 +237,120 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
                 await Task.yield()
                 guard let self, generation == updateGeneration else { return }
 
+                let opensPanel = (sidebarChanged && showsSidebar)
+                    || (inspectorChanged && showsInspector)
+                if opensPanel {
+                    applyPanelStateImmediately(
+                        showsSidebar: showsSidebar,
+                        showsInspector: showsInspector,
+                        sidebarChanged: sidebarChanged,
+                        inspectorChanged: inspectorChanged
+                    )
+                    return
+                }
+
                 if inspectorChanged && !animatesInspector {
-                    inspectorItem?.isCollapsed = !showsInspector
+                    applyInspectorState(isPresented: showsInspector)
                 }
                 if sidebarChanged && !animatesSidebar {
-                    sidebarItem?.isCollapsed = !showsSidebar
+                    applySidebarState(isPresented: showsSidebar)
                 }
                 guard animatesSidebar || animatesInspector else { return }
 
-                await NSAnimationContext.runAnimationGroup { animationContext in
-                    animationContext.duration = WorkspaceSplitAnimationPolicy.panelDuration
-                    if inspectorChanged && animatesInspector {
-                        inspectorItem?.animator().isCollapsed = !showsInspector
-                    }
+                guard let splitView = controller?.splitView else {
+                    applyPanelStateImmediately(
+                        showsSidebar: showsSidebar,
+                        showsInspector: showsInspector,
+                        sidebarChanged: sidebarChanged,
+                        inspectorChanged: inspectorChanged
+                    )
+                    return
+                }
+
+                if sidebarChanged && animatesSidebar {
+                    sidebarItem?.minimumThickness = 0
+                    sidebarItem?.canCollapse = false
+                }
+                if inspectorChanged && animatesInspector {
+                    inspectorItem?.minimumThickness = 0
+                    inspectorItem?.canCollapse = false
+                }
+
+                let arrangedSubviews = splitView.arrangedSubviews
+                let sidebarStart = arrangedSubviews.first?.frame.maxX ?? 0
+                let inspectorStart = arrangedSubviews.count > 2
+                    ? arrangedSubviews[2].frame.minX - splitView.dividerThickness
+                    : splitView.bounds.width
+                let frameInterval = WorkspaceSplitAnimationPolicy.panelDuration
+                    / Double(WorkspaceSplitAnimationPolicy.frameCount)
+                defer {
                     if sidebarChanged && animatesSidebar {
-                        sidebarItem?.animator().isCollapsed = !showsSidebar
+                        sidebarItem?.canCollapse = true
+                        sidebarItem?.minimumThickness = AtelierMetrics.workspaceSidebarMinWidth
+                    }
+                    if inspectorChanged && animatesInspector {
+                        inspectorItem?.canCollapse = true
+                        inspectorItem?.minimumThickness = AtelierMetrics.inspectorMinWidth
                     }
                 }
+
+                for frame in 1...WorkspaceSplitAnimationPolicy.frameCount {
+                    guard generation == updateGeneration else { return }
+                    let progress = CGFloat(frame)
+                        / CGFloat(WorkspaceSplitAnimationPolicy.frameCount)
+                    let easedProgress = 1 - pow(1 - progress, 3)
+
+                    if inspectorChanged && animatesInspector {
+                        let position = inspectorStart
+                            + (splitView.bounds.width - inspectorStart) * easedProgress
+                        splitView.setPosition(position, ofDividerAt: 1)
+                    }
+                    if sidebarChanged && animatesSidebar {
+                        splitView.setPosition(
+                            sidebarStart * (1 - easedProgress),
+                            ofDividerAt: 0
+                        )
+                    }
+
+                    if frame < WorkspaceSplitAnimationPolicy.frameCount {
+                        try? await Task.sleep(for: .seconds(frameInterval))
+                    }
+                }
+
+                guard generation == updateGeneration else { return }
+                if sidebarChanged && animatesSidebar {
+                    applySidebarState(isPresented: showsSidebar)
+                }
+                if inspectorChanged && animatesInspector {
+                    applyInspectorState(isPresented: showsInspector)
+                }
             }
+        }
+
+        private func applyPanelStateImmediately(
+            showsSidebar: Bool,
+            showsInspector: Bool,
+            sidebarChanged: Bool,
+            inspectorChanged: Bool
+        ) {
+            if sidebarChanged {
+                applySidebarState(isPresented: showsSidebar)
+            }
+            if inspectorChanged {
+                applyInspectorState(isPresented: showsInspector)
+            }
+        }
+
+        private func applySidebarState(isPresented: Bool) {
+            sidebarItem?.canCollapse = true
+            sidebarItem?.isCollapsed = !isPresented
+            sidebarItem?.minimumThickness = AtelierMetrics.workspaceSidebarMinWidth
+        }
+
+        private func applyInspectorState(isPresented: Bool) {
+            inspectorItem?.canCollapse = true
+            inspectorItem?.isCollapsed = !isPresented
+            inspectorItem?.minimumThickness = AtelierMetrics.inspectorMinWidth
         }
     }
 }

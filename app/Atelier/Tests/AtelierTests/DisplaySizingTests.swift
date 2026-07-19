@@ -144,13 +144,31 @@ struct DisplaySizingTests {
         #expect(standardFromWide.showsInspector)
         #expect(standardFromWide.togglingInspector(layout: .standard) == standard)
 
+        let inspectorOnly = WorkspacePanelPresentation(
+            showsSidebar: false,
+            showsInspector: true,
+            restoresSidebarAfterInspector: false
+        )
+        let hiddenFromWide = inspectorOnly.togglingAllPanels(layout: .wide)
+        #expect(hiddenFromWide == compact)
+        #expect(hiddenFromWide.togglingAllPanels(layout: .wide) == wide)
+
+        let hiddenFromStandard = inspectorOnly.togglingAllPanels(layout: .standard)
+        #expect(hiddenFromStandard == compact)
+        #expect(hiddenFromStandard.togglingAllPanels(layout: .standard) == standard)
+        #expect(compact.togglingAllPanels(layout: .compact) == compact)
+
         #expect(standard.adapting(from: .standard, to: .compact) == compact)
         #expect(compact.adapting(from: .compact, to: .wide) == wide)
     }
 
     @Test("Workspace split animation policy respects geometry and Reduce Motion")
     func workspaceSplitAnimationPolicy() {
-        #expect(WorkspaceSplitAnimationPolicy.panelDuration == 0.32)
+        #expect(WorkspaceSplitAnimationPolicy.panelDuration == 0.20)
+        #expect(WorkspaceSplitAnimationPolicy.panelRollDistance == 24)
+        #expect(WorkspaceSplitAnimationPolicy.frameCount == 12)
+        #expect(WorkspacePanelMotionEdge.leading.hiddenOffset == -24)
+        #expect(WorkspacePanelMotionEdge.trailing.hiddenOffset == 24)
         #expect(
             WorkspaceSplitAnimationPolicy.animates(
                 panelChanged: true,
@@ -200,6 +218,9 @@ struct DisplaySizingTests {
 
     @Test("Workspace side panels hold width ahead of the center pane")
     func workspaceSidePanelHoldingPriority() {
+        #expect(
+            WorkspaceSplitLayoutPolicy.panelCollapseBehavior == .useConstraints
+        )
         #expect(
             WorkspaceSplitLayoutPolicy.sidePanelHoldingPriority.rawValue
                 > NSLayoutConstraint.Priority.defaultLow.rawValue
