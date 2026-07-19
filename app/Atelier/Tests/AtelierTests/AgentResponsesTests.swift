@@ -448,15 +448,9 @@ struct AgentResponsesTests {
         #expect(AgentResponseNavigationPolicy.nextIndex(currentIndex: nil, count: 0) == nil)
     }
 
-    @Test("Agent sidecar preserves terminal width across breakpoints")
+    @Test("Agent sidecar overlay keeps a fixed width")
     func agentSidecarLayoutPolicy() {
-        #expect(AgentSidecarLayoutPolicy.collapsedWidth == 1)
-        #expect(AgentSidecarLayoutPolicy.presentation(containerWidth: 899) == .overlay)
-        #expect(AgentSidecarLayoutPolicy.presentation(containerWidth: 900) == .split)
-        #expect(AgentSidecarLayoutPolicy.width(containerWidth: 650) == 300)
-        #expect(AgentSidecarLayoutPolicy.width(containerWidth: 760) == 350)
-        #expect(AgentSidecarLayoutPolicy.width(containerWidth: 1_000) == 320)
-        #expect(AgentSidecarLayoutPolicy.width(containerWidth: 2_000) == 480)
+        #expect(AgentSidecarLayoutPolicy.width == 360)
     }
 
     @Test("Response model exposes loading state during refresh")

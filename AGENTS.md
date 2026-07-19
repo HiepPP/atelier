@@ -72,6 +72,7 @@ These rules come from a shipped crash: zooming the window crossed a width breakp
 
 - Never switch a long-lived `NSViewRepresentable` terminal, editor, web view, or Metal-backed surface in and out of the hierarchy when tab selection or adjacent panel visibility changes. Keep it mounted with stable identity and toggle allocated width, opacity, hit testing, and accessibility visibility.
 - Never collapse an `HSplitView` child to exactly zero or leave it structurally empty. Keep a positive placeholder width or use native split-item collapse, then verify every pane still renders.
+- A panel defined as an overlay must stay outside `HSplitView` and must not change the proposed size of its native content surface at any window width.
 - An inactive native tab must release first responder. Pass explicit active state through the representable and controller, then restore focus only after the active view is attached.
 - For a native tab-switch fix, run `native tab -> image or SwiftUI tab -> native tab` once at each relevant zoom and sidecar state. Repeat only when the bug is intermittent or the first pass fails.
 

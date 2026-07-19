@@ -92,6 +92,7 @@ Rules:
 | Workspace sidebar | 300 | 340 | 420 |
 | Center | 420 | 660 | Flexible |
 | Inspector | 220 | 260 | 320 |
+| Agent response overlay | 360 | 360 | 360 |
 | Explorer legacy range | 220 | 280 | 400 |
 | Source Control legacy range | 320 | 380 | 540 |
 
@@ -457,15 +458,15 @@ Persistence boundaries:
 - Keep editor word wrap as a per-file setting.
 - Promote a preview before the first edit is saved.
 - Preserve first responder across palette, zoom, inspector, and sidecar transitions.
-- Keep the terminal's structural parent stable while a sidecar opens or closes. Resize the existing sidecar slot instead of rebuilding the terminal container.
-- Keep a mounted native split slot at a positive collapsed width. An exact zero-width or empty `HSplitView` child is invalid for terminal presentation.
+- Keep the terminal's structural parent and proposed size stable while a sidecar opens or closes. Never reserve terminal width for agent responses.
 
 ### Gemma and Agent Responses
 
 - Use a readable transcript width capped at 680 points.
 - Keep user and assistant hierarchy clear without chat-bubble decoration everywhere.
 - Use cards for tool activity and structured results.
-- Present terminal responses as a sidecar controlled from the tab bar.
+- Present terminal responses as a trailing overlay sidecar at every window width. It never becomes a split peer or consumes terminal layout width.
+- Keep the response overlay fixed at 360 points. Sidebar and inspector visibility must not change its width.
 - Keep status, navigation, refresh, copy, and close actions keyboard accessible.
 
 ### Settings

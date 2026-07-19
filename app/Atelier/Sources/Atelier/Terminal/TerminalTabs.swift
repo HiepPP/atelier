@@ -2,11 +2,6 @@ import AppKit
 import Observation
 import SwiftUI
 
-nonisolated enum AgentSidecarPresentation: Equatable, Sendable {
-    case split
-    case overlay
-}
-
 nonisolated enum FileTabDisposition: Equatable, Sendable {
     case preview
     case permanent
@@ -34,20 +29,7 @@ nonisolated struct TerminalTabInspectorContext: Equatable, Sendable {
 }
 
 nonisolated enum AgentSidecarLayoutPolicy {
-    static let splitBreakpoint: CGFloat = 900
-    static let collapsedWidth: CGFloat = 1
-    static let minimumWidth: CGFloat = 300
-    static let maximumWidth: CGFloat = 480
-    static let minimumTerminalWidth: CGFloat = 480
-
-    static func presentation(containerWidth: CGFloat) -> AgentSidecarPresentation {
-        containerWidth >= splitBreakpoint ? .split : .overlay
-    }
-
-    static func width(containerWidth: CGFloat) -> CGFloat {
-        let ratio = presentation(containerWidth: containerWidth) == .split ? 0.32 : 0.46
-        return min(maximumWidth, max(minimumWidth, (containerWidth * ratio).rounded()))
-    }
+    static let width: CGFloat = 360
 }
 
 final class TerminalSession: Identifiable {
@@ -1036,55 +1018,17 @@ private struct TerminalAgentSidecar: View {
     @Environment(AtelierZoomModel.self) private var zoom
 
     var body: some View {
-        GeometryReader { geometry in
-            let presentation = AgentSidecarLayoutPolicy.presentation(
-                containerWidth: geometry.size.width
-            )
-            let sidecarWidth = AgentSidecarLayoutPolicy.width(
-                containerWidth: geometry.size.width
-            )
-
-            switch presentation {
-            case .split:
-                HSplitView {
-                    terminal
-                        .frame(minWidth: AgentSidecarLayoutPolicy.minimumTerminalWidth)
-                    ZStack {
-                        Color.clear
-                        if isPresented {
-                            sidecar
-                        }
-                    }
-                    .frame(
-                        minWidth: isPresented
-                            ? AgentSidecarLayoutPolicy.minimumWidth
-                            : AgentSidecarLayoutPolicy.collapsedWidth,
-                        idealWidth: isPresented
-                            ? sidecarWidth
-                            : AgentSidecarLayoutPolicy.collapsedWidth,
-                        maxWidth: isPresented
-                            ? AgentSidecarLayoutPolicy.maximumWidth
-                            : AgentSidecarLayoutPolicy.collapsedWidth
-                    )
-                    .opacity(isPresented ? 1 : 0)
-                    .allowsHitTesting(isPresented)
-                    .accessibilityHidden(!isPresented)
+        terminal
+            .overlay(alignment: .trailing) {
+                if isPresented {
+                    sidecar
+                        .frame(width: AgentSidecarLayoutPolicy.width)
+                        .atelierOverlayPanel(edge: .trailing)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
-                .atelierSplitViewChrome()
-            case .overlay:
-                terminal
-                    .overlay(alignment: .trailing) {
-                        if isPresented {
-                            sidecar
-                                .frame(width: sidecarWidth)
-                                .atelierOverlayPanel(edge: .trailing)
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
-                        }
-                    }
             }
-        }
-        .id(tabID)
-        .background(AtelierTheme.editor)
+            .id(tabID)
+            .background(AtelierTheme.editor)
     }
 
     private var terminal: some View {
