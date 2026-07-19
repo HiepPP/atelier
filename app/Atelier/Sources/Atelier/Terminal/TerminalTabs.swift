@@ -898,7 +898,9 @@ struct TerminalTabs: View {
             }
             .padding(.trailing, AtelierMetrics.spaceXS)
             .frame(height: AtelierMetrics.tabBarHeight)
-            .background(AtelierTheme.chrome)
+            .background {
+                AtelierChromeBackground()
+            }
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(AtelierTheme.border)

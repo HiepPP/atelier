@@ -337,6 +337,7 @@ struct WorkspaceView: View {
     let isActive: Bool
     @Environment(AppModel.self) private var app
     @Environment(AtelierZoomModel.self) private var zoom
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fileTreeCreationRequest: FileTreeCreationRequest?
     @State private var fileTreeTargetDirectory: URL?
     @State private var responderBeforeAgentPreview: NSResponder?
@@ -346,6 +347,7 @@ struct WorkspaceView: View {
     @State private var responderBeforeInspector: NSResponder?
     @State private var hasAppliedInitialLayout = false
     @State private var currentLayoutMode = WorkspaceLayoutMode.standard
+    @State private var isProjectMenuPresented = false
 
     var body: some View {
         GeometryReader { outerGeometry in
@@ -369,10 +371,21 @@ struct WorkspaceView: View {
                 applyInitialLayout(workspaceLayout)
             }
             .onChange(of: workspaceLayout) { oldLayout, newLayout in
-                adaptPanels(from: oldLayout, to: newLayout)
+                // Defer off the current layout pass. During a window zoom the
+                // GeometryReader width crosses a breakpoint mid-resize; mutating
+                // panel state synchronously re-enters AppKit's layout cycle and
+                // macOS traps in -[NSWindow _postWindowNeedsUpdateConstraints].
+                Task { @MainActor in
+                    adaptPanels(from: oldLayout, to: newLayout)
+                }
             }
             .onChange(of: zoom.isFocusMode) { _, isFocused in
                 updateFocusMode(isFocused)
+            }
+            .onChange(of: isActive) { _, isActive in
+                if !isActive {
+                    isProjectMenuPresented = false
+                }
             }
         }
     }
@@ -398,6 +411,8 @@ struct WorkspaceView: View {
                         idealWidth: AtelierMetrics.workspaceSidebarIdealWidth,
                         maxWidth: AtelierMetrics.workspaceSidebarMaxWidth
                     )
+                    .clipped()
+                    .transition(.move(edge: .leading).combined(with: .opacity))
             }
 
             workspaceDetail
@@ -452,7 +467,9 @@ struct WorkspaceView: View {
     private var workspaceToolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             Button {
-                panels = panels.togglingSidebar(layout: currentLayoutMode)
+                withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+                    panels = panels.togglingSidebar(layout: currentLayoutMode)
+                }
             } label: {
                 Image(systemName: "sidebar.leading")
             }
@@ -463,48 +480,37 @@ struct WorkspaceView: View {
         }
 
         ToolbarItem(placement: .principal) {
-            Menu {
-                Button("Open Folder...", systemImage: "folder") {
-                    AtelierActionRegistry.perform(.openFolder, model: app)
-                }
-                Button("Show in Finder", systemImage: "folder.badge.magnifyingglass") {
-                    NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
-                }
-                Button("Copy Project Path", systemImage: "doc.on.doc") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(state.path, forType: .string)
-                }
-                Divider()
-                Button("New Terminal", systemImage: "terminal") {
-                    AtelierActionRegistry.perform(.newTerminal, model: app)
-                }
-                Button("Open Gemma", systemImage: "sparkles") {
-                    session.openGemma()
-                }
-                Button("Close Workspace", systemImage: "xmark.rectangle", role: .destructive) {
-                    app.closeWorkspace(id: state.id)
-                }
-                Divider()
-                Button("Zoom In", systemImage: "plus.magnifyingglass") {
-                    app.windowController.maximizeWorkspaceWindow()
-                    zoom.zoomIn()
-                }
-                .disabled(!zoom.canZoomIn)
-                Button("Zoom Out", systemImage: "minus.magnifyingglass") {
-                    zoom.zoomOut()
-                }
-                .disabled(!zoom.canZoomOut)
-                Button("Actual Size", systemImage: "1.magnifyingglass") {
-                    zoom.reset()
+            Button {
+                withAnimation(reduceMotion ? nil : AtelierMotionTokens.selection) {
+                    isProjectMenuPresented.toggle()
                 }
             } label: {
                 ProjectMenuLabel(projectName: folderName)
+                    .frame(width: AtelierMetrics.projectMenuWidth)
+                    .atelierGlassControl(isSelected: isProjectMenuPresented)
             }
-            .menuStyle(.borderlessButton)
-            .frame(width: AtelierMetrics.projectMenuWidth)
+            .buttonStyle(.plain)
+            .contentShape(
+                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+            )
             .help("\(folderName)\n\(state.path)\nProject commands")
             .accessibilityLabel("Project commands for \(folderName)")
+            .accessibilityValue(isProjectMenuPresented ? "Open" : "Closed")
             .atelierPointerCursor()
+            .popover(
+                isPresented: $isProjectMenuPresented,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .top
+            ) {
+                ProjectCommandMenuView(
+                    session: session,
+                    workspaceURL: workspaceURL,
+                    onDismiss: { isProjectMenuPresented = false }
+                )
+                .frame(width: AtelierMetrics.projectMenuWidth)
+                .presentationCompactAdaptation(.popover)
+                .presentationBackground(.clear)
+            }
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
@@ -609,6 +615,10 @@ struct WorkspaceView: View {
                     .foregroundStyle(
                         selectedSidebarTab == tab ? Color.primary : Color.secondary
                     )
+                    .accessibilityValue(
+                        selectedSidebarTab == tab ? "Selected" : "Not selected"
+                    )
+                    .frame(maxWidth: .infinity)
                     .background(
                         selectedSidebarTab == tab
                             ? AtelierTheme.selection
@@ -621,57 +631,21 @@ struct WorkspaceView: View {
                                 .frame(height: 2)
                         }
                     }
-                    .accessibilityValue(selectedSidebarTab == tab ? "Selected" : "Not selected")
-                }
-
-                if selectedSidebarTab == .explorer {
-                    Button {
-                        fileTreeCreationRequest = FileTreeCreationRequest(
-                            kind: .file,
-                            parentURL: fileTreeTargetDirectory ?? workspaceURL
-                        )
-                    } label: {
-                        Image(systemName: "doc.badge.plus")
-                    }
-                    .buttonStyle(AtelierLuminareIconButtonStyle())
-                    .accessibilityLabel("New file")
-                    .help("New file")
-
-                    Button {
-                        fileTreeCreationRequest = FileTreeCreationRequest(
-                            kind: .folder,
-                            parentURL: fileTreeTargetDirectory ?? workspaceURL
-                        )
-                    } label: {
-                        Image(systemName: "folder.badge.plus")
-                    }
-                    .buttonStyle(AtelierLuminareIconButtonStyle())
-                    .accessibilityLabel("New folder")
-                    .help("New folder")
-                } else {
-                    Button {
-                        gitModel.refresh()
-                    } label: {
-                        if gitModel.isLoading {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    .buttonStyle(AtelierLuminareIconButtonStyle())
-                    .accessibilityLabel("Refresh Git status")
-                    .help("Refresh Git status")
                 }
             }
             .padding(.horizontal, AtelierMetrics.spaceS)
             .frame(height: AtelierMetrics.panelHeaderHeight)
-            .background(AtelierTheme.chrome)
+            .background {
+                AtelierChromeBackground()
+            }
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(AtelierTheme.border)
                     .frame(height: AtelierTheme.strokeHairline)
             }
             .environment(\.atelierZoomScale, zoom.sidebarScale)
+
+            sidebarBodyToolbar
 
             switch selectedSidebarTab {
             case .explorer:
@@ -685,6 +659,62 @@ struct WorkspaceView: View {
             }
         }
         .background(AtelierTheme.sidebar)
+    }
+
+    @ViewBuilder
+    private var sidebarBodyToolbar: some View {
+        HStack(spacing: 2) {
+            Spacer(minLength: 0)
+
+            switch selectedSidebarTab {
+            case .explorer:
+                Group {
+                    Button {
+                        fileTreeCreationRequest = FileTreeCreationRequest(
+                            kind: .file,
+                            parentURL: fileTreeTargetDirectory ?? workspaceURL
+                        )
+                    } label: {
+                        Image(systemName: "doc.badge.plus")
+                    }
+                    .accessibilityLabel("New file")
+                    .help("New file")
+
+                    Button {
+                        fileTreeCreationRequest = FileTreeCreationRequest(
+                            kind: .folder,
+                            parentURL: fileTreeTargetDirectory ?? workspaceURL
+                        )
+                    } label: {
+                        Image(systemName: "folder.badge.plus")
+                    }
+                    .accessibilityLabel("New folder")
+                    .help("New folder")
+                }
+                .buttonStyle(AtelierRowIconButtonStyle())
+            case .sourceControl:
+                Button {
+                    gitModel.refresh()
+                } label: {
+                    if gitModel.isLoading {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(AtelierRowIconButtonStyle())
+                .accessibilityLabel("Refresh Git status")
+                .help("Refresh Git status")
+            }
+        }
+        .padding(.horizontal, AtelierMetrics.spaceS)
+        .frame(height: AtelierMetrics.controlHeight)
+        .background(AtelierTheme.sidebar)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(AtelierTheme.border)
+                .frame(height: AtelierTheme.strokeHairline)
+        }
     }
 
     private var explorerContent: some View {
@@ -742,7 +772,9 @@ struct WorkspaceView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, AtelierMetrics.spaceM)
         .frame(height: AtelierMetrics.statusBarHeight)
-        .background(AtelierTheme.chrome)
+        .background {
+            AtelierChromeBackground()
+        }
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(AtelierTheme.border)
@@ -755,27 +787,196 @@ private struct ProjectMenuLabel: View {
     let projectName: String
 
     var body: some View {
-        HStack(spacing: AtelierMetrics.spaceS) {
-            Image(systemName: "folder")
-                .atelierFont(size: AtelierTypography.body, weight: .medium)
-                .foregroundStyle(.secondary)
+        Text(projectName)
+            .atelierFont(size: AtelierTypography.body, weight: .semibold)
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, AtelierMetrics.spaceM)
+            .frame(minHeight: AtelierMetrics.controlHeight)
+            .contentShape(
+                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+            )
+    }
+}
 
-            Text(projectName)
-                .atelierFont(size: AtelierTypography.body, weight: .semibold)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+private struct ProjectCommandMenuView: View {
+    let session: WorkspaceSession
+    let workspaceURL: URL
+    let onDismiss: () -> Void
 
-            Spacer(minLength: AtelierMetrics.spaceM)
+    @Environment(AppModel.self) private var app
+    @Environment(AtelierZoomModel.self) private var zoom
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isVisible = false
+    @State private var isClosing = false
 
-            Image(systemName: "chevron.down")
-                .atelierFont(size: AtelierTypography.micro, weight: .medium)
-                .foregroundStyle(.tertiary)
+    var body: some View {
+        VStack(spacing: 0) {
+            commandButton("Open Folder...", systemImage: "folder") {
+                AtelierActionRegistry.perform(.openFolder, model: app)
+            }
+            commandButton("Show in Finder", systemImage: "folder.badge.magnifyingglass") {
+                NSWorkspace.shared.activateFileViewerSelecting([workspaceURL])
+            }
+            commandButton("Copy Project Path", systemImage: "doc.on.doc") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(session.state.path, forType: .string)
+            }
+
+            commandDivider
+
+            commandButton("New Terminal", systemImage: "terminal") {
+                AtelierActionRegistry.perform(.newTerminal, model: app)
+            }
+            commandButton("Open Gemma", systemImage: "sparkles") {
+                session.openGemma()
+            }
+            commandButton(
+                "Close Workspace",
+                systemImage: "xmark.rectangle",
+                role: .destructive
+            ) {
+                app.closeWorkspace(id: session.state.id)
+            }
+
+            commandDivider
+
+            commandButton(
+                "Zoom In",
+                systemImage: "plus.magnifyingglass",
+                isEnabled: zoom.canZoomIn
+            ) {
+                app.windowController.maximizeWorkspaceWindow()
+                zoom.zoomIn()
+            }
+            commandButton(
+                "Zoom Out",
+                systemImage: "minus.magnifyingglass",
+                isEnabled: zoom.canZoomOut
+            ) {
+                zoom.zoomOut()
+            }
+            commandButton("Actual Size", systemImage: "1.magnifyingglass") {
+                zoom.reset()
+            }
         }
-        .padding(.horizontal, AtelierMetrics.spaceM)
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: AtelierMetrics.controlHeight)
-        .contentShape(Rectangle())
+        .padding(AtelierMetrics.spaceS)
+        .frame(width: AtelierMetrics.projectMenuWidth)
+        .background {
+            AtelierChromeBackground()
+        }
+        .clipShape(
+            RoundedRectangle(cornerRadius: AtelierTheme.panelRadius, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: AtelierTheme.panelRadius, style: .continuous)
+                .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
+        }
+        .shadow(color: AtelierTheme.shadowFloating, radius: 20, y: 10)
+        .opacity(isVisible ? 1 : 0)
+        .scaleEffect(isVisible ? 1 : 0.96, anchor: .top)
+        .blur(radius: isVisible ? 0 : 6)
+        .offset(y: isVisible ? 0 : -6)
+        .allowsHitTesting(!isClosing)
+        .onAppear {
+            if reduceMotion {
+                isVisible = true
+            } else {
+                withAnimation(AtelierMotionTokens.panel) {
+                    isVisible = true
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Project commands")
+    }
+
+    private var commandDivider: some View {
+        Divider()
+            .padding(.horizontal, AtelierMetrics.spaceS)
+            .padding(.vertical, AtelierMetrics.spaceXS)
+    }
+
+    private func commandButton(
+        _ title: String,
+        systemImage: String,
+        role: ButtonRole? = nil,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role) {
+            dismissThenPerform(action)
+        } label: {
+            HStack(spacing: AtelierMetrics.spaceM) {
+                Image(systemName: systemImage)
+                    .frame(width: AtelierMetrics.regularIconSize)
+                Text(title)
+                Spacer(minLength: AtelierMetrics.spaceM)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: AtelierMetrics.rowHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(ProjectCommandRowButtonStyle(isDestructive: role == .destructive))
+        .disabled(!isEnabled || isClosing)
+    }
+
+    private func dismissThenPerform(_ action: @escaping () -> Void) {
+        guard !isClosing else { return }
+        guard !reduceMotion else {
+            onDismiss()
+            action()
+            return
+        }
+
+        isClosing = true
+        withAnimation(.easeIn(duration: AtelierMotionTokens.quick)) {
+            isVisible = false
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(AtelierMotionTokens.quick))
+            onDismiss()
+            action()
+        }
+    }
+}
+
+private struct ProjectCommandRowButtonStyle: ButtonStyle {
+    let isDestructive: Bool
+
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .atelierFont(size: AtelierTypography.body, weight: .medium)
+            .foregroundStyle(isDestructive ? Color.red : Color.primary)
+            .padding(.horizontal, AtelierMetrics.spaceM)
+            .background {
+                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+                    .fill(AtelierTheme.controlFill(for: interactionState(configuration)))
+            }
+            .contentShape(
+                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+            )
+            .opacity(AtelierTheme.controlOpacity(for: interactionState(configuration)))
+            .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : 0.985)
+            .onHover { isHovering = $0 }
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: AtelierMotionTokens.quick),
+                value: isHovering
+            )
+            .atelierPointerCursor()
+    }
+
+    private func interactionState(_ configuration: Configuration) -> AtelierInteractionState {
+        if !isEnabled { return .disabled }
+        if configuration.isPressed { return .pressed }
+        if isHovering { return .hovered }
+        return .normal
     }
 }
 

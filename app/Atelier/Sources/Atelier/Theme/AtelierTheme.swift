@@ -29,6 +29,15 @@ enum AtelierTheme {
     static let gitDeleted = Color(nsColor: AppKitThemeAdapter.gitDeleted)
     static let gitUntracked = Color(nsColor: AppKitThemeAdapter.gitUntracked)
     static let selection = Color(nsColor: AppKitThemeAdapter.selection)
+    static let workspaceRailTop = Color(nsColor: AppKitThemeAdapter.workspaceRailTop)
+    static let workspaceRailBottom = Color(nsColor: AppKitThemeAdapter.workspaceRailBottom)
+    static let workspaceRailSolid = Color(nsColor: AppKitThemeAdapter.workspaceRailSolid)
+    static let workspaceRailForeground = Color(nsColor: AppKitThemeAdapter.workspaceRailForeground)
+    static let workspaceRailSecondary = Color(nsColor: AppKitThemeAdapter.workspaceRailSecondary)
+    static let workspaceRailSelection = Color(nsColor: AppKitThemeAdapter.workspaceRailSelection)
+    static let workspaceRailHover = Color(nsColor: AppKitThemeAdapter.workspaceRailHover)
+    static let workspaceRailPressed = Color(nsColor: AppKitThemeAdapter.workspaceRailPressed)
+    static let workspaceRailBorder = Color(nsColor: AppKitThemeAdapter.workspaceRailBorder)
     static let danger = gitDeleted
     static let panelRadius: CGFloat = 12
     static let controlRadius: CGFloat = 8
@@ -69,6 +78,19 @@ enum AtelierTheme {
             accent.opacity(0.72)
         case .normal, .hovered, .pressed, .disabled:
             border
+        }
+    }
+
+    static func workspaceRailControlFill(for state: AtelierInteractionState) -> Color {
+        switch state {
+        case .normal, .disabled:
+            Color.clear
+        case .hovered:
+            workspaceRailHover
+        case .pressed:
+            workspaceRailPressed
+        case .selected, .focused:
+            workspaceRailSelection
         }
     }
 

@@ -148,7 +148,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             ?? makeCell(identifier: identifier)
         cell.textField?.stringValue = node.name
         cell.textField?.font = font
-        cell.textField?.textColor = AppKitThemeAdapter.foreground
+        cell.textField?.textColor = AppKitThemeAdapter.fileTreeForeground
         cell.imageView?.image = icon(for: node)
         cell.imageView?.contentTintColor = iconColor(for: node)
         cell.setSymbolicLink(node.isSymbolicLink)
@@ -410,6 +410,12 @@ private final class FileTreeCellView: NSTableCellView {
         nil
     }
 
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet {
+            textField?.textColor = AppKitThemeAdapter.fileTreeForeground
+        }
+    }
+
     func setSymbolicLink(_ isSymbolicLink: Bool) {
         symbolicLinkBadge.isHidden = !isSymbolicLink
         badgeSpacingConstraint.constant = isSymbolicLink ? AtelierMetrics.spaceXS : 0
@@ -482,6 +488,17 @@ private final class FileTreeRowView: NSTableRowView {
         guard selectionHighlightStyle != .none else { return }
         AppKitThemeAdapter.selection.setFill()
         rowShape.fill()
+        AppKitThemeAdapter.accent.setFill()
+        NSBezierPath(
+            roundedRect: NSRect(
+                x: bounds.minX + AtelierMetrics.spaceXS,
+                y: bounds.minY + 4,
+                width: 2,
+                height: bounds.height - 8
+            ),
+            xRadius: 1,
+            yRadius: 1
+        ).fill()
     }
 
     private var rowShape: NSBezierPath {

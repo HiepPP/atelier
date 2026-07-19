@@ -54,6 +54,27 @@ Use four-space indentation and standard Swift API naming. Types use `UpperCamelC
 
 Use `rg` for repository search. Do not add or use GitNexus metadata in this repository.
 
+## SwiftUI and AppKit Crash Rules
+
+These rules come from a shipped crash: zooming the window crossed a width breakpoint mid-resize, `.onChange` mutated panel `@State` during AppKit's layout pass, and macOS trapped in `-[NSWindow _postWindowNeedsUpdateConstraints]`. `swift build` and `swift test` cannot catch this class of runtime Cocoa exception. Follow these rules to prevent it.
+
+### Layout Reentrancy
+
+- Never mutate `@State`, `@Observable`, or model state synchronously from a layout-derived value (`GeometryReader` size, `.onChange` of a size, `onGeometryChange`). Defer the mutation with `Task { @MainActor in ... }` so it runs on the next runloop, off the current layout pass.
+- Do not add or remove structural views such as `HSplitView` children in response to a width breakpoint. Keep panes mounted and toggle visibility with `frame`, `opacity`, or `ViewThatFits`.
+- Keep all UI mutation on `MainActor`. Keep Swift 6 strict concurrency and `defaultIsolation(MainActor)` enabled.
+
+### No Runtime Traps in UI
+
+- Ban `!` force unwrap, `try!`, `as!`, unchecked subscript, `fatalError`, and `precondition` on any view or controller path. These raise `EXC_BREAKPOINT`. Use `guard let`, `if let`, and safe access instead.
+- Keep AppKit customization defensive and idempotent, matching existing patterns.
+
+### Verify and Test Against the Real Trigger
+
+- A crash fix is not done until you drive the exact trigger (for example window zoom at a narrow and a wide size) and confirm no crash and no new report in `~/Library/Logs/DiagnosticReports/`.
+- When investigating a crash, read the full `.ips` report, including `asiBacktraces`, not only the exception summary.
+- Pure breakpoint policy needs a matching UI smoke that drives resize and zoom across each breakpoint. Unit tests on the policy alone do not cover the layout-pass wiring.
+
 ## Testing Guidelines
 
 Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swift` for packaged binary checks. Every change must pass build, tests, and self-test. UI changes also require native checks at narrow and wide window sizes. Record exact failures and screenshots when relevant.

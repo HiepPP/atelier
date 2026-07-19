@@ -6,7 +6,7 @@
 |---|---|
 | Status | Current implementation baseline |
 | Updated | 2026-07-19 |
-| Baseline commit | `72fcd61` |
+| Baseline commit | `02ebe5b` |
 | Platform | macOS 26+ |
 | UI stack | SwiftUI, AppKit, Luminare |
 
@@ -14,13 +14,14 @@ This file records and governs the current Atelier design. Update this contract b
 
 ## Product Character
 
-Atelier is a native macOS workspace tool. It should feel focused, dense, warm, and calm.
+Atelier is a native macOS workspace tool. It should feel focused, dense, calm, and expensive.
 
 - Use native macOS structure, behavior, menus, focus, and keyboard input.
 - Keep the center editor as the main visual surface.
-- Use a warm neutral palette with one terracotta accent.
+- Use an executive-alloy hierarchy: smoked graphite navigation, titanium chrome, porcelain work surfaces, and one terracotta accent.
 - Use compact controls and clear hierarchy instead of decorative chrome.
 - Show state through fill, weight, opacity, and thin rules.
+- Keep the editor matte. Reserve glass and the signature gradient for navigation and compact chrome.
 - Keep motion short and useful. Never block work with animation.
 - Preserve text clarity at every display scale.
 
@@ -113,19 +114,29 @@ All palette colors are dynamic `sRGB` colors. Foreground text uses native label 
 
 | Token | Light | Dark | Role |
 |---|---|---|---|
-| `chrome` | `#F1EDE5` | `#23211F` | Toolbar, headers, status, tab strip |
-| `canvas` | `#F6F2EA` | `#191816` | Window and empty-state background |
-| `sidebar` | `#ECE7DE` | `#211F1C` | Explorer and Git sidebar |
-| `panel` | `#FCFAF5` | `#292622` | Cards and panel content |
-| `raised` | `#E2DCD1` | `#332F2A` | Raised controls and palette body |
-| `editor` | `#FBFAF7` | `#1A1917` | Editor, code, and terminal base |
-| `tabInactive` | `#ECE7DE` | `#24211E` | Inactive tabs |
-| `border` | `#CDC5B8` | `#403B35` | Dividers and control outlines |
-| `selection` | `#E8D4C2` | `#4C352A` | Selected rows and tabs |
-| `hover` | `#E2DCD1` | `#37322D` | Hover state |
-| `pressed` | `#D8D0C3` | `#423B34` | Pressed state |
-| `accent` | `#935A3D` | `#D39A72` | Primary emphasis and focus |
+| `chrome` | `#E7E3DD` | `#23262A` | Titanium toolbar, headers, status, tab strip |
+| `canvas` | `#DEDAD3` | `#181A1D` | Window and empty-state background |
+| `sidebar` | `#E1DED8` | `#202328` | Explorer and Git sidebar |
+| `panel` | `#F2F0EC` | `#292C30` | Pearl inspector, cards, and panel content |
+| `raised` | `#D4D0C9` | `#34383D` | Raised controls and palette body |
+| `editor` | `#F8F7F4` | `#191B1E` | Matte porcelain editor, code, and terminal base |
+| `tabInactive` | `#E5E1DB` | `#25282C` | Inactive tabs |
+| `border` | `#BFBAB2` | `#42474D` | Dividers and control outlines |
+| `selection` | `#DED1C6` | `#4B3730` | Selected rows and tabs |
+| `hover` | `#D8D4CD` | `#383C41` | Hover state |
+| `pressed` | `#CCC7BF` | `#44494F` | Pressed state |
+| `accent` | `#A44F32` | `#D79570` | Primary emphasis and focus |
 | `accentInk` | `#FFF9F2` | `#21150F` | Text on accent fill |
+| `workspaceRailTop` | `#1D232B` | `#171C22` | Upper graphite rail gradient stop |
+| `workspaceRailBottom` | `#2D3B45` | `#202D35` | Lower petrol rail gradient stop |
+| `workspaceRailSolid` | `#252D35` | `#1D252C` | Reduce Transparency rail fallback |
+| `workspaceRailForeground` | `#F3F1EC` | `#F3F1EC` | Primary text and icons on the rail |
+| `workspaceRailSecondary` | `#B6BEC3` | `#ADB7BD` | Rail metadata and inactive icons |
+| `workspaceRailSelection` | `#3B444C` | `#343E46` | Active rail row fill |
+| `workspaceRailHover` | `#333C44` | `#2D373F` | Rail hover fill |
+| `workspaceRailPressed` | `#46515A` | `#404B54` | Rail pressed fill |
+| `workspaceRailBorder` | `#59636B` | `#4C575F` | Rail edge and focused control outline |
+| `fileTreeForeground` | `#302E2B` | `#E8E4DE` | Stable Explorer label color, including selection |
 | `gitAdded` | `#356B43` | `#7FC58C` | Additions and success |
 | `gitModified` | `#8A5B21` | `#D4A45D` | Modified state |
 | `gitDeleted` | `#A13E37` | `#E17B70` | Deletions, danger, destructive state |
@@ -136,6 +147,7 @@ Color rules:
 - Reserve accent for selection, focus, primary action, and active indicators.
 - Reserve Git colors for file and diff meaning.
 - Use native primary and secondary labels for normal text.
+- Use dedicated rail foreground tokens because the rail remains dark in both appearances.
 - Do not create feature-local colors when an existing semantic token fits.
 - Use one active accent per surface. Avoid competing highlights.
 
@@ -173,7 +185,9 @@ Depth rules:
 - Use `shadowSoft` only for raised local content.
 - Use `shadowFloating` for modal overlays such as the palette.
 - Use the `0.12` black scrim behind blocking overlays.
-- Do not add gradients except for small empty-state illustrations.
+- Allow one signature gradient on the workspace rail and a restrained directional sheen on shared chrome.
+- Keep editor, terminal, Explorer, Git, and inspector content matte and gradient-free.
+- Do not add broad glow, deep drop shadows, or decorative glass layers.
 
 ## Typography
 
@@ -226,7 +240,7 @@ Rules:
 | `quick` | 0.12s | Hover and press feedback |
 | `standard` | 0.20s | Normal transitions |
 | `deliberate` | 0.32s | Larger state changes |
-| `panel` | Spring 0.30 / 0.88 | Panel movement |
+| `panel` | Smooth 0.32 / no bounce | Panel movement |
 | `selection` | Spring 0.24 / 0.86 | Selection movement |
 
 Motion rules:
@@ -294,9 +308,12 @@ Every interactive control must define these states where relevant:
 - Show the active project name in the menu and expose the full path as help text.
 - Give the project menu a 420-point command-center width in the principal toolbar position.
 - Keep the project identity centered, readable, and middle-truncated inside the full-width hit target.
-- Preserve the existing project command menu. The wider label must not imply search or palette behavior.
+- Keep the project command trigger text-only. Do not show a folder or disclosure icon.
+- Preserve every existing project command in a 420-point popover that matches the trigger width.
 - Clicking any part of the project menu opens the existing project commands menu.
-- Use a quiet native label. Do not add a tinted icon tile, nested pill, gradient, glow, or heavy shadow.
+- Show the pointing-hand cursor across the full 420-point trigger.
+- Animate popover presentation with restrained opacity, scale, blur, and vertical movement. Use native dismissal animation and disable decorative motion under Reduce Motion.
+- Use a quiet native label inside the system toolbar material. Do not add a tinted icon tile, nested pill, glow, or heavy shadow.
 - Put Gemma, focus mode, and inspector in primary actions.
 - Keep branch, focus state, and zoom in the 26-point status bar.
 - Use thin dividers between sidebar, center, inspector, and status bar.
@@ -316,9 +333,11 @@ Every interactive control must define these states where relevant:
 - Mark the active workspace with label weight, restrained selection fill, a checkmark, and a 2-point leading accent rule.
 - Show loading, unavailable, and error accessories without replacing project identity.
 - Show the full path in help and accessibility text.
-- Use semantic hover, pressed, focused, selected, and disabled fills from existing interaction-state primitives.
+- Use rail-specific hover, pressed, focused, selected, and disabled fills so contrast stays stable.
 - Keep optional motion limited to quick opacity and scale feedback. Disable it under Reduce Motion.
-- Use the sidebar surface color and existing border token. Do not add glow, gradients, heavy shadows, pills, or dock magnification.
+- Keep the rail dark in light and dark appearance. Use the graphite-to-petrol gradient as its only signature depth effect.
+- Use `workspaceRailSolid` when Reduce Transparency is enabled.
+- Use a faint top-edge sheen and one trailing hairline. Do not add glow, heavy shadows, pills, or dock magnification.
 
 Workspace item states:
 
@@ -351,10 +370,17 @@ Persistence boundaries:
 
 ### Sidebar
 
+- Use the warm titanium sidebar token. Keep its content matte and slightly darker than the editor.
+- Use the chrome sheen only on the 40-point sidebar header.
 - Explorer and Git share one sidebar slot.
+- Keep the sidebar header visually limited to the Explorer and Git tabs. Do not place actions inside or after the tabs.
+- Put a compact contextual toolbar at the top of the selected tab body, directly below the tab bar.
+- Right-align New File and New Folder in the Explorer toolbar. Right-align Refresh in the Git toolbar.
+- Render only the selected body's actions. Keep the tab label, count, selection target, help, and accessibility text intact.
 - The selected sidebar tab uses selection fill and a 2-point accent underline.
 - Show the Git change count as a semantic badge.
-- Keep file creation and refresh actions in the 40-point sidebar header.
+- Keep body toolbar actions at 24 points, with quiet hover and pressed fills.
+- Keep selected file labels in the primary text color. Use selection fill, a thin accent edge, and no inverted text.
 - Vertically center the disclosure, icon, and label within every file-tree row.
 - Keep the base file or folder icon and add an `arrow.turn.up.right` badge after symlink names.
 - Do not expand directory symlinks from Explorer.
@@ -364,6 +390,7 @@ Persistence boundaries:
 
 ### Center Tabs
 
+- Use titanium chrome for the strip and porcelain for the selected editor surface.
 - Keep Back and Forward visible before the horizontal tab scroller.
 - Keep tab widths between 112 and 220 points, with 152 ideal.
 - Mark selection with primary text and a 2-point accent top rule.
@@ -396,6 +423,8 @@ Persistence boundaries:
 
 ### Editor and Terminal
 
+- Keep the center work surface the brightest large region. It must remain matte, quiet, and highly legible.
+- Keep code gutters and terminal backgrounds aligned with the editor token.
 - Use the editor surface color for source, diff, and terminal content.
 - Use native AppKit text and terminal views through narrow representable bridges.
 - Keep editor word wrap as a per-file setting.
@@ -463,7 +492,8 @@ Rules:
 - Keep AppKit customization defensive and idempotent.
 - Keep view modifiers small and named by visual contract.
 - Do not add a component for one local use.
-- Do not add gradients, heavy shadows, or large rounded cards to dense workspace surfaces.
+- Do not add gradients beyond the rail, shared chrome sheen, and existing small empty-state illustrations.
+- Do not add heavy shadows or large rounded cards to dense workspace surfaces.
 - Do not use web dashboard patterns, oversized hero copy, or floating card grids.
 - Do not change panel visibility in several async steps.
 - Do not restore an AppKit responder from another window.

@@ -162,7 +162,17 @@ nonisolated enum AtelierActionRegistry {
     ]
 
     static func descriptor(for id: AtelierActionID) -> AtelierActionDescriptor {
-        actions.first { $0.id == id }!
+        guard let descriptor = actions.first(where: { $0.id == id }) else {
+            assertionFailure("No descriptor registered for \(id.rawValue)")
+            return AtelierActionDescriptor(
+                id: id,
+                title: id.rawValue,
+                category: "",
+                systemImage: "questionmark",
+                shortcutLabel: nil
+            )
+        }
+        return descriptor
     }
 
     static func title(for id: AtelierActionID, context: AtelierActionContext) -> String {

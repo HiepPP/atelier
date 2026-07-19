@@ -6,7 +6,7 @@ enum AtelierMotionTokens {
     static let standard = 0.20
     static let deliberate = 0.32
 
-    static let panel = Animation.spring(response: 0.30, dampingFraction: 0.88)
+    static let panel = Animation.smooth(duration: 0.32, extraBounce: 0)
     static let selection = Animation.spring(response: 0.24, dampingFraction: 0.86)
 }
 

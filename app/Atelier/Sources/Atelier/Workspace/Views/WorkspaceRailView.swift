@@ -74,11 +74,11 @@ struct WorkspaceRailView: View {
             HStack {
                 Text("Workspaces")
                     .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AtelierTheme.workspaceRailSecondary)
                 Spacer()
                 Text(app.workspaceItems.count.formatted())
                     .atelierFont(size: AtelierTypography.caption, design: .monospaced)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(AtelierTheme.workspaceRailSecondary.opacity(0.76))
             }
             .padding(.horizontal, AtelierMetrics.spaceM)
             .frame(height: AtelierMetrics.sectionHeaderHeight)
@@ -94,7 +94,9 @@ struct WorkspaceRailView: View {
             }
             .scrollIndicators(.hidden)
 
-            Divider()
+            Rectangle()
+                .fill(AtelierTheme.workspaceRailBorder.opacity(0.72))
+                .frame(height: AtelierTheme.strokeHairline)
 
             WorkspaceRailAddButton {
                 AtelierActionRegistry.perform(.openFolder, model: app)
@@ -102,10 +104,18 @@ struct WorkspaceRailView: View {
             .padding(AtelierMetrics.spaceS)
         }
         .frame(width: AtelierMetrics.workspaceRailWidth)
-        .background(AtelierTheme.sidebar)
+        .background {
+            AtelierWorkspaceRailBackground()
+        }
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Color.white.opacity(0.09))
+                .frame(height: AtelierTheme.strokeHairline)
+                .accessibilityHidden(true)
+        }
         .overlay(alignment: .trailing) {
             Rectangle()
-                .fill(AtelierTheme.border)
+                .fill(AtelierTheme.workspaceRailBorder)
                 .frame(width: AtelierTheme.strokeHairline)
         }
         .accessibilityElement(children: .contain)
@@ -134,6 +144,7 @@ private struct WorkspaceRailAddButton: View {
             .frame(height: AtelierMetrics.rowHeight)
             .contentShape(Rectangle())
         }
+        .foregroundStyle(AtelierTheme.workspaceRailForeground)
         .buttonStyle(
             WorkspaceRailItemButtonStyle(
                 isSelected: false,
@@ -168,7 +179,7 @@ private struct WorkspaceRailItemButton: View {
             HStack(spacing: AtelierMetrics.spaceM) {
                 Image(systemName: "folder")
                     .atelierFont(size: AtelierTypography.body, weight: .medium)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(AtelierTheme.workspaceRailSecondary)
                     .frame(width: AtelierMetrics.regularIconSize)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -177,13 +188,17 @@ private struct WorkspaceRailItemButton: View {
                             size: AtelierTypography.body,
                             weight: isSelected ? .semibold : .regular
                         )
-                        .foregroundStyle(isLoading ? .secondary : .primary)
+                        .foregroundStyle(
+                            isLoading
+                                ? AtelierTheme.workspaceRailSecondary
+                                : AtelierTheme.workspaceRailForeground
+                        )
                         .lineLimit(1)
                         .truncationMode(.middle)
 
                     Text(parentPath)
                         .atelierFont(size: AtelierTypography.caption, design: .monospaced)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(AtelierTheme.workspaceRailSecondary)
                         .lineLimit(1)
                         .truncationMode(.head)
                 }
@@ -271,10 +286,11 @@ private struct WorkspaceRailItemButton: View {
         case .loading:
             ProgressView()
                 .controlSize(.mini)
+                .tint(AtelierTheme.workspaceRailSecondary)
                 .accessibilityHidden(true)
         case .unavailable:
             Image(systemName: "questionmark.folder")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(AtelierTheme.workspaceRailSecondary)
                 .accessibilityHidden(true)
         case .error:
             Image(systemName: "exclamationmark.triangle")
@@ -351,7 +367,7 @@ private struct WorkspaceRailItemButtonStyle: ButtonStyle {
         }
 
         configuration.label
-            .background(AtelierTheme.controlFill(for: interactionState))
+            .background(AtelierTheme.workspaceRailControlFill(for: interactionState))
             .clipShape(
                 RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
             )
@@ -365,7 +381,10 @@ private struct WorkspaceRailItemButtonStyle: ButtonStyle {
             .overlay {
                 if isFocused || isDropTargeted {
                     RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
-                        .stroke(AtelierTheme.accent, lineWidth: AtelierTheme.strokeFocus)
+                        .stroke(
+                            isDropTargeted ? AtelierTheme.accent : AtelierTheme.workspaceRailBorder,
+                            lineWidth: AtelierTheme.strokeFocus
+                        )
                 }
             }
             .opacity(AtelierTheme.controlOpacity(for: interactionState))

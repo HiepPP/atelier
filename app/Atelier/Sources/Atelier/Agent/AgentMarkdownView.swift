@@ -339,7 +339,11 @@ struct MermaidResponseCard: View {
                 Color.clear
                     .onAppear { containerWidth = max(1, geometry.size.width) }
                     .onChange(of: geometry.size.width) { _, width in
-                        containerWidth = max(1, width)
+                        // Defer off the layout pass: mutating state synchronously here
+                        // re-enters AppKit layout and can trap during window zoom.
+                        Task { @MainActor in
+                            containerWidth = max(1, width)
+                        }
                     }
             }
         }

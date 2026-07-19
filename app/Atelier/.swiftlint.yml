@@ -1,0 +1,38 @@
+# SwiftLint config for Atelier.
+# Scope is intentionally narrow: the crash-prevention rules from
+# CLAUDE.md > "SwiftUI and AppKit Crash Rules". This is not a full style pass.
+# force_* rules are errors and fail the build. Custom layout rules warn.
+
+# force_* gate targets production code. Test force-unwraps are acceptable.
+included:
+  - Sources
+
+excluded:
+  - .build
+
+only_rules:
+  - force_unwrapping
+  - force_try
+  - force_cast
+  - custom_rules
+
+force_unwrapping:
+  severity: error
+
+force_try:
+  severity: error
+
+force_cast:
+  severity: error
+
+custom_rules:
+  onchange_size_state_mutation:
+    name: "State mutation in onChange(size)"
+    message: "Mutating state synchronously in .onChange of a size/width/layout value re-enters AppKit layout and can crash on window zoom. Defer with Task { @MainActor in ... }. See CLAUDE.md > SwiftUI and AppKit Crash Rules."
+    regex: 'onChange\(of:[^)]*(?:[wW]idth|[sS]ize|[gG]eometry|[lL]ayout)[^)]*\)\s*\{(?:(?!Task\s*\{|DispatchQueue|\})[\s\S])*?(?<!let )(?<!var )[A-Za-z_][\w.\[\]]*\s*=\s*[^=]'
+    severity: warning
+  geometry_reader_state_mutation:
+    name: "State mutation in GeometryReader"
+    message: "Do not mutate state synchronously inside a GeometryReader closure; it runs during layout. Defer with Task { @MainActor in ... }. See CLAUDE.md > SwiftUI and AppKit Crash Rules."
+    regex: 'GeometryReader\s*\{(?:(?!Task\s*\{|DispatchQueue|\})[\s\S])*?(?<!let )(?<!var )self\.[A-Za-z_][\w.\[\]]*\s*=\s*[^=]'
+    severity: warning

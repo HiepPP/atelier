@@ -47,6 +47,46 @@ extension View {
     }
 }
 
+struct AtelierChromeBackground: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        ZStack {
+            AtelierTheme.chrome
+            if !reduceTransparency {
+                LinearGradient(
+                    colors: [Color.white.opacity(0.20), Color.white.opacity(0.03), Color.clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+    }
+}
+
+struct AtelierWorkspaceRailBackground: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        ZStack {
+            if reduceTransparency {
+                AtelierTheme.workspaceRailSolid
+            } else {
+                LinearGradient(
+                    colors: [AtelierTheme.workspaceRailTop, AtelierTheme.workspaceRailBottom],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                LinearGradient(
+                    colors: [Color.white.opacity(0.07), Color.clear, Color.black.opacity(0.10)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+    }
+}
+
 /// Standard panel header: icon, title, optional mono subtitle, trailing controls.
 /// One height, one background, one hairline for every panel in the app.
 struct AtelierPanelHeader<Trailing: View>: View {
@@ -100,7 +140,9 @@ struct AtelierPanelHeader<Trailing: View>: View {
         }
         .padding(.horizontal, AtelierMetrics.spaceM)
         .frame(height: AtelierMetrics.panelHeaderHeight)
-        .background(AtelierTheme.chrome)
+        .background {
+            AtelierChromeBackground()
+        }
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(Color.white.opacity(0.28))

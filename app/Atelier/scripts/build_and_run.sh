@@ -71,6 +71,22 @@ sign_app_bundle() {
   codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 }
 
+run_swiftlint() {
+  if [[ "${ATELIER_SKIP_LINT:-0}" == "1" ]]; then
+    echo "SwiftLint skipped (ATELIER_SKIP_LINT=1)."
+    return
+  fi
+  if ! command -v swiftlint >/dev/null 2>&1; then
+    echo "SwiftLint not installed. Install with: brew install swiftlint" >&2
+    echo "Bypass with ATELIER_SKIP_LINT=1 (not recommended)." >&2
+    exit 1
+  fi
+  echo "Running SwiftLint gate..."
+  ( cd "$ROOT_DIR" && swiftlint lint --config "$ROOT_DIR/.swiftlint.yml" --quiet )
+}
+
+run_swiftlint
+
 swift build --package-path "$ROOT_DIR" -c "$CONFIGURATION"
 BUILD_DIR="$(swift build --package-path "$ROOT_DIR" -c "$CONFIGURATION" --show-bin-path)"
 BUILD_BINARY="$BUILD_DIR/$APP_NAME"

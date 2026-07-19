@@ -123,8 +123,8 @@ final class WindowController {
     private func configure(_ window: NSWindow) {
         window.backgroundColor = AppKitThemeAdapter.chrome
         window.titleVisibility = .visible
-        window.titlebarAppearsTransparent = false
-        window.titlebarSeparatorStyle = .automatic
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .line
         AppLogger.window.debug("Configured workspace window")
     }
 }
