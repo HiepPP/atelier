@@ -68,6 +68,12 @@ These rules come from a shipped crash: zooming the window crossed a width breakp
 - Do not add or remove structural views such as `HSplitView` children in response to a width breakpoint. Keep panes mounted and toggle visibility with `frame`, `opacity`, or `ViewThatFits`.
 - Keep all UI mutation on `MainActor`. Keep Swift 6 strict concurrency and `defaultIsolation(MainActor)` enabled.
 
+### Persistent AppKit Tab Content
+
+- Never switch a long-lived `NSViewRepresentable` terminal, editor, web view, or Metal-backed surface in and out of the hierarchy when tab selection or adjacent panel visibility changes. Keep it mounted with stable identity and toggle allocated width, opacity, hit testing, and accessibility visibility.
+- An inactive native tab must release first responder. Pass explicit active state through the representable and controller, then restore focus only after the active view is attached.
+- For a native tab-switch fix, run `native tab -> image or SwiftUI tab -> native tab` once at each relevant zoom and sidecar state. Repeat only when the bug is intermittent or the first pass fails.
+
 ### No Runtime Traps in UI
 
 - Ban `!` force unwrap, `try!`, `as!`, unchecked subscript, `fatalError`, and `precondition` on any view or controller path. These raise `EXC_BREAKPOINT`. Use `guard let`, `if let`, and safe access instead.
@@ -89,7 +95,7 @@ Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swi
 - Define the exact UI states and evidence needed before starting automation. Stop when those acceptance points are covered.
 - Confirm the target app, process, and window before every automated UI input. If another app becomes active, stop immediately and return to the target without interacting with the other app.
 - Use one controlled capture path for visual proof. After one capture method fails, switch methods once or report the limitation instead of retrying indefinitely.
-- Timebox flaky UI automation. Do not turn a small change into an open-ended test session.
+- Timebox UI automation. Run each acceptance path once by default, stop when evidence is sufficient, and repeat only for intermittent behavior or a failed pass.
 - Do not repeat builds, tests, self-tests, or launch scripts unless code changed or the prior result was incomplete.
 - Separate product failures from automation, environment, window-focus, and capture failures in the final report.
 - Prefer read-only system checks. Change accessibility or system settings only when required, then restore the original value.

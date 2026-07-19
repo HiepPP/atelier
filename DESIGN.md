@@ -100,7 +100,7 @@ Rules:
 | Token | Value | Use |
 |---|---:|---|
 | `panelHeaderHeight` | 40 | Panel and diff headers |
-| `sectionHeaderHeight` | 36 | Sidebar tabs and section headers |
+| `sectionHeaderHeight` | 36 | Section headers below panel chrome |
 | `tabBarHeight` | 34 | Center tab strip |
 | `statusBarHeight` | 26 | Bottom workspace status |
 | `fieldHeight` | 32 | Search and text fields |
@@ -251,7 +251,8 @@ Motion rules:
 
 - Disable optional motion when Reduce Motion is enabled.
 - Use a short shine after refresh, shake for Git error, and small jump for a new terminal.
-- Keep tab selection responsive with a short damped spring.
+- Keep tab selection responsive through fill or indicator changes inside fixed bounds.
+- Never animate or transform the outer geometry of sidebar tabs.
 - Never animate loading in a way that changes layout size.
 
 ## Component Rules
@@ -286,10 +287,16 @@ Every interactive control must define these states where relevant:
 
 - Normal: clear fill and normal opacity.
 - Hovered: semantic hover fill.
-- Pressed: stronger pressed fill and a small scale change when motion is allowed.
+- Pressed: stronger pressed fill. Scale only isolated compact controls when motion is allowed.
 - Selected: selection fill or accent indicator.
 - Focused: accent-tinted fill and 1.5-point focus ring.
 - Disabled: visible control with `0.45` opacity.
+
+Interaction geometry rules:
+
+- Tabs, full-width rows, segmented cells, and header controls keep identical outer bounds in every state.
+- Hover, press, selection, focus, badges, and count changes never alter frame, padding, alignment, or baseline.
+- Use scale feedback only for isolated controls with visible space around every edge.
 
 ### Pointer Cursor
 
@@ -386,11 +393,18 @@ Persistence boundaries:
 - Use the chrome sheen only on the 40-point sidebar header.
 - Explorer and Git share one sidebar slot.
 - Keep the sidebar header visually limited to the Explorer and Git tabs. Do not place actions inside or after the tabs.
+- Make every sidebar tab cell occupy the full 40-point `panelHeaderHeight` envelope.
+- Make the Explorer and Git tab strip span the full sidebar width edge-to-edge.
+- Use zero outer horizontal padding and zero spacing between sidebar tab cells.
+- Let adjacent tab fills meet directly. Use an overlay hairline when separation is required, never layout spacing.
 - Put a compact contextual toolbar at the top of the selected tab body, directly below the tab bar.
 - Right-align New File and New Folder in the Explorer toolbar. Right-align Refresh in the Git toolbar.
 - Render only the selected body's actions. Keep the tab label, count, selection target, help, and accessibility text intact.
-- The selected sidebar tab uses selection fill and a 2-point accent underline.
-- Show the Git change count as a semantic badge.
+- Align every sidebar tab fill and hit target to all four edges of the header envelope.
+- Pin the 2-point accent underline to the bottom edge with no inset or exposed header fill.
+- Use one native label line box so each tab icon and title share a baseline.
+- Show the Git change count as a trailing semantic badge that never shifts the centered label.
+- Keep sidebar tab geometry stable across normal, hovered, pressed, selected, and count-change states.
 - Keep body toolbar actions at 24 points, with quiet hover and pressed fills.
 - Keep selected file labels in the primary text color. Use selection fill, a thin accent edge, and no inverted text.
 - Vertically center the disclosure, icon, and label within every file-tree row.
@@ -403,14 +417,15 @@ Persistence boundaries:
 ### Center Tabs
 
 - Use titanium chrome for the strip and porcelain for the selected editor surface.
-- Keep Back and Forward visible before the horizontal tab scroller.
+- Keep Back and Forward available through menus and shortcuts, not inside the tab strip.
 - Keep tab widths between 112 and 220 points, with 152 ideal.
 - Mark selection with primary text and a 2-point accent top rule.
 - Mark preview with regular label weight and `0.72` opacity. Do not add another icon.
 - Place the close control at the left edge of every closable tab.
 - Show close only on the selected or hovered tab.
 - Preserve drag reorder, rename, context menu, and word-wrap behavior.
-- Keep terminal response and new-terminal actions after the scroller.
+- Keep terminal response, new-terminal, and editor actions in one trailing group after the scroller.
+- Give the trailing action group `spaceXS` horizontal insets and `spaceXS` spacing between controls.
 - Reopen Closed Tab restores permanent file tabs only.
 
 ### Quick Open and Command Palette
@@ -442,6 +457,7 @@ Persistence boundaries:
 - Keep editor word wrap as a per-file setting.
 - Promote a preview before the first edit is saved.
 - Preserve first responder across palette, zoom, inspector, and sidecar transitions.
+- Keep the terminal's structural parent stable while a sidecar opens or closes. Resize the existing sidecar slot instead of rebuilding the terminal container.
 
 ### Gemma and Agent Responses
 

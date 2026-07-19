@@ -685,29 +685,6 @@ struct TerminalTabs: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                Button {
-                    model.navigateBack()
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .buttonStyle(AtelierLuminareIconButtonStyle())
-                .disabled(!model.canNavigateBack)
-                .accessibilityLabel("Back")
-                .accessibilityValue(model.canNavigateBack ? "Available" : "Unavailable")
-                .help("Back")
-                .padding(.leading, AtelierMetrics.spaceXS)
-
-                Button {
-                    model.navigateForward()
-                } label: {
-                    Image(systemName: "chevron.right")
-                }
-                .buttonStyle(AtelierLuminareIconButtonStyle())
-                .disabled(!model.canNavigateForward)
-                .accessibilityLabel("Forward")
-                .accessibilityValue(model.canNavigateForward ? "Available" : "Unavailable")
-                .help("Forward")
-
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
                         ForEach(model.visibleTabs) { tab in
@@ -826,77 +803,79 @@ struct TerminalTabs: View {
                 }
                 .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.chrome)
 
-                if model.isTerminalSelected {
-                    Button {
-                        if isAgentSidecarPresented {
-                            onCloseAgentSidecar()
-                        } else {
-                            onOpenAgentSidecar()
-                        }
-                    } label: {
-                        HStack(spacing: AtelierMetrics.spaceXS) {
-                            Image(systemName: "text.bubble")
-                            Text("Response")
-                            if agentResponses.unreadCount > 0 {
-                                Circle()
-                                    .fill(AtelierTheme.accent)
-                                    .frame(width: 6, height: 6)
+                HStack(spacing: AtelierMetrics.spaceXS) {
+                    if model.isTerminalSelected {
+                        Button {
+                            if isAgentSidecarPresented {
+                                onCloseAgentSidecar()
+                            } else {
+                                onOpenAgentSidecar()
                             }
+                        } label: {
+                            HStack(spacing: AtelierMetrics.spaceXS) {
+                                Image(systemName: "text.bubble")
+                                Text("Response")
+                                if agentResponses.unreadCount > 0 {
+                                    Circle()
+                                        .fill(AtelierTheme.accent)
+                                        .frame(width: 6, height: 6)
+                                }
+                            }
+                            .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+                            .padding(.horizontal, AtelierMetrics.spaceS)
+                            .frame(height: AtelierMetrics.controlHeight)
+                            .contentShape(
+                                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
+                            )
                         }
-                        .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                        .padding(.horizontal, AtelierMetrics.spaceS)
-                        .frame(height: AtelierMetrics.controlHeight)
-                        .contentShape(
-                            RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
+                        .buttonStyle(.plain)
+                        .atelierPointerCursor()
+                        .foregroundStyle(
+                            isAgentSidecarPresented ? AtelierTheme.accent : Color.primary
+                        )
+                        .atelierGlassControl(isSelected: isAgentSidecarPresented)
+                        .accessibilityLabel(
+                            isAgentSidecarPresented
+                                ? "Close agent response sidecar"
+                                : "Open agent response sidecar"
+                        )
+                        .accessibilityValue("\(agentResponses.unreadCount) unread")
+                        .help(
+                            isAgentSidecarPresented
+                                ? "Close Agent Responses"
+                                : "Open Agent Responses"
                         )
                     }
-                    .buttonStyle(.plain)
-                    .atelierPointerCursor()
-                    .foregroundStyle(
-                        isAgentSidecarPresented ? AtelierTheme.accent : Color.primary
-                    )
-                    .atelierGlassControl(isSelected: isAgentSidecarPresented)
-                    .accessibilityLabel(
-                        isAgentSidecarPresented
-                            ? "Close agent response sidecar"
-                            : "Open agent response sidecar"
-                    )
-                    .accessibilityValue("\(agentResponses.unreadCount) unread")
-                    .help(
-                        isAgentSidecarPresented
-                            ? "Close Agent Responses"
-                            : "Open Agent Responses"
-                    )
-                }
 
-                Button {
-                    model.add()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(AtelierLuminareIconButtonStyle())
-                .atelierNewTerminalEffect(sessionCount: model.terminalCount)
-                .accessibilityLabel("New terminal")
-                .help("New terminal")
-
-                if let editor = model.selectedEditor {
                     Button {
-                        editor.toggleWordWrap()
+                        model.add()
                     } label: {
-                        Image(
-                            systemName: editor.isWordWrapEnabled
-                                ? "text.word.spacing"
-                                : "arrow.left.and.right"
-                        )
+                        Image(systemName: "plus")
                     }
                     .buttonStyle(AtelierLuminareIconButtonStyle())
-                    .help(editor.isWordWrapEnabled ? "Disable Word Wrap" : "Enable Word Wrap")
-                    .accessibilityLabel(
-                        editor.isWordWrapEnabled ? "Disable Word Wrap" : "Enable Word Wrap"
-                    )
+                    .atelierNewTerminalEffect(sessionCount: model.terminalCount)
+                    .accessibilityLabel("New terminal")
+                    .help("New terminal")
+
+                    if let editor = model.selectedEditor {
+                        Button {
+                            editor.toggleWordWrap()
+                        } label: {
+                            Image(
+                                systemName: editor.isWordWrapEnabled
+                                    ? "text.word.spacing"
+                                    : "arrow.left.and.right"
+                            )
+                        }
+                        .buttonStyle(AtelierLuminareIconButtonStyle())
+                        .help(editor.isWordWrapEnabled ? "Disable Word Wrap" : "Enable Word Wrap")
+                        .accessibilityLabel(
+                            editor.isWordWrapEnabled ? "Disable Word Wrap" : "Enable Word Wrap"
+                        )
+                    }
                 }
+                .padding(.horizontal, AtelierMetrics.spaceXS)
             }
-            .padding(.trailing, AtelierMetrics.spaceXS)
             .frame(height: AtelierMetrics.tabBarHeight)
             .background {
                 AtelierChromeBackground()
@@ -907,42 +886,59 @@ struct TerminalTabs: View {
                     .frame(height: AtelierTheme.strokeHairline)
             }
 
-            if let tab = model.selectedTab {
-                switch tab.content {
-                case .terminal(let session):
-                    TerminalAgentSidecar(
-                        session: session,
-                        tabID: tab.id,
-                        agentResponses: agentResponses,
-                        isPresented: isAgentSidecarPresented,
-                        onClose: onCloseAgentSidecar
-                    )
-                case .file(let file):
-                    FileTabView(file: file) {
-                        model.promotePreview(for: file.document.url)
+            ZStack {
+                ForEach(model.visibleTabs) { tab in
+                    if case .terminal(let session) = tab.content {
+                        let isActive = model.selectedID == tab.id
+                        TerminalAgentSidecar(
+                            session: session,
+                            tabID: tab.id,
+                            agentResponses: agentResponses,
+                            isPresented: isAgentSidecarPresented,
+                            isActive: isActive,
+                            onClose: onCloseAgentSidecar
+                        )
+                        .opacity(isActive ? 1 : 0)
+                        .allowsHitTesting(isActive)
+                        .accessibilityHidden(!isActive)
+                        .zIndex(isActive ? 1 : 0)
                     }
-                        .id(tab.id)
-                        .background(AtelierTheme.editor)
-                        .environment(\.atelierZoomScale, zoom.contentScale)
-                case .gitDiff(let diff):
-                    GitDiffTabView(session: diff)
-                        .id(tab.id)
-                        .environment(\.atelierZoomScale, zoom.contentScale)
-                case .gemma(let agent):
-                    GemmaAgentView(
-                        model: agent,
-                        workspaceRoot: URL(fileURLWithPath: model.workspacePath, isDirectory: true),
-                        onOpenFile: model.openFile
-                    )
-                    .id(tab.id)
-                    .environment(\.atelierZoomScale, zoom.contentScale)
                 }
-            } else {
-                AtelierEmptyState(
-                    systemImage: "rectangle.stack",
-                    title: "No Open Tabs",
-                    message: "Open a file or add a terminal tab."
-                )
+
+                if let tab = model.selectedTab {
+                    switch tab.content {
+                    case .terminal:
+                        EmptyView()
+                    case .file(let file):
+                        FileTabView(file: file) {
+                            model.promotePreview(for: file.document.url)
+                        }
+                            .id(tab.id)
+                            .background(AtelierTheme.editor)
+                            .environment(\.atelierZoomScale, zoom.contentScale)
+                    case .gitDiff(let diff):
+                        GitDiffTabView(session: diff)
+                            .id(tab.id)
+                            .environment(\.atelierZoomScale, zoom.contentScale)
+                    case .gemma(let agent):
+                        GemmaAgentView(
+                            model: agent,
+                            workspaceRoot: URL(
+                                fileURLWithPath: model.workspacePath,
+                                isDirectory: true
+                            ),
+                            onOpenFile: model.openFile
+                        )
+                        .id(tab.id)
+                        .environment(\.atelierZoomScale, zoom.contentScale)
+                    }
+                } else {
+                    AtelierEmptyState(
+                        systemImage: "rectangle.stack",
+                        title: "No Open Tabs",
+                        message: "Open a file or add a terminal tab."
+                    )
+                }
             }
         }
         .focusedSceneValue(\.renameActiveTab) {
@@ -1033,6 +1029,7 @@ private struct TerminalAgentSidecar: View {
     let tabID: UUID
     @Bindable var agentResponses: AgentResponsesModel
     let isPresented: Bool
+    let isActive: Bool
     let onClose: () -> Void
 
     @Environment(AtelierZoomModel.self) private var zoom
@@ -1048,21 +1045,24 @@ private struct TerminalAgentSidecar: View {
 
             switch presentation {
             case .split:
-                if isPresented {
-                    HSplitView {
-                        terminal
-                            .frame(minWidth: AgentSidecarLayoutPolicy.minimumTerminalWidth)
-                        sidecar
-                            .frame(
-                                minWidth: AgentSidecarLayoutPolicy.minimumWidth,
-                                idealWidth: sidecarWidth,
-                                maxWidth: AgentSidecarLayoutPolicy.maximumWidth
-                            )
-                    }
-                    .atelierSplitViewChrome()
-                } else {
+                HSplitView {
                     terminal
+                        .frame(minWidth: AgentSidecarLayoutPolicy.minimumTerminalWidth)
+                    ZStack {
+                        if isPresented {
+                            sidecar
+                        }
+                    }
+                    .frame(
+                        minWidth: isPresented ? AgentSidecarLayoutPolicy.minimumWidth : 0,
+                        idealWidth: isPresented ? sidecarWidth : 0,
+                        maxWidth: isPresented ? AgentSidecarLayoutPolicy.maximumWidth : 0
+                    )
+                    .opacity(isPresented ? 1 : 0)
+                    .allowsHitTesting(isPresented)
+                    .accessibilityHidden(!isPresented)
                 }
+                .atelierSplitViewChrome()
             case .overlay:
                 terminal
                     .overlay(alignment: .trailing) {
@@ -1082,7 +1082,8 @@ private struct TerminalAgentSidecar: View {
     private var terminal: some View {
         TerminalView(
             controller: session.controller,
-            scale: zoom.contentScale
+            scale: zoom.contentScale,
+            isActive: isActive
         )
         .background(AtelierTheme.editor)
     }

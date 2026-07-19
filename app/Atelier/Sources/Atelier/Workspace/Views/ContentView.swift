@@ -28,7 +28,6 @@ nonisolated enum WorkspaceSidebarTab: String, CaseIterable, Identifiable, Sendab
 
 private struct WorkspaceSidebarTabButtonStyle: ButtonStyle {
     let isSelected: Bool
-    let selectionNamespace: Namespace.ID
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
@@ -36,30 +35,20 @@ private struct WorkspaceSidebarTabButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .frame(maxWidth: .infinity)
-            .frame(height: AtelierMetrics.sectionHeaderHeight)
+            .frame(height: AtelierMetrics.panelHeaderHeight)
             .background(tabFill(isPressed: configuration.isPressed))
             .overlay(alignment: .bottom) {
                 if isSelected {
-                    Capsule()
+                    Rectangle()
                         .fill(AtelierTheme.accent)
                         .frame(height: 2)
-                        .padding(.horizontal, AtelierMetrics.spaceM)
-                        .matchedGeometryEffect(
-                            id: "workspace-sidebar-selection",
-                            in: selectionNamespace
-                        )
                 }
             }
             .contentShape(Rectangle())
-            .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : 0.985)
             .onHover { isHovering = $0 }
             .animation(
                 reduceMotion ? nil : .easeOut(duration: AtelierMotionTokens.quick),
                 value: isHovering
-            )
-            .animation(
-                reduceMotion ? nil : .easeOut(duration: AtelierMotionTokens.quick),
-                value: configuration.isPressed
             )
             .atelierPointerCursor()
     }
@@ -394,7 +383,6 @@ struct WorkspaceView: View {
     @Environment(AppModel.self) private var app
     @Environment(AtelierZoomModel.self) private var zoom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var sidebarTabSelectionNamespace
     @State private var fileTreeCreationRequest: FileTreeCreationRequest?
     @State private var fileTreeTargetDirectory: URL?
     @State private var responderBeforeAgentPreview: NSResponder?
@@ -712,7 +700,7 @@ struct WorkspaceView: View {
 
     private var workspaceSidebar: some View {
         VStack(spacing: 0) {
-            HStack(spacing: AtelierMetrics.spaceXS) {
+            HStack(spacing: 0) {
                 ForEach(WorkspaceSidebarTab.allCases) { tab in
                     let isSelected = selectedSidebarTab == tab
                     let changeCount = tab == .sourceControl
@@ -720,44 +708,32 @@ struct WorkspaceView: View {
                         : 0
 
                     Button {
-                        withAnimation(reduceMotion ? nil : AtelierMotionTokens.selection) {
-                            selectedSidebarTab = tab
-                        }
+                        selectedSidebarTab = tab
                     } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: tab.systemImage)
-                                .symbolRenderingMode(.hierarchical)
-                                .atelierFont(
+                        Label(tab.rawValue, systemImage: tab.systemImage)
+                            .font(
+                                .system(
                                     size: AtelierTypography.uiSize,
-                                    weight: .semibold
+                                    weight: isSelected ? .semibold : .regular
                                 )
-                                .foregroundStyle(
-                                    isSelected ? AtelierTheme.accent : Color.secondary
-                                )
-                                .frame(width: AtelierMetrics.regularIconSize)
-
-                            Text(tab.rawValue)
-                                .atelierFont(
-                                    size: AtelierTypography.body,
-                                    weight: isSelected ? .semibold : .medium
-                                )
-                                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                                .lineLimit(1)
-
-                            if changeCount > 0 {
-                                AtelierCountBadge(
-                                    value: changeCount,
-                                    color: AtelierTheme.gitOrange
-                                )
-                                .accessibilityHidden(true)
+                            )
+                            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity)
+                            .overlay(alignment: .trailing) {
+                                if changeCount > 0 {
+                                    AtelierCountBadge(
+                                        value: changeCount,
+                                        color: AtelierTheme.gitOrange
+                                    )
+                                    .accessibilityHidden(true)
+                                    .padding(.trailing, AtelierMetrics.spaceM)
+                                }
                             }
-                        }
-                        .padding(.horizontal, AtelierMetrics.spaceM)
                     }
                     .buttonStyle(
                         WorkspaceSidebarTabButtonStyle(
-                            isSelected: isSelected,
-                            selectionNamespace: sidebarTabSelectionNamespace
+                            isSelected: isSelected
                         )
                     )
                     .accessibilityLabel(
@@ -773,7 +749,6 @@ struct WorkspaceView: View {
                     .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.horizontal, AtelierMetrics.spaceS)
             .frame(height: AtelierMetrics.panelHeaderHeight)
             .background {
                 AtelierChromeBackground()

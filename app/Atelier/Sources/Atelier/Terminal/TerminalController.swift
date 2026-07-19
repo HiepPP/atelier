@@ -15,6 +15,7 @@ enum TerminalRenderingPolicy {
 final class TerminalController {
     private let processService: TerminalProcessService
     private let terminal = AtelierTerminalNativeView(frame: .zero)
+    private var isActive = false
     private var isClosed = false
 
     init(workspacePath: String, processService: TerminalProcessService = TerminalProcessService()) {
@@ -27,9 +28,19 @@ final class TerminalController {
         AppLogger.terminal.info("Started terminal session")
     }
 
-    func attach() -> AtelierTerminalNativeView {
-        terminal.requestFocusWhenAttached()
+    func attach(isActive: Bool) -> AtelierTerminalNativeView {
+        setActive(isActive)
         return terminal
+    }
+
+    func setActive(_ isActive: Bool) {
+        guard self.isActive != isActive else { return }
+        self.isActive = isActive
+        if isActive {
+            terminal.requestFocusWhenAttached()
+        } else {
+            terminal.releaseFocusIfNeeded()
+        }
     }
 
     func updateScale(_ scale: CGFloat, displayScale: CGFloat) {
@@ -71,6 +82,11 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
     func requestFocusWhenAttached() {
         shouldFocusWhenAttached = true
         focusIfPossible()
+    }
+
+    func releaseFocusIfNeeded() {
+        guard let window, window.firstResponder === self else { return }
+        window.makeFirstResponder(nil)
     }
 
     override func viewDidMoveToWindow() {
