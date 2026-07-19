@@ -176,8 +176,121 @@ nonisolated struct WorkspacePanelPresentation: Equatable, Sendable {
     }
 }
 
+@MainActor
+@Observable
+final class WorkspaceChromeModel {
+    var panels = WorkspacePanelPresentation.initial(for: .standard)
+    var currentLayoutMode = WorkspaceLayoutMode.standard
+    var isProjectMenuPresented = false
+    var sidebarAnimationRequestID = 0
+    var inspectorAnimationRequestID = 0
+    var projectCommandToolbarOffset: CGFloat = 0
+    private var hasAppliedInitialLayout = false
+    private var projectMenuTransitionID = 0
+    private var responderBeforeProjectMenu: NSResponder?
+    private var responderBeforeInspector: NSResponder?
+
+    func applyInitialLayout(_ layout: WorkspaceLayoutMode) {
+        guard !hasAppliedInitialLayout else { return }
+        hasAppliedInitialLayout = true
+        currentLayoutMode = layout
+        panels = .initial(for: layout)
+    }
+
+    func adaptPanels(
+        from oldLayout: WorkspaceLayoutMode,
+        to newLayout: WorkspaceLayoutMode,
+        isFocusMode: Bool
+    ) {
+        currentLayoutMode = newLayout
+        guard !isFocusMode else { return }
+        panels = panels.adapting(from: oldLayout, to: newLayout)
+    }
+
+    func applyPanelPresentation(
+        _ nextPanels: WorkspacePanelPresentation,
+        requestsAnimation: Bool
+    ) {
+        if requestsAnimation && panels.showsSidebar != nextPanels.showsSidebar {
+            sidebarAnimationRequestID += 1
+        }
+        if requestsAnimation && panels.showsInspector != nextPanels.showsInspector {
+            inspectorAnimationRequestID += 1
+        }
+        panels = nextPanels
+    }
+
+    func toggleSidebar() {
+        sidebarAnimationRequestID += 1
+        panels = panels.togglingSidebar(layout: currentLayoutMode)
+    }
+
+    func updateFocusMode(_ isFocused: Bool) {
+        applyPanelPresentation(
+            panels.settingAllPanelsPresented(!isFocused, layout: currentLayoutMode),
+            requestsAnimation: true
+        )
+    }
+
+    func toggleInspector(windowController: WindowController) {
+        guard currentLayoutMode.supportsInspector else { return }
+        responderBeforeInspector = windowController.currentFirstResponder()
+        inspectorAnimationRequestID += 1
+        panels = panels.togglingInspector(layout: currentLayoutMode)
+        Task { @MainActor in
+            await Task.yield()
+            windowController.restoreFirstResponder(responderBeforeInspector)
+            responderBeforeInspector = nil
+        }
+    }
+
+    func toggleProjectMenu(windowController: WindowController, reduceMotion: Bool) {
+        if isProjectMenuPresented {
+            dismissProjectMenu(windowController: windowController, reduceMotion: reduceMotion)
+            return
+        }
+
+        projectMenuTransitionID += 1
+        responderBeforeProjectMenu = windowController.currentFirstResponder()
+        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+            isProjectMenuPresented = true
+        }
+    }
+
+    func dismissProjectMenu(
+        restoresResponder: Bool = true,
+        windowController: WindowController,
+        reduceMotion: Bool
+    ) {
+        guard isProjectMenuPresented else { return }
+
+        projectMenuTransitionID += 1
+        let transitionID = projectMenuTransitionID
+        let responder = responderBeforeProjectMenu
+        responderBeforeProjectMenu = nil
+
+        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+            isProjectMenuPresented = false
+        }
+
+        guard restoresResponder, let responder else { return }
+        Task { @MainActor in
+            if reduceMotion {
+                await Task.yield()
+            } else {
+                try? await Task.sleep(for: .seconds(AtelierMotionTokens.deliberate))
+            }
+            guard transitionID == projectMenuTransitionID,
+                  !isProjectMenuPresented else { return }
+            windowController.restoreFirstResponder(responder)
+        }
+    }
+}
+
 struct ContentView: View {
     @Environment(AppModel.self) private var app
+    @Environment(AtelierZoomModel.self) private var zoom
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var commandPaletteModel = AtelierPaletteModel()
     @State private var presentedPaletteMode: AtelierPaletteMode?
     @State private var responderBeforePalette: NSResponder?
@@ -221,6 +334,12 @@ struct ContentView: View {
         }
         .background(AtelierTheme.canvas)
         .tint(AtelierTheme.accent)
+        .toolbar {
+            if let workspace = app.workspace {
+                workspaceToolbar(for: workspace)
+            }
+        }
+        .navigationTitle(app.workspace.map(Self.folderName) ?? "")
         .focusedSceneValue(\.showQuickOpen, quickOpenAction)
         .focusedSceneValue(\.showCommandPalette) {
             presentPalette(.commands)
@@ -230,6 +349,134 @@ struct ContentView: View {
                 dismissPalette(restoresResponder: false)
             }
         }
+    }
+
+    static func folderName(for session: WorkspaceSession) -> String {
+        (session.state.path as NSString).lastPathComponent
+    }
+
+    @ToolbarContentBuilder
+    private func workspaceToolbar(for session: WorkspaceSession) -> some ToolbarContent {
+        let chrome = session.chrome
+        let folderName = Self.folderName(for: session)
+
+        ToolbarItem(placement: .navigation) {
+            Button {
+                chrome.dismissProjectMenu(
+                    restoresResponder: false,
+                    windowController: app.windowController,
+                    reduceMotion: reduceMotion
+                )
+                chrome.toggleSidebar()
+            } label: {
+                Image(systemName: "sidebar.leading")
+            }
+            .accessibilityLabel(chrome.panels.showsSidebar ? "Hide Sidebar" : "Show Sidebar")
+            .help(chrome.panels.showsSidebar ? "Hide Sidebar" : "Show Sidebar")
+            .disabled(zoom.isFocusMode || !chrome.currentLayoutMode.docksSidebar)
+            .atelierPointerCursor()
+        }
+
+        ToolbarItem(placement: .principal) {
+            Button {
+                chrome.toggleProjectMenu(
+                    windowController: app.windowController,
+                    reduceMotion: reduceMotion
+                )
+            } label: {
+                ProjectMenuLabel(projectName: folderName)
+                    .frame(width: AtelierMetrics.projectMenuWidth)
+                    .atelierGlassControl(isSelected: chrome.isProjectMenuPresented)
+                    .background {
+                        ProjectCommandToolbarCenterBridge { correction in
+                            chrome.projectCommandToolbarOffset += correction
+                        }
+                    }
+            }
+            .buttonStyle(.plain)
+            .contentShape(
+                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+            )
+            .help("\(folderName)\n\(session.state.path)\nProject commands")
+            .accessibilityLabel("Project commands for \(folderName)")
+            .accessibilityValue(chrome.isProjectMenuPresented ? "Open" : "Closed")
+            .atelierPointerCursor()
+            .offset(x: chrome.projectCommandToolbarOffset)
+        }
+        .sharedBackgroundVisibility(.hidden)
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                chrome.dismissProjectMenu(
+                    restoresResponder: false,
+                    windowController: app.windowController,
+                    reduceMotion: reduceMotion
+                )
+                session.openGemma()
+            } label: {
+                Image(systemName: "sparkles")
+            }
+            .accessibilityLabel("Open Gemma workspace assistant")
+            .help("Open Gemma workspace assistant")
+            .atelierPointerCursor()
+
+            Button {
+                chrome.dismissProjectMenu(
+                    restoresResponder: false,
+                    windowController: app.windowController,
+                    reduceMotion: reduceMotion
+                )
+                toggleAllWorkspacePanels(chrome: chrome)
+            } label: {
+                Image(
+                    systemName: workspacePanelsArePresented(chrome: chrome)
+                        ? "rectangle.center.inset.filled"
+                        : "rectangle.split.3x1"
+                )
+            }
+            .accessibilityLabel(
+                workspacePanelsArePresented(chrome: chrome)
+                    ? "Hide workspace panels"
+                    : "Show workspace panels"
+            )
+            .help(
+                workspacePanelsArePresented(chrome: chrome)
+                    ? "Hide Workspace Panels"
+                    : "Show Workspace Panels"
+            )
+            .atelierPointerCursor()
+
+            Button {
+                chrome.dismissProjectMenu(
+                    restoresResponder: false,
+                    windowController: app.windowController,
+                    reduceMotion: reduceMotion
+                )
+                chrome.toggleInspector(windowController: app.windowController)
+            } label: {
+                Image(systemName: "sidebar.trailing")
+            }
+            .accessibilityLabel(chrome.panels.showsInspector ? "Hide inspector" : "Show inspector")
+            .help(chrome.panels.showsInspector ? "Hide Inspector" : "Show Inspector")
+            .disabled(zoom.isFocusMode || !chrome.currentLayoutMode.supportsInspector)
+            .atelierPointerCursor()
+        }
+    }
+
+    private func workspacePanelsArePresented(chrome: WorkspaceChromeModel) -> Bool {
+        !zoom.isFocusMode && chrome.panels.hasVisiblePanel
+    }
+
+    private func toggleAllWorkspacePanels(chrome: WorkspaceChromeModel) {
+        if workspacePanelsArePresented(chrome: chrome) || zoom.isFocusMode {
+            zoom.toggleFocusMode()
+            return
+        }
+
+        chrome.applyPanelPresentation(
+            chrome.panels.togglingAllPanels(layout: chrome.currentLayoutMode),
+            requestsAnimation: true
+        )
     }
 
     private var quickOpenAction: (() -> Void)? {
@@ -405,16 +652,6 @@ struct WorkspaceView: View {
     @State private var fileTreeTargetDirectory: URL?
     @State private var responderBeforeAgentPreview: NSResponder?
     @State private var selectedSidebarTab = WorkspaceSidebarTab.explorer
-    @State private var panels = WorkspacePanelPresentation.initial(for: .standard)
-    @State private var responderBeforeInspector: NSResponder?
-    @State private var hasAppliedInitialLayout = false
-    @State private var currentLayoutMode = WorkspaceLayoutMode.standard
-    @State private var isProjectMenuPresented = false
-    @State private var projectCommandToolbarOffset: CGFloat = 0
-    @State private var sidebarAnimationRequestID = 0
-    @State private var inspectorAnimationRequestID = 0
-    @State private var responderBeforeProjectMenu: NSResponder?
-    @State private var projectMenuTransitionID = 0
 
     var body: some View {
         GeometryReader { outerGeometry in
@@ -435,17 +672,17 @@ struct WorkspaceView: View {
                     }
                     .atelierPointerCursor()
                     .accessibilityHidden(true)
-                    .allowsHitTesting(isProjectMenuPresented)
+                    .allowsHitTesting(chrome.isProjectMenuPresented)
 
                 ProjectCommandMenuView(
                     session: session,
                     workspaceURL: workspaceURL,
-                    isPresented: isProjectMenuPresented,
+                    isPresented: chrome.isProjectMenuPresented,
                     onDismiss: { dismissProjectMenu() }
                 )
                 .modifier(
                     ProjectMenuRevealModifier(
-                        progress: isProjectMenuPresented ? 1 : 0
+                        progress: chrome.isProjectMenuPresented ? 1 : 0
                     )
                 )
                 .offset(
@@ -453,20 +690,14 @@ struct WorkspaceView: View {
                         workspaceRailWidth: AtelierMetrics.workspaceRailWidth
                     )
                 )
-                .allowsHitTesting(isProjectMenuPresented)
-                .accessibilityHidden(!isProjectMenuPresented)
+                .allowsHitTesting(chrome.isProjectMenuPresented)
+                .accessibilityHidden(!chrome.isProjectMenuPresented)
                 .zIndex(1)
             }
             .background(AtelierTheme.editor)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .toolbar {
-                if isActive {
-                    workspaceToolbar
-                }
-            }
-            .navigationTitle(isActive ? folderName : "")
             .onAppear {
-                applyInitialLayout(workspaceLayout)
+                chrome.applyInitialLayout(workspaceLayout)
             }
             .onChange(of: workspaceLayout) { oldLayout, newLayout in
                 // Defer off the current layout pass. During a window zoom the
@@ -474,11 +705,15 @@ struct WorkspaceView: View {
                 // panel state synchronously re-enters AppKit's layout cycle and
                 // macOS traps in -[NSWindow _postWindowNeedsUpdateConstraints].
                 Task { @MainActor in
-                    adaptPanels(from: oldLayout, to: newLayout)
+                    chrome.adaptPanels(
+                        from: oldLayout,
+                        to: newLayout,
+                        isFocusMode: zoom.isFocusMode
+                    )
                 }
             }
             .onChange(of: zoom.isFocusMode) { _, isFocused in
-                updateFocusMode(isFocused)
+                chrome.updateFocusMode(isFocused)
             }
             .onChange(of: isActive) { _, isActive in
                 if !isActive {
@@ -489,6 +724,16 @@ struct WorkspaceView: View {
                 dismissProjectMenu()
             }
         }
+    }
+
+    private var chrome: WorkspaceChromeModel { session.chrome }
+
+    private func dismissProjectMenu(restoresResponder: Bool = true) {
+        chrome.dismissProjectMenu(
+            restoresResponder: restoresResponder,
+            windowController: app.windowController,
+            reduceMotion: reduceMotion
+        )
     }
 
     private var state: WorkspaceState { session.state }
@@ -516,10 +761,10 @@ struct WorkspaceView: View {
             )
             .environment(app)
             .environment(zoom),
-            showsSidebar: panels.showsSidebar && !zoom.isFocusMode,
-            showsInspector: panels.showsInspector && !zoom.isFocusMode,
-            sidebarAnimationRequestID: sidebarAnimationRequestID,
-            inspectorAnimationRequestID: inspectorAnimationRequestID,
+            showsSidebar: chrome.panels.showsSidebar && !zoom.isFocusMode,
+            showsInspector: chrome.panels.showsInspector && !zoom.isFocusMode,
+            sidebarAnimationRequestID: chrome.sidebarAnimationRequestID,
+            inspectorAnimationRequestID: chrome.inspectorAnimationRequestID,
             reduceMotion: reduceMotion
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -555,199 +800,6 @@ struct WorkspaceView: View {
             app.windowController.restoreFirstResponder(responderBeforeAgentPreview)
             responderBeforeAgentPreview = nil
         }
-    }
-
-    @ToolbarContentBuilder
-    private var workspaceToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            Button {
-                dismissProjectMenu(restoresResponder: false)
-                sidebarAnimationRequestID += 1
-                panels = panels.togglingSidebar(layout: currentLayoutMode)
-            } label: {
-                Image(systemName: "sidebar.leading")
-            }
-            .accessibilityLabel(panels.showsSidebar ? "Hide Sidebar" : "Show Sidebar")
-            .help(panels.showsSidebar ? "Hide Sidebar" : "Show Sidebar")
-            .disabled(zoom.isFocusMode || !currentLayoutMode.docksSidebar)
-            .atelierPointerCursor()
-        }
-
-        ToolbarItem(placement: .principal) {
-            Button {
-                toggleProjectMenu()
-            } label: {
-                ProjectMenuLabel(projectName: folderName)
-                    .frame(width: AtelierMetrics.projectMenuWidth)
-                    .atelierGlassControl(isSelected: isProjectMenuPresented)
-                    .background {
-                        ProjectCommandToolbarCenterBridge { correction in
-                            projectCommandToolbarOffset += correction
-                        }
-                    }
-            }
-            .buttonStyle(.plain)
-            .contentShape(
-                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
-            )
-            .help("\(folderName)\n\(state.path)\nProject commands")
-            .accessibilityLabel("Project commands for \(folderName)")
-            .accessibilityValue(isProjectMenuPresented ? "Open" : "Closed")
-            .atelierPointerCursor()
-            .offset(x: projectCommandToolbarOffset)
-        }
-        .sharedBackgroundVisibility(.hidden)
-
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button {
-                dismissProjectMenu(restoresResponder: false)
-                session.openGemma()
-            } label: {
-                Image(systemName: "sparkles")
-            }
-            .accessibilityLabel("Open Gemma workspace assistant")
-            .help("Open Gemma workspace assistant")
-            .atelierPointerCursor()
-
-            Button {
-                dismissProjectMenu(restoresResponder: false)
-                toggleAllWorkspacePanels()
-            } label: {
-                Image(
-                    systemName: workspacePanelsArePresented
-                        ? "rectangle.center.inset.filled"
-                        : "rectangle.split.3x1"
-                )
-            }
-            .accessibilityLabel(
-                workspacePanelsArePresented
-                    ? "Hide workspace panels"
-                    : "Show workspace panels"
-            )
-            .help(
-                workspacePanelsArePresented
-                    ? "Hide Workspace Panels"
-                    : "Show Workspace Panels"
-            )
-            .atelierPointerCursor()
-
-            Button {
-                dismissProjectMenu(restoresResponder: false)
-                toggleInspector()
-            } label: {
-                Image(systemName: "sidebar.trailing")
-            }
-            .accessibilityLabel(panels.showsInspector ? "Hide inspector" : "Show inspector")
-            .help(panels.showsInspector ? "Hide Inspector" : "Show Inspector")
-            .disabled(zoom.isFocusMode || !currentLayoutMode.supportsInspector)
-            .atelierPointerCursor()
-        }
-    }
-
-    private var workspacePanelsArePresented: Bool {
-        !zoom.isFocusMode && panels.hasVisiblePanel
-    }
-
-    private func toggleAllWorkspacePanels() {
-        if workspacePanelsArePresented || zoom.isFocusMode {
-            zoom.toggleFocusMode()
-            return
-        }
-
-        applyPanelPresentation(
-            panels.togglingAllPanels(layout: currentLayoutMode),
-            requestsAnimation: true
-        )
-    }
-
-    private func applyPanelPresentation(
-        _ nextPanels: WorkspacePanelPresentation,
-        requestsAnimation: Bool
-    ) {
-        if requestsAnimation && panels.showsSidebar != nextPanels.showsSidebar {
-            sidebarAnimationRequestID += 1
-        }
-        if requestsAnimation && panels.showsInspector != nextPanels.showsInspector {
-            inspectorAnimationRequestID += 1
-        }
-        panels = nextPanels
-    }
-
-    private func toggleProjectMenu() {
-        if isProjectMenuPresented {
-            dismissProjectMenu()
-            return
-        }
-
-        projectMenuTransitionID += 1
-        responderBeforeProjectMenu = app.windowController.currentFirstResponder()
-        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
-            isProjectMenuPresented = true
-        }
-    }
-
-    private func dismissProjectMenu(restoresResponder: Bool = true) {
-        guard isProjectMenuPresented else { return }
-
-        projectMenuTransitionID += 1
-        let transitionID = projectMenuTransitionID
-        let responder = responderBeforeProjectMenu
-        responderBeforeProjectMenu = nil
-
-        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
-            isProjectMenuPresented = false
-        }
-
-        guard restoresResponder, let responder else { return }
-        Task { @MainActor in
-            if reduceMotion {
-                await Task.yield()
-            } else {
-                try? await Task.sleep(for: .seconds(AtelierMotionTokens.deliberate))
-            }
-            guard transitionID == projectMenuTransitionID,
-                  !isProjectMenuPresented else { return }
-            app.windowController.restoreFirstResponder(responder)
-        }
-    }
-
-    private func applyInitialLayout(_ layout: WorkspaceLayoutMode) {
-        guard !hasAppliedInitialLayout else { return }
-        hasAppliedInitialLayout = true
-        currentLayoutMode = layout
-        panels = .initial(for: layout)
-    }
-
-    private func adaptPanels(
-        from oldLayout: WorkspaceLayoutMode,
-        to newLayout: WorkspaceLayoutMode
-    ) {
-        currentLayoutMode = newLayout
-        guard !zoom.isFocusMode else { return }
-        panels = panels.adapting(from: oldLayout, to: newLayout)
-    }
-
-    private func updateFocusMode(_ isFocused: Bool) {
-        applyPanelPresentation(
-            panels.settingAllPanelsPresented(!isFocused, layout: currentLayoutMode),
-            requestsAnimation: true
-        )
-    }
-
-    private func toggleInspector() {
-        guard currentLayoutMode.supportsInspector else { return }
-        responderBeforeInspector = app.windowController.currentFirstResponder()
-        inspectorAnimationRequestID += 1
-        panels = panels.togglingInspector(layout: currentLayoutMode)
-        Task { @MainActor in
-            await Task.yield()
-            restoreInspectorResponder()
-        }
-    }
-
-    private func restoreInspectorResponder() {
-        app.windowController.restoreFirstResponder(responderBeforeInspector)
-        responderBeforeInspector = nil
     }
 
     private var workspaceSidebar: some View {

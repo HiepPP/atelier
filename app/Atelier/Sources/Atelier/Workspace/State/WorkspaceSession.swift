@@ -11,6 +11,7 @@ final class WorkspaceSession {
     let gitModel: GitWorkspaceModel
     let gemmaAgent: GemmaAgentModel
     let agentResponses: AgentResponsesModel
+    let chrome = WorkspaceChromeModel()
     private(set) var fileTreeRevision = 0
     private(set) var isAgentSidecarPresented = false
 
