@@ -11,4 +11,8 @@ nonisolated enum IgnoreRules {
     static func shouldIgnore(_ url: URL) -> Bool {
         ignoredNames.contains(url.lastPathComponent)
     }
+
+    static func shouldIgnoreEventPath(_ path: String) -> Bool {
+        path.split(separator: "/").contains { ignoredNames.contains(String($0)) }
+    }
 }

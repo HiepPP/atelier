@@ -81,7 +81,12 @@ nonisolated final class FileWatcher: @unchecked Sendable {
                 | kFSEventStreamEventFlagRootChanged
         )
         let mustRescan = flags.contains { $0 & rescanFlags != 0 }
-        guard mustRescan || paths.contains(where: { !isGitInternal($0) }) else { return }
+        // Build products and dependency directories churn thousands of events
+        // during compiles; reacting to them spawns git and reloads the file
+        // tree for content the app never shows.
+        guard mustRescan || paths.contains(where: {
+            !isGitInternal($0) && !IgnoreRules.shouldIgnoreEventPath($0)
+        }) else { return }
 
         stateLock.lock()
         pendingWork?.cancel()
