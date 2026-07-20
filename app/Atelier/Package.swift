@@ -5,7 +5,7 @@ let package = Package(
     name: "Atelier",
     platforms: [.macOS(.v26)],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.14.0"),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.15.0"),
         .package(url: "https://github.com/appstefan/HighlightSwift.git", exact: "1.1.0"),
         .package(url: "https://github.com/sindresorhus/KeyboardShortcuts", exact: "3.0.1"),
         .package(url: "https://github.com/EmergeTools/Pow", exact: "1.0.5"),
