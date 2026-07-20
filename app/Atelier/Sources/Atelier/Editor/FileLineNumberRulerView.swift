@@ -1,65 +1,78 @@
 import AppKit
-import STTextView
 
+/// Line-number gutter driven by the text view's own TextKit 1 layout manager.
+/// Because it shares that single layout manager, the numbers can never diverge
+/// from the displayed glyphs (the cross-TextKit measurement that used to drop
+/// lines is gone), and `NSScrollView` keeps the ruler pinned to the document as
+/// it scrolls, so numbers never lag behind the text.
 @MainActor
-final class FileLineNumberRulerView: NSView {
-    private weak var textView: STTextView?
-    var backgroundColor = AppKitThemeAdapter.code {
+final class FileLineNumberRulerView: NSRulerView {
+    private weak var textView: NSTextView?
+
+    // UTF-16 offset of the first character of each logical line. Precomputed on
+    // content change so the per-scroll draw resolves the first visible line with
+    // a binary search instead of rescanning the document every frame.
+    private var lineStartOffsets: [Int] = [0]
+
+    var backgroundColor = AppKitThemeAdapter.editor(usesDarkAppearance: false) {
         didSet { needsDisplay = true }
     }
-    var font = AtelierTypography.codeFont(size: AtelierTypography.editorSize) {
+    var separatorColor = AppKitThemeAdapter.border {
+        didSet { needsDisplay = true }
+    }
+    var textColor = AppKitThemeAdapter.secondary {
         didSet {
             cachedDrawAttributes = nil
-            scheduleVisibleLineRefresh()
+            needsDisplay = true
+        }
+    }
+    var numberFont = AtelierTypography.codeFont(size: AtelierTypography.editorSize) {
+        didSet {
+            guard numberFont != oldValue else { return }
+            cachedDrawAttributes = nil
+            invalidateThickness()
+            needsDisplay = true
         }
     }
 
     // draw() runs per scroll frame; rebuild the attribute dictionary only when
-    // the font changes instead of per line per frame.
+    // the font or color changes instead of per line per frame.
     private var cachedDrawAttributes: [NSAttributedString.Key: Any]?
     private var drawAttributes: [NSAttributedString.Key: Any] {
         if let cachedDrawAttributes { return cachedDrawAttributes }
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: AppKitThemeAdapter.secondary
+            .font: numberFont,
+            .foregroundColor: textColor
         ]
         cachedDrawAttributes = attributes
         return attributes
     }
 
-    private var textLength = 0
-    private var lineCenters: [CGFloat] = []
-    private var visibleLineLabels: [(number: Int, centerY: CGFloat)] = []
-    private var visibleLineRefreshTask: Task<Void, Never>?
-    private var visibleLineRefreshPending = false
-
-    init(
-        scrollView: NSScrollView,
-        textView: STTextView,
-        gutterView: STGutterView
-    ) {
+    init(scrollView: NSScrollView, textView: NSTextView) {
         self.textView = textView
-        font = gutterView.font
-        super.init(frame: gutterView.bounds)
-        autoresizingMask = [.width, .height]
+        numberFont = textView.font ?? AtelierTypography.codeFont(size: AtelierTypography.editorSize)
+        super.init(scrollView: scrollView, orientation: .verticalRuler)
+        clientView = textView
+        ruleThickness = AtelierMetrics.codeGutterWidth
+
         scrollView.contentView.postsBoundsChangedNotifications = true
         scrollView.contentView.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(clipViewDidChange),
+            selector: #selector(clientViewDidScroll),
             name: NSView.boundsDidChangeNotification,
             object: scrollView.contentView
         )
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(clipViewDidChange),
+            selector: #selector(clientViewDidScroll),
             name: NSView.frameDidChangeNotification,
             object: scrollView.contentView
         )
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init(coder: NSCoder) {
         super.init(coder: coder)
     }
 
@@ -67,154 +80,137 @@ final class FileLineNumberRulerView: NSView {
         NotificationCenter.default.removeObserver(self)
     }
 
-    override var isFlipped: Bool {
-        true
+    /// Recomputes logical line starts. Called whenever the document text changes
+    /// (programmatic load or user edit). One UTF-16 pass, off the draw path.
+    func updateLineStarts(for text: String) {
+        var starts = [0]
+        starts.reserveCapacity(max(1, text.utf16.count / 40))
+        var offset = 0
+        for unit in text.utf16 {
+            offset += 1
+            if unit == 0x0A {
+                starts.append(offset)
+            }
+        }
+        lineStartOffsets = starts
+        invalidateThickness()
+        needsDisplay = true
     }
 
-    func updateText(_ text: String) {
-        textLength = text.utf16.count
-        scheduleVisibleLineRefresh()
+    @objc private func clientViewDidScroll() {
+        needsDisplay = true
     }
 
-    func updateLineCenters(_ lineCenters: [CGFloat]) {
-        self.lineCenters = lineCenters
-        scheduleVisibleLineRefresh()
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
+    override func drawHashMarksAndLabels(in rect: NSRect) {
         backgroundColor.setFill()
-        dirtyRect.fill()
-        drawHashMarksAndLabels(in: dirtyRect)
+        bounds.fill()
+        separatorColor.setFill()
+        NSRect(x: bounds.maxX - 1, y: bounds.minY, width: 1, height: bounds.height).fill()
 
-        AppKitThemeAdapter.border.setFill()
-        NSRect(
-            x: bounds.maxX - 1,
-            y: dirtyRect.minY,
-            width: 1,
-            height: dirtyRect.height
-        ).fill()
-    }
+        guard let textView,
+              let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else { return }
 
-    private func drawHashMarksAndLabels(in rect: NSRect) {
-        guard textLength > 0 else {
-            drawLineNumber(1, centeredAt: bounds.minY + font.lineHeight / 2)
+        let content = textView.string as NSString
+        let insetHeight = textView.textContainerInset.height
+        // textView (flipped) origin expressed in ruler coordinates.
+        let originInRuler = convert(NSPoint.zero, from: textView).y + insetHeight
+
+        guard content.length > 0 else {
+            drawNumber(1, atFragmentMinY: 0, fragmentHeight: numberFont.approximateLineHeight, originInRuler: originInRuler)
             return
         }
 
-        for label in visibleLineLabels where rect.minY...rect.maxY ~= label.centerY {
-            drawLineNumber(label.number, centeredAt: label.centerY)
-        }
-    }
+        let visibleRect = textView.visibleRect
+        let visibleGlyphRange = layoutManager.glyphRange(forBoundingRect: visibleRect, in: textContainer)
+        guard visibleGlyphRange.length > 0 else { return }
 
-    @objc private func clipViewDidChange() {
-        scheduleVisibleLineRefresh()
-    }
+        let firstCharIndex = layoutManager.characterIndexForGlyph(at: visibleGlyphRange.location)
+        var lineNumber = lineNumber(forCharacterIndex: firstCharIndex)
 
-    func scheduleVisibleLineRefresh() {
-        visibleLineRefreshPending = true
-        guard visibleLineRefreshTask == nil else { return }
-        visibleLineRefreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            var didRefresh = false
-            repeat {
-                visibleLineRefreshPending = false
-                try? await Task.sleep(nanoseconds: 16_000_000)
-                guard !Task.isCancelled else { return }
-                didRefresh = refreshVisibleLines()
-            } while visibleLineRefreshPending
-            if !didRefresh {
-                try? await Task.sleep(nanoseconds: 50_000_000)
-                guard !Task.isCancelled else { return }
-                _ = refreshVisibleLines()
-            }
-            visibleLineRefreshTask = nil
-        }
-    }
-
-    @discardableResult
-    private func refreshVisibleLines() -> Bool {
-        guard let textView else {
-            visibleLineLabels = []
-            needsDisplay = true
-            return true
-        }
-        guard textLength > 0 else {
-            visibleLineLabels = []
-            needsDisplay = true
-            return true
-        }
-        guard !lineCenters.isEmpty else { return false }
-
-        let documentBounds = textView.convert(visibleRect, from: self)
-        let firstLine = max(0, lowerBoundCenter(for: documentBounds.minY) - 1)
-        let lastLine = min(
-            lineCenters.count,
-            upperBoundCenter(for: documentBounds.maxY) + 1
-        )
-        guard firstLine < lastLine else { return false }
-        var labels: [(number: Int, centerY: CGFloat)] = []
-        labels.reserveCapacity(lastLine - firstLine)
-        for lineIndex in firstLine..<lastLine {
-            let rulerPoint = convert(
-                NSPoint(x: 0, y: lineCenters[lineIndex]),
-                from: textView
+        var glyphIndex = visibleGlyphRange.location
+        let glyphRangeEnd = NSMaxRange(visibleGlyphRange)
+        while glyphIndex < glyphRangeEnd {
+            let charIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+            let lineCharRange = content.lineRange(for: NSRange(location: charIndex, length: 0))
+            let lineGlyphRange = layoutManager.glyphRange(
+                forCharacterRange: lineCharRange,
+                actualCharacterRange: nil
             )
-            labels.append((lineIndex + 1, rulerPoint.y))
+
+            // Draw the number only against the first display fragment of the
+            // logical line; wrapped continuation fragments stay blank.
+            var effectiveRange = NSRange()
+            let fragmentRect = layoutManager.lineFragmentRect(
+                forGlyphAt: lineGlyphRange.location,
+                effectiveRange: &effectiveRange,
+                withoutAdditionalLayout: true
+            )
+            drawNumber(
+                lineNumber,
+                atFragmentMinY: fragmentRect.minY,
+                fragmentHeight: fragmentRect.height,
+                originInRuler: originInRuler
+            )
+
+            lineNumber += 1
+            glyphIndex = max(NSMaxRange(lineGlyphRange), glyphIndex + 1)
         }
 
-        let visibleBounds = visibleRect
-        let visibleLabels = labels.filter {
-            visibleBounds.minY...visibleBounds.maxY ~= $0.centerY
+        // Trailing empty line (document ends with a newline).
+        if layoutManager.extraLineFragmentTextContainer != nil {
+            drawNumber(
+                lineNumber,
+                atFragmentMinY: layoutManager.extraLineFragmentRect.minY,
+                fragmentHeight: layoutManager.extraLineFragmentRect.height,
+                originInRuler: originInRuler
+            )
         }
-        visibleLineLabels = visibleLabels
-        needsDisplay = true
-        return !visibleLabels.isEmpty
     }
 
-    private func drawLineNumber(_ number: Int, centeredAt centerY: CGFloat) {
+    private func drawNumber(
+        _ number: Int,
+        atFragmentMinY fragmentMinY: CGFloat,
+        fragmentHeight: CGFloat,
+        originInRuler: CGFloat
+    ) {
         let value = "\(number)" as NSString
         let attributes = drawAttributes
         let size = value.size(withAttributes: attributes)
-        value.draw(
-            at: NSPoint(
-                x: max(0, bounds.maxX - AtelierMetrics.spaceS - size.width),
-                y: centerY - size.height / 2
-            ),
-            withAttributes: attributes
-        )
+        let y = originInRuler + fragmentMinY + (fragmentHeight - size.height) / 2
+        let x = max(AtelierMetrics.spaceXS, bounds.maxX - AtelierMetrics.spaceS - size.width)
+        value.draw(at: NSPoint(x: x, y: y), withAttributes: attributes)
     }
 
-    private func lowerBoundCenter(for position: CGFloat) -> Int {
+    // Number of line starts at or before the given UTF-16 index. lineStartOffsets
+    // always begins with 0, so any valid index resolves to line >= 1.
+    private func lineNumber(forCharacterIndex index: Int) -> Int {
         var lower = 0
-        var upper = lineCenters.count
+        var upper = lineStartOffsets.count
         while lower < upper {
             let middle = lower + (upper - lower) / 2
-            if lineCenters[middle] < position {
+            if lineStartOffsets[middle] <= index {
                 lower = middle + 1
             } else {
                 upper = middle
             }
         }
-        return lower
+        return max(1, lower)
     }
 
-    private func upperBoundCenter(for position: CGFloat) -> Int {
-        var lower = 0
-        var upper = lineCenters.count
-        while lower < upper {
-            let middle = lower + (upper - lower) / 2
-            if lineCenters[middle] <= position {
-                lower = middle + 1
-            } else {
-                upper = middle
-            }
+    private func invalidateThickness() {
+        let digits = max(3, String(lineStartOffsets.count).count)
+        let sample = String(repeating: "0", count: digits) as NSString
+        let width = ceil(sample.size(withAttributes: drawAttributes).width) + AtelierMetrics.spaceS * 2
+        let thickness = max(AtelierMetrics.codeGutterWidth, width)
+        if abs(ruleThickness - thickness) > 0.5 {
+            ruleThickness = thickness
         }
-        return lower
     }
 }
 
 private extension NSFont {
-    var lineHeight: CGFloat {
+    var approximateLineHeight: CGFloat {
         ceil(ascender - descender + leading)
     }
 }
