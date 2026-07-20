@@ -560,6 +560,31 @@ private final class StableFileTextView: STTextView {
     private var allowsNextFindRelocationHeight = false
     private var findRelocationResetTask: Task<Void, Never>?
 
+    // Height only depends on the text, font, wrap mode, and container width.
+    // Highlight passes swap colors on identical text, so remembering the last
+    // measured key lets those passes skip the full-document measurement.
+    private struct MeasurementKey: Equatable {
+        let text: String
+        let width: CGFloat
+        let font: NSFont
+        let wraps: Bool
+    }
+
+    private var lastMeasurementKey: MeasurementKey?
+
+    // One reusable measurement stack instead of a fresh TextKit1 stack per
+    // measurement.
+    private let measurementStorage = NSTextStorage()
+    private let measurementContainer = NSTextContainer(
+        size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+    )
+    private lazy var measurementLayoutManager: NSLayoutManager = {
+        let layoutManager = NSLayoutManager()
+        layoutManager.addTextContainer(measurementContainer)
+        measurementStorage.addLayoutManager(layoutManager)
+        return layoutManager
+    }()
+
     override func setFrameSize(_ newSize: NSSize) {
         if allowsNextFindRelocationHeight {
             allowsNextFindRelocationHeight = false
@@ -587,17 +612,30 @@ private final class StableFileTextView: STTextView {
     func stabilizeDocumentHeight() {
         guard let attributedText else { return }
 
-        let textStorage = NSTextStorage(attributedString: attributedText)
-        let layoutManager = NSLayoutManager()
-        let measurementContainer = NSTextContainer(
-            size: NSSize(
-                width: textContainer.size.width,
-                height: .greatestFiniteMagnitude
-            )
+        let key = MeasurementKey(
+            text: attributedText.string,
+            width: textContainer.size.width,
+            font: font,
+            wraps: !isHorizontallyResizable
+        )
+        if let currentHeight = stabilizedDocumentHeight, key == lastMeasurementKey {
+            // Text metrics unchanged (e.g. a highlight pass); keep the cached
+            // measurement and only grow to fill a taller viewport.
+            let viewportHeight = enclosingScrollView?.contentView.bounds.height ?? 0
+            if viewportHeight > currentHeight {
+                stabilizedDocumentHeight = viewportHeight
+                super.setFrameSize(NSSize(width: frame.width, height: viewportHeight))
+            }
+            return
+        }
+
+        let layoutManager = measurementLayoutManager
+        measurementContainer.size = NSSize(
+            width: textContainer.size.width,
+            height: .greatestFiniteMagnitude
         )
         measurementContainer.lineFragmentPadding = textContainer.lineFragmentPadding
-        layoutManager.addTextContainer(measurementContainer)
-        textStorage.addLayoutManager(layoutManager)
+        measurementStorage.setAttributedString(attributedText)
         layoutManager.ensureLayout(for: measurementContainer)
 
         let lineStarts = Self.lineStarts(in: attributedText.string)
@@ -644,6 +682,9 @@ private final class StableFileTextView: STTextView {
         let viewportHeight = enclosingScrollView?.contentView.bounds.height ?? 0
         let stableHeight = max(measuredHeight, viewportHeight)
         stabilizedDocumentHeight = stableHeight
+        lastMeasurementKey = key
+        // Drop the copied text once measured; the key keeps its own reference.
+        measurementStorage.setAttributedString(NSAttributedString())
         super.setFrameSize(NSSize(width: frame.width, height: stableHeight))
         gutterView?.subviews
             .compactMap { $0 as? FileLineNumberRulerView }

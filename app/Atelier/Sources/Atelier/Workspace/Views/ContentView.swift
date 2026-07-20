@@ -806,55 +806,13 @@ struct WorkspaceView: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 ForEach(WorkspaceSidebarTab.allCases) { tab in
-                    let isSelected = selectedSidebarTab == tab
-                    let changeCount = tab == .sourceControl
-                        ? gitModel.snapshot.status.changes.count
-                        : 0
-
-                    Button {
+                    WorkspaceSidebarTabButton(
+                        tab: tab,
+                        isSelected: selectedSidebarTab == tab,
+                        gitModel: gitModel
+                    ) {
                         selectedSidebarTab = tab
-                    } label: {
-                        Label(tab.rawValue, systemImage: tab.systemImage)
-                            .font(
-                                .system(
-                                    size: AtelierTypography.uiSize,
-                                    weight: isSelected ? .semibold : .regular
-                                )
-                            )
-                            .foregroundStyle(
-                                isSelected
-                                    ? AtelierTheme.chromeSelectionInk
-                                    : Color.secondary
-                            )
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity)
-                            .overlay(alignment: .trailing) {
-                                if changeCount > 0 {
-                                    AtelierCountBadge(
-                                        value: changeCount,
-                                        color: AtelierTheme.gitOrange
-                                    )
-                                    .accessibilityHidden(true)
-                                    .padding(.trailing, AtelierMetrics.spaceM)
-                                }
-                            }
                     }
-                    .buttonStyle(
-                        WorkspaceSidebarTabButtonStyle(
-                            isSelected: isSelected
-                        )
-                    )
-                    .accessibilityLabel(
-                        changeCount > 0
-                            ? "\(tab.rawValue), \(changeCount) changes"
-                            : tab.rawValue
-                    )
-                    .accessibilityValue(
-                        isSelected ? "Selected" : "Not selected"
-                    )
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
-                    .help(tab.rawValue)
-                    .frame(maxWidth: .infinity)
                 }
             }
             .frame(height: AtelierMetrics.panelHeaderHeight)
@@ -916,18 +874,7 @@ struct WorkspaceView: View {
                 }
                 .buttonStyle(AtelierRowIconButtonStyle())
             case .sourceControl:
-                Button {
-                    gitModel.refresh()
-                } label: {
-                    if gitModel.isLoading {
-                        ProgressView().controlSize(.mini)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-                .buttonStyle(AtelierRowIconButtonStyle())
-                .accessibilityLabel("Refresh Git status")
-                .help("Refresh Git status")
+                GitRefreshButton(gitModel: gitModel)
             }
         }
         .padding(.horizontal, AtelierMetrics.spaceS)
@@ -961,10 +908,10 @@ struct WorkspaceView: View {
                 .environment(\.atelierZoomScale, zoom.sidebarScale)
             }
 
-            FileTreeView(
+            ExplorerFileTree(
+                gitModel: gitModel,
                 rootURL: workspaceURL,
                 revision: session.fileTreeRevision,
-                ignoredPaths: gitModel.snapshot.status.ignoredPaths,
                 onTargetDirectoryChange: { fileTreeTargetDirectory = $0 },
                 onCreateItem: { kind, parentURL in
                     fileTreeCreationRequest = FileTreeCreationRequest(
@@ -1010,10 +957,7 @@ struct WorkspaceView: View {
 
     private var statusBar: some View {
         HStack(spacing: AtelierMetrics.spaceM) {
-            Label(
-                gitModel.snapshot.branch.isEmpty ? "detached" : gitModel.snapshot.branch,
-                systemImage: "arrow.triangle.branch"
-            )
+            GitBranchLabel(gitModel: gitModel)
             Spacer()
             if zoom.isFocusMode {
                 Text("Focus")
@@ -1032,6 +976,124 @@ struct WorkspaceView: View {
                 .fill(AtelierTheme.border)
                 .frame(height: AtelierTheme.strokeHairline)
         }
+    }
+}
+
+// Git-dependent leaves live in their own views so a git snapshot change
+// invalidates only these leaves instead of the whole WorkspaceView tree.
+private struct WorkspaceSidebarTabButton: View {
+    let tab: WorkspaceSidebarTab
+    let isSelected: Bool
+    let gitModel: GitWorkspaceModel
+    let action: () -> Void
+
+    var body: some View {
+        let changeCount = tab == .sourceControl
+            ? gitModel.snapshot.status.changes.count
+            : 0
+
+        Button(action: action) {
+            Label(tab.rawValue, systemImage: tab.systemImage)
+                .font(
+                    .system(
+                        size: AtelierTypography.uiSize,
+                        weight: isSelected ? .semibold : .regular
+                    )
+                )
+                .foregroundStyle(
+                    isSelected
+                        ? AtelierTheme.chromeSelectionInk
+                        : Color.secondary
+                )
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .trailing) {
+                    if changeCount > 0 {
+                        AtelierCountBadge(
+                            value: changeCount,
+                            color: AtelierTheme.gitOrange
+                        )
+                        .accessibilityHidden(true)
+                        .padding(.trailing, AtelierMetrics.spaceM)
+                    }
+                }
+        }
+        .buttonStyle(
+            WorkspaceSidebarTabButtonStyle(
+                isSelected: isSelected
+            )
+        )
+        .accessibilityLabel(
+            changeCount > 0
+                ? "\(tab.rawValue), \(changeCount) changes"
+                : tab.rawValue
+        )
+        .accessibilityValue(
+            isSelected ? "Selected" : "Not selected"
+        )
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .help(tab.rawValue)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct GitRefreshButton: View {
+    let gitModel: GitWorkspaceModel
+
+    var body: some View {
+        Button {
+            gitModel.refresh()
+        } label: {
+            if gitModel.isLoading {
+                ProgressView().controlSize(.mini)
+            } else {
+                Image(systemName: "arrow.clockwise")
+            }
+        }
+        .buttonStyle(AtelierRowIconButtonStyle())
+        .accessibilityLabel("Refresh Git status")
+        .help("Refresh Git status")
+    }
+}
+
+private struct GitBranchLabel: View {
+    let gitModel: GitWorkspaceModel
+
+    var body: some View {
+        Label(
+            gitModel.snapshot.branch.isEmpty ? "detached" : gitModel.snapshot.branch,
+            systemImage: "arrow.triangle.branch"
+        )
+    }
+}
+
+private struct ExplorerFileTree: View {
+    let gitModel: GitWorkspaceModel
+    let rootURL: URL
+    let revision: Int
+    let onTargetDirectoryChange: (URL) -> Void
+    let onCreateItem: (FileTreeCreationKind, URL) -> Void
+    let onRenameItem: (URL, String) -> Void
+    let onMoveItemToTrash: (URL) -> Void
+    let onAddItemToGitIgnore: (URL) -> Void
+    let onPasteRelativePath: (String) -> Bool
+    let onPreview: (URL) -> Void
+    let onOpen: (URL) -> Void
+
+    var body: some View {
+        FileTreeView(
+            rootURL: rootURL,
+            revision: revision,
+            ignoredPaths: gitModel.snapshot.status.ignoredPaths,
+            onTargetDirectoryChange: onTargetDirectoryChange,
+            onCreateItem: onCreateItem,
+            onRenameItem: onRenameItem,
+            onMoveItemToTrash: onMoveItemToTrash,
+            onAddItemToGitIgnore: onAddItemToGitIgnore,
+            onPasteRelativePath: onPasteRelativePath,
+            onPreview: onPreview,
+            onOpen: onOpen
+        )
     }
 }
 
