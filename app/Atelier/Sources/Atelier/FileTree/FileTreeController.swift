@@ -177,8 +177,9 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     }
 
     @objc private func handlePreview(_ sender: NSOutlineView) {
-        guard sender.selectedRow >= 0,
-              let node = sender.item(atRow: sender.selectedRow) as? FileTreeNode else { return }
+        let row = sender.clickedRow >= 0 ? sender.clickedRow : sender.selectedRow
+        guard row >= 0,
+              let node = sender.item(atRow: row) as? FileTreeNode else { return }
         if node.isDirectory {
             sender.isItemExpanded(node) ? sender.collapseItem(node) : sender.expandItem(node)
         } else {
