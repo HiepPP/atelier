@@ -6,6 +6,7 @@ import Observation
 final class EditorSession {
     let document: EditorDocument
     private(set) var content: FileContent = .loading
+    private(set) var selectedLineRange: ClosedRange<Int>?
     var isWordWrapEnabled = true
     private var loadTask: Task<Void, Never>?
     private weak var surface: (any EditorSurface)?
@@ -30,6 +31,7 @@ final class EditorSession {
         loadTask?.cancel()
         loadTask = nil
         surface = nil
+        selectedLineRange = nil
     }
 
     func toggleWordWrap() {
@@ -48,6 +50,22 @@ final class EditorSession {
     func performFindAction(_ action: EditorFindAction) {
         guard canFindInFile else { return }
         surface?.performFindAction(action)
+    }
+
+    func updateSelection(text: String, range: NSRange) {
+        selectedLineRange = EditorSelectionReferencePolicy.lineRange(
+            in: text,
+            selection: range
+        )
+    }
+
+    func selectionReference(workspaceRootURL: URL) -> String? {
+        guard let selectedLineRange else { return nil }
+        return EditorSelectionReferencePolicy.reference(
+            fileURL: document.url,
+            workspaceRootURL: workspaceRootURL,
+            lineRange: selectedLineRange
+        )
     }
 
     var canFindInFile: Bool {

@@ -75,6 +75,31 @@ struct AtelierTests {
         session.close()
     }
 
+    @Test("Editor selection references use UTF-16 line ranges")
+    func editorSelectionReferences() throws {
+        let text = "first\nemoji 👩🏽‍💻\nthird\nfourth"
+        let source = text as NSString
+        let selection = source.range(of: "emoji 👩🏽‍💻\nthird")
+        let lineRange = try #require(
+            EditorSelectionReferencePolicy.lineRange(in: text, selection: selection)
+        )
+
+        #expect(lineRange == 2...3)
+        #expect(EditorSelectionReferencePolicy.lineRange(
+            in: text,
+            selection: NSRange(location: 0, length: 6)
+        ) == 1...1)
+        #expect(EditorSelectionReferencePolicy.lineRange(
+            in: text,
+            selection: NSRange(location: 0, length: 0)
+        ) == nil)
+        #expect(EditorSelectionReferencePolicy.reference(
+            fileURL: URL(fileURLWithPath: "/tmp/project/apps/catalog.ts"),
+            workspaceRootURL: URL(fileURLWithPath: "/tmp/project", isDirectory: true),
+            lineRange: 10...15
+        ) == "@apps/catalog.ts:10~15 ")
+    }
+
     @Test("File tree filters ignored paths and sorts directories first")
     func fileTree() async throws {
         let root = temporaryDirectory("file-tree")

@@ -496,6 +496,10 @@ Persistence boundaries:
 - Keep native previous, next, replace, replace-all, selection, match-mode, and result-count behavior.
 - Keep search inside the file scroll view. Closing search restores focus to the editor.
 - Keep editor word wrap as a per-file setting.
+- With a non-empty editor selection, `Cmd-Shift-C` inserts
+  `@<workspace-relative-path>:<first-line>~<last-line> ` into the most recently selected terminal
+  and switches to that terminal. Keep exactly one trailing space. Disable the command when no
+  text is selected.
 - Promote a preview before the first edit is saved.
 - Preserve first responder across palette, zoom, inspector, and sidecar transitions.
 - Keep the terminal's structural parent and proposed size stable while a sidecar opens or closes. Never reserve terminal width for agent responses.
@@ -530,6 +534,7 @@ Persistence boundaries:
 | `Cmd-G` | Next file-search match |
 | `Cmd-Shift-G` | Previous file-search match |
 | `Cmd-E` | Use editor selection for file search |
+| `Cmd-Shift-C` | Insert selected editor line reference into terminal |
 | `Ctrl--` | Back |
 | `Ctrl-Shift--` | Forward |
 | `Cmd-Shift-T` | Reopen Closed Tab |

@@ -295,8 +295,10 @@ struct FileViewer: NSViewRepresentable {
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard notification.object as? STTextView === textView,
-                  scrollView?.isFindBarVisible == true else { return }
+            guard let textView,
+                  notification.object as? STTextView === textView else { return }
+            updateSelectionState(textView)
+            guard scrollView?.isFindBarVisible == true else { return }
             lineNumberView?.scheduleVisibleLineRefresh()
             if let textView = textView as? StableFileTextView {
                 textView.prepareForFindRelocation()
@@ -462,6 +464,7 @@ struct FileViewer: NSViewRepresentable {
                     length: min(selection.length, text.length - selection.location)
                 )
             }
+            updateSelectionState(textView)
             scrollView.contentView.scroll(to: origin)
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
@@ -532,6 +535,13 @@ struct FileViewer: NSViewRepresentable {
             textView?.gutterView?.subviews
                 .compactMap { $0 as? FileLineNumberRulerView }
                 .first
+        }
+
+        private func updateSelectionState(_ textView: STTextView) {
+            surfaceOwner?.updateSelection(
+                text: textView.text ?? "",
+                range: textView.textSelection
+            )
         }
     }
 }

@@ -244,6 +244,32 @@ struct TerminalTabsNavigationTests {
         #expect(!tabs.pasteIntoSelectedTerminal("@Sources/App.swift "))
     }
 
+    @Test("Editor selection reference returns to the last selected terminal")
+    func editorSelectionReferenceTarget() throws {
+        let fixture = try Fixture(names: ["A.swift"])
+        defer { fixture.remove() }
+        let tabs = TerminalTabsModel(workspacePath: fixture.root.path)
+        defer { tabs.closeAll() }
+
+        tabs.add()
+        let lastTerminalID = tabs.selectedID
+        tabs.openFile(fixture.url("A.swift"))
+        let editor = try #require(tabs.selectedEditor)
+        #expect(!tabs.canPasteSelectedEditorReference)
+
+        let text = "first\nsecond\nthird"
+        editor.updateSelection(
+            text: text,
+            range: (text as NSString).range(of: "second\nthird")
+        )
+
+        #expect(editor.selectionReference(workspaceRootURL: fixture.root) == "@A.swift:2~3 ")
+        #expect(tabs.canPasteSelectedEditorReference)
+        #expect(tabs.pasteSelectedEditorReferenceIntoTerminal())
+        #expect(tabs.selectedID == lastTerminalID)
+        #expect(tabs.isTerminalSelected)
+    }
+
     @Test("Removing a tree item closes descendant tabs and clears stale history")
     func closeFilesForTreeMutation() throws {
         let fixture = try Fixture(names: ["Keep.swift"])

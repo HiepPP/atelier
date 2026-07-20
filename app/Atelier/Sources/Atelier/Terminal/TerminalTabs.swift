@@ -125,6 +125,7 @@ final class TerminalTabsModel {
     private var tabs: [CenterTab] = []
     private var recentFiles = RecentFileHistory()
     private var fileNavigationHistory = FileNavigationHistory()
+    private var lastSelectedTerminalID: UUID?
     var selectedID: UUID?
 
     fileprivate let workspacePath: String
@@ -143,7 +144,7 @@ final class TerminalTabsModel {
         tabs.first { $0.id == selectedID }
     }
 
-    fileprivate var selectedEditor: EditorSession? {
+    var selectedEditor: EditorSession? {
         guard let selectedTab,
               case .file(let editor) = selectedTab.content else { return nil }
         return editor
@@ -212,7 +213,29 @@ final class TerminalTabsModel {
         guard !text.isEmpty,
               let selectedTab,
               case .terminal(let session) = selectedTab.content else { return false }
+        lastSelectedTerminalID = selectedTab.id
         session.controller.paste(text)
+        return true
+    }
+
+    var canPasteSelectedEditorReference: Bool {
+        guard let selectedEditor,
+              selectedEditor.selectionReference(workspaceRootURL: workspaceRootURL) != nil else {
+            return false
+        }
+        return preferredTerminalTab != nil
+    }
+
+    @discardableResult
+    func pasteSelectedEditorReferenceIntoTerminal() -> Bool {
+        guard let selectedEditor,
+              let reference = selectedEditor.selectionReference(
+                  workspaceRootURL: workspaceRootURL
+              ),
+              let terminalTab = preferredTerminalTab,
+              case .terminal(let session) = terminalTab.content else { return false }
+        select(terminalTab)
+        session.controller.paste(reference)
         return true
     }
 
@@ -358,7 +381,7 @@ final class TerminalTabsModel {
         let tab = CenterTab(content: .terminal(session))
         nextNumber += 1
         tabs.append(tab)
-        selectedID = tab.id
+        select(tab)
     }
 
     func closeAll() {
@@ -377,6 +400,7 @@ final class TerminalTabsModel {
         tabs.removeAll(keepingCapacity: false)
         recentFiles.removeAll()
         fileNavigationHistory.clear()
+        lastSelectedTerminalID = nil
         selectedID = nil
     }
 
@@ -532,6 +556,9 @@ final class TerminalTabsModel {
 
     fileprivate func select(_ tab: CenterTab) {
         selectedID = tab.id
+        if case .terminal = tab.content {
+            lastSelectedTerminalID = tab.id
+        }
         if let target = navigationTarget(for: tab) {
             fileNavigationHistory.record(target)
         }
@@ -576,6 +603,46 @@ final class TerminalTabsModel {
                 fileNavigationHistory.record(target)
             }
         }
+        repairLastSelectedTerminal()
+    }
+
+    private var workspaceRootURL: URL {
+        URL(fileURLWithPath: workspacePath, isDirectory: true)
+    }
+
+    private var preferredTerminalTab: CenterTab? {
+        if let lastSelectedTerminalID,
+           let tab = tabs.first(where: { tab in
+               guard tab.id == lastSelectedTerminalID,
+                     case .terminal = tab.content else { return false }
+               return true
+           }) {
+            return tab
+        }
+        return tabs.first { tab in
+            if case .terminal = tab.content { return true }
+            return false
+        }
+    }
+
+    private func repairLastSelectedTerminal() {
+        if let lastSelectedTerminalID,
+           tabs.contains(where: { tab in
+               guard tab.id == lastSelectedTerminalID,
+                     case .terminal = tab.content else { return false }
+               return true
+           }) {
+            return
+        }
+        if let selectedTab,
+           case .terminal = selectedTab.content {
+            lastSelectedTerminalID = selectedTab.id
+            return
+        }
+        lastSelectedTerminalID = tabs.first(where: { tab in
+            if case .terminal = tab.content { return true }
+            return false
+        })?.id
     }
 
     private func navigationTarget(for tab: CenterTab) -> FileNavigationTarget? {
@@ -626,6 +693,10 @@ private struct CloseActiveTabKey: FocusedValueKey {
     typealias Value = () -> Void
 }
 
+private struct InsertSelectionReferenceKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
 extension FocusedValues {
     @Entry var activeEditor: EditorSession?
 
@@ -643,16 +714,28 @@ extension FocusedValues {
         get { self[CloseActiveTabKey.self] }
         set { self[CloseActiveTabKey.self] = newValue }
     }
+
+    var insertSelectionReference: (() -> Void)? {
+        get { self[InsertSelectionReferenceKey.self] }
+        set { self[InsertSelectionReferenceKey.self] = newValue }
+    }
 }
 
 struct AtelierTabCommands: Commands {
     @FocusedValue(\.activeEditor) private var activeEditor
+    @FocusedValue(\.insertSelectionReference) private var insertSelectionReference
     @FocusedValue(\.renameActiveTab) private var renameActiveTab
     @FocusedValue(\.toggleWordWrap) private var toggleWordWrap
     @FocusedValue(\.closeActiveTab) private var closeActiveTab
 
     var body: some Commands {
         CommandGroup(after: .pasteboard) {
+            Button("Insert Selection Reference into Terminal") {
+                insertSelectionReference?()
+            }
+            .keyboardShortcut("c", modifiers: [.command, .shift])
+            .disabled(insertSelectionReference == nil)
+
             Divider()
 
             Button("Find...") {
@@ -993,6 +1076,7 @@ struct TerminalTabs: View {
             }
         }
         .focusedSceneValue(\.activeEditor, model.selectedEditor)
+        .focusedSceneValue(\.insertSelectionReference, insertSelectionReferenceAction)
         .focusedSceneValue(\.renameActiveTab) {
             guard let selectedID = model.selectedID else { return }
             beginRename(selectedID)
@@ -1022,6 +1106,11 @@ struct TerminalTabs: View {
     private var toggleWordWrapAction: (() -> Void)? {
         guard let editor = model.selectedEditor else { return nil }
         return { editor.toggleWordWrap() }
+    }
+
+    private var insertSelectionReferenceAction: (() -> Void)? {
+        guard model.canPasteSelectedEditorReference else { return nil }
+        return { model.pasteSelectedEditorReferenceIntoTerminal() }
     }
 
     private var closeActiveTabAction: (() -> Void)? {
