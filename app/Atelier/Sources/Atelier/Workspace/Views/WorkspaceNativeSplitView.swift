@@ -4,7 +4,6 @@ import SwiftUI
 nonisolated enum WorkspaceSplitAnimationPolicy {
     static let panelDuration = 0.20
     static let panelRollDistance: CGFloat = 24
-    static let frameCount = 12
 
     static func animates(
         panelChanged: Bool,
@@ -189,6 +188,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         var sidebarAnimationRequestID = 0
         var inspectorAnimationRequestID = 0
         private var updateGeneration = 0
+        private var pendingUpdateGeneration: Int?
 
         func install(
             controller: NSSplitViewController,
@@ -224,133 +224,56 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             animatesSidebar: Bool,
             animatesInspector: Bool
         ) {
-            guard sidebarChanged || inspectorChanged else { return }
+            let reconcilesSidebar = sidebarItem?.isCollapsed == showsSidebar
+            let reconcilesInspector = inspectorItem?.isCollapsed == showsInspector
 
             self.showsSidebar = showsSidebar
             self.showsInspector = showsInspector
             self.sidebarAnimationRequestID = sidebarAnimationRequestID
             self.inspectorAnimationRequestID = inspectorAnimationRequestID
+            guard sidebarChanged || inspectorChanged || reconcilesSidebar
+                || reconcilesInspector else { return }
+            if !sidebarChanged && !inspectorChanged && pendingUpdateGeneration != nil {
+                return
+            }
+
             updateGeneration += 1
             let generation = updateGeneration
+            pendingUpdateGeneration = generation
 
-            Task { @MainActor [weak self] in
-                await Task.yield()
-                guard let self, generation == updateGeneration else { return }
-
-                let opensPanel = (sidebarChanged && showsSidebar)
-                    || (inspectorChanged && showsInspector)
-                if opensPanel {
-                    applyPanelStateImmediately(
-                        showsSidebar: showsSidebar,
-                        showsInspector: showsInspector,
-                        sidebarChanged: sidebarChanged,
-                        inspectorChanged: inspectorChanged
-                    )
+            DispatchQueue.main.async { [weak self] in
+                guard let self, generation == updateGeneration else {
                     return
                 }
-
-                if inspectorChanged && !animatesInspector {
-                    applyInspectorState(isPresented: showsInspector)
-                }
-                if sidebarChanged && !animatesSidebar {
-                    applySidebarState(isPresented: showsSidebar)
-                }
-                guard animatesSidebar || animatesInspector else { return }
-
-                guard let splitView = controller?.splitView else {
-                    applyPanelStateImmediately(
-                        showsSidebar: showsSidebar,
-                        showsInspector: showsInspector,
-                        sidebarChanged: sidebarChanged,
-                        inspectorChanged: inspectorChanged
-                    )
-                    return
-                }
-
-                if sidebarChanged && animatesSidebar {
-                    sidebarItem?.minimumThickness = 0
-                    sidebarItem?.canCollapse = false
-                }
-                if inspectorChanged && animatesInspector {
-                    inspectorItem?.minimumThickness = 0
-                    inspectorItem?.canCollapse = false
-                }
-
-                let arrangedSubviews = splitView.arrangedSubviews
-                let sidebarStart = arrangedSubviews.first?.frame.maxX ?? 0
-                let inspectorStart = arrangedSubviews.count > 2
-                    ? arrangedSubviews[2].frame.minX - splitView.dividerThickness
-                    : splitView.bounds.width
-                let frameInterval = WorkspaceSplitAnimationPolicy.panelDuration
-                    / Double(WorkspaceSplitAnimationPolicy.frameCount)
                 defer {
-                    if sidebarChanged && animatesSidebar {
-                        sidebarItem?.canCollapse = true
-                        sidebarItem?.minimumThickness = AtelierMetrics.workspaceSidebarMinWidth
-                    }
-                    if inspectorChanged && animatesInspector {
-                        inspectorItem?.canCollapse = true
-                        inspectorItem?.minimumThickness = AtelierMetrics.inspectorMinWidth
+                    if pendingUpdateGeneration == generation {
+                        pendingUpdateGeneration = nil
                     }
                 }
 
-                for frame in 1...WorkspaceSplitAnimationPolicy.frameCount {
-                    guard generation == updateGeneration else { return }
-                    let progress = CGFloat(frame)
-                        / CGFloat(WorkspaceSplitAnimationPolicy.frameCount)
-                    let easedProgress = 1 - pow(1 - progress, 3)
+                let updatesSidebar = sidebarItem?.isCollapsed == showsSidebar
+                let updatesInspector = inspectorItem?.isCollapsed == showsInspector
 
-                    if inspectorChanged && animatesInspector {
-                        let position = inspectorStart
-                            + (splitView.bounds.width - inspectorStart) * easedProgress
-                        splitView.setPosition(position, ofDividerAt: 1)
-                    }
-                    if sidebarChanged && animatesSidebar {
-                        splitView.setPosition(
-                            sidebarStart * (1 - easedProgress),
-                            ofDividerAt: 0
-                        )
-                    }
-
-                    if frame < WorkspaceSplitAnimationPolicy.frameCount {
-                        try? await Task.sleep(for: .seconds(frameInterval))
-                    }
+                if updatesInspector && !animatesInspector {
+                    inspectorItem?.isCollapsed = !showsInspector
                 }
-
-                guard generation == updateGeneration else { return }
-                if sidebarChanged && animatesSidebar {
-                    applySidebarState(isPresented: showsSidebar)
+                if updatesSidebar && !animatesSidebar {
+                    sidebarItem?.isCollapsed = !showsSidebar
                 }
-                if inspectorChanged && animatesInspector {
-                    applyInspectorState(isPresented: showsInspector)
+                guard (updatesSidebar && animatesSidebar)
+                    || (updatesInspector && animatesInspector) else { return }
+
+                NSAnimationContext.runAnimationGroup { animationContext in
+                    animationContext.duration = WorkspaceSplitAnimationPolicy.panelDuration
+                    animationContext.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    if updatesInspector && animatesInspector {
+                        inspectorItem?.animator().isCollapsed = !showsInspector
+                    }
+                    if updatesSidebar && animatesSidebar {
+                        sidebarItem?.animator().isCollapsed = !showsSidebar
+                    }
                 }
             }
-        }
-
-        private func applyPanelStateImmediately(
-            showsSidebar: Bool,
-            showsInspector: Bool,
-            sidebarChanged: Bool,
-            inspectorChanged: Bool
-        ) {
-            if sidebarChanged {
-                applySidebarState(isPresented: showsSidebar)
-            }
-            if inspectorChanged {
-                applyInspectorState(isPresented: showsInspector)
-            }
-        }
-
-        private func applySidebarState(isPresented: Bool) {
-            sidebarItem?.canCollapse = true
-            sidebarItem?.isCollapsed = !isPresented
-            sidebarItem?.minimumThickness = AtelierMetrics.workspaceSidebarMinWidth
-        }
-
-        private func applyInspectorState(isPresented: Bool) {
-            inspectorItem?.canCollapse = true
-            inspectorItem?.isCollapsed = !isPresented
-            inspectorItem?.minimumThickness = AtelierMetrics.inspectorMinWidth
         }
     }
 }

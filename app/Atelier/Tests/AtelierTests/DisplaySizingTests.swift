@@ -1,7 +1,28 @@
 import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import Atelier
+
+private struct WorkspacePanelGeometryProbe: View {
+    let nativeView: NSView
+    let idealWidth: CGFloat
+
+    var body: some View {
+        WorkspacePanelGeometryProbeRepresentable(nativeView: nativeView)
+            .frame(idealWidth: idealWidth)
+    }
+}
+
+private struct WorkspacePanelGeometryProbeRepresentable: NSViewRepresentable {
+    let nativeView: NSView
+
+    func makeNSView(context: Context) -> NSView {
+        nativeView
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
 
 @Suite("Display sizing")
 struct DisplaySizingTests {
@@ -166,7 +187,6 @@ struct DisplaySizingTests {
     func workspaceSplitAnimationPolicy() {
         #expect(WorkspaceSplitAnimationPolicy.panelDuration == 0.20)
         #expect(WorkspaceSplitAnimationPolicy.panelRollDistance == 24)
-        #expect(WorkspaceSplitAnimationPolicy.frameCount == 12)
         #expect(WorkspacePanelMotionEdge.leading.hiddenOffset == -24)
         #expect(WorkspacePanelMotionEdge.trailing.hiddenOffset == 24)
         #expect(
@@ -219,12 +239,304 @@ struct DisplaySizingTests {
     @Test("Workspace side panels hold width ahead of the center pane")
     func workspaceSidePanelHoldingPriority() {
         #expect(
-            WorkspaceSplitLayoutPolicy.panelCollapseBehavior == .useConstraints
+            WorkspaceSplitLayoutPolicy.panelCollapseBehavior
+                == .useConstraints
         )
         #expect(
             WorkspaceSplitLayoutPolicy.sidePanelHoldingPriority.rawValue
                 > NSLayoutConstraint.Priority.defaultLow.rawValue
         )
+    }
+
+    @Test("Workspace native split restores panels without owning window chrome")
+    func workspaceNativeSplitRestoresPanelGeometry() async {
+        typealias NativeSplit = WorkspaceNativeSplitView<
+            WorkspacePanelGeometryProbe,
+            EmptyView,
+            WorkspacePanelGeometryProbe
+        >
+
+        let controller = NSSplitViewController()
+        controller.splitView.isVertical = true
+        controller.splitView.dividerStyle = .thin
+
+        let sidebarContentView = NSView()
+        let sidebarController = NSHostingController(
+            rootView: WorkspacePanelMotionContainer(
+                content: WorkspacePanelGeometryProbe(
+                    nativeView: sidebarContentView,
+                    idealWidth: AtelierMetrics.workspaceSidebarIdealWidth
+                ),
+                isPresented: true,
+                edge: .leading,
+                reduceMotion: false
+            )
+        )
+        let sidebarItem = NSSplitViewItem(viewController: sidebarController)
+        sidebarItem.minimumThickness = AtelierMetrics.workspaceSidebarMinWidth
+        sidebarItem.maximumThickness = AtelierMetrics.workspaceSidebarMaxWidth
+        sidebarItem.canCollapse = true
+        sidebarItem.collapseBehavior = WorkspaceSplitLayoutPolicy.panelCollapseBehavior
+
+        let detailController = NSHostingController(rootView: EmptyView())
+        let detailItem = NSSplitViewItem(viewController: detailController)
+        detailItem.minimumThickness = AtelierMetrics.centerMinWidth
+
+        let inspectorContentView = NSView()
+        let inspectorController = NSHostingController(
+            rootView: WorkspacePanelMotionContainer(
+                content: WorkspacePanelGeometryProbe(
+                    nativeView: inspectorContentView,
+                    idealWidth: AtelierMetrics.inspectorIdealWidth
+                ),
+                isPresented: false,
+                edge: .trailing,
+                reduceMotion: false
+            )
+        )
+        let inspectorItem = NSSplitViewItem(viewController: inspectorController)
+        inspectorItem.minimumThickness = AtelierMetrics.inspectorMinWidth
+        inspectorItem.maximumThickness = AtelierMetrics.inspectorMaxWidth
+        inspectorItem.canCollapse = true
+        inspectorItem.collapseBehavior = WorkspaceSplitLayoutPolicy.panelCollapseBehavior
+        inspectorItem.isCollapsed = true
+
+        #expect(sidebarItem.behavior != .sidebar)
+        #expect(inspectorItem.behavior != .inspector)
+
+        controller.addSplitViewItem(sidebarItem)
+        controller.addSplitViewItem(detailItem)
+        controller.addSplitViewItem(inspectorItem)
+
+        let coordinator = NativeSplit.Coordinator()
+        coordinator.install(
+            controller: controller,
+            sidebarController: sidebarController,
+            sidebarItem: sidebarItem,
+            detailController: detailController,
+            inspectorController: inspectorController,
+            inspectorItem: inspectorItem,
+            showsSidebar: true,
+            showsInspector: false,
+            sidebarAnimationRequestID: 0,
+            inspectorAnimationRequestID: 0
+        )
+
+        let window = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 920, height: 700),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = controller
+        controller.view.layoutSubtreeIfNeeded()
+        controller.splitView.adjustSubviews()
+
+        func setSidebarPresentation(_ isPresented: Bool) {
+            sidebarController.rootView = WorkspacePanelMotionContainer(
+                content: WorkspacePanelGeometryProbe(
+                    nativeView: sidebarContentView,
+                    idealWidth: AtelierMetrics.workspaceSidebarIdealWidth
+                ),
+                isPresented: isPresented,
+                edge: .leading,
+                reduceMotion: false
+            )
+        }
+
+        func setInspectorPresentation(_ isPresented: Bool) {
+            inspectorController.rootView = WorkspacePanelMotionContainer(
+                content: WorkspacePanelGeometryProbe(
+                    nativeView: inspectorContentView,
+                    idealWidth: AtelierMetrics.inspectorIdealWidth
+                ),
+                isPresented: isPresented,
+                edge: .trailing,
+                reduceMotion: false
+            )
+        }
+
+        func waitUntil(_ condition: () -> Bool) async -> Bool {
+            for _ in 0..<300 {
+                controller.view.layoutSubtreeIfNeeded()
+                if condition() { return true }
+                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            return false
+        }
+
+        setSidebarPresentation(false)
+        coordinator.update(
+            showsSidebar: false,
+            showsInspector: false,
+            sidebarChanged: true,
+            inspectorChanged: false,
+            sidebarAnimationRequestID: 1,
+            inspectorAnimationRequestID: 0,
+            animatesSidebar: true,
+            animatesInspector: false
+        )
+        var collapsedDuringRepeatedUpdates = false
+        for _ in 0..<40 {
+            coordinator.update(
+                showsSidebar: false,
+                showsInspector: false,
+                sidebarChanged: false,
+                inspectorChanged: false,
+                sidebarAnimationRequestID: 1,
+                inspectorAnimationRequestID: 0,
+                animatesSidebar: false,
+                animatesInspector: false
+            )
+            await Task.yield()
+            controller.view.layoutSubtreeIfNeeded()
+            if sidebarItem.isCollapsed {
+                collapsedDuringRepeatedUpdates = true
+                break
+            }
+        }
+        #expect(collapsedDuringRepeatedUpdates)
+
+        let didCollapse = await waitUntil {
+            sidebarItem.isCollapsed && inspectorItem.isCollapsed
+        }
+        #expect(didCollapse)
+
+        setSidebarPresentation(true)
+        coordinator.update(
+            showsSidebar: true,
+            showsInspector: false,
+            sidebarChanged: true,
+            inspectorChanged: false,
+            sidebarAnimationRequestID: 2,
+            inspectorAnimationRequestID: 0,
+            animatesSidebar: true,
+            animatesInspector: false
+        )
+        let didRestoreGeometry = await waitUntil {
+            !sidebarItem.isCollapsed
+                && inspectorItem.isCollapsed
+                && sidebarController.view.frame.width
+                    >= AtelierMetrics.workspaceSidebarMinWidth
+                && abs(
+                    sidebarContentView.frame.width
+                        - sidebarController.view.bounds.width
+                ) < 1
+                && abs(sidebarContentView.frame.minX) < 1
+        }
+        #expect(didRestoreGeometry)
+
+        setSidebarPresentation(false)
+        setInspectorPresentation(true)
+        coordinator.update(
+            showsSidebar: false,
+            showsInspector: true,
+            sidebarChanged: true,
+            inspectorChanged: true,
+            sidebarAnimationRequestID: 2,
+            inspectorAnimationRequestID: 1,
+            animatesSidebar: false,
+            animatesInspector: true
+        )
+        let didShowStandardInspector = await waitUntil {
+            sidebarItem.isCollapsed
+                && !inspectorItem.isCollapsed
+                && inspectorController.view.frame.width
+                    >= AtelierMetrics.inspectorMinWidth
+                && abs(
+                    inspectorContentView.frame.width
+                        - inspectorController.view.bounds.width
+                ) < 1
+                && abs(inspectorContentView.frame.minX) < 1
+        }
+        #expect(didShowStandardInspector)
+
+        setSidebarPresentation(true)
+        setInspectorPresentation(false)
+        coordinator.update(
+            showsSidebar: true,
+            showsInspector: false,
+            sidebarChanged: true,
+            inspectorChanged: true,
+            sidebarAnimationRequestID: 2,
+            inspectorAnimationRequestID: 2,
+            animatesSidebar: false,
+            animatesInspector: true
+        )
+        let didRestoreStandardSidebar = await waitUntil {
+            !sidebarItem.isCollapsed
+                && inspectorItem.isCollapsed
+                && sidebarController.view.frame.width
+                    >= AtelierMetrics.workspaceSidebarMinWidth
+                && abs(
+                    sidebarContentView.frame.width
+                        - sidebarController.view.bounds.width
+                ) < 1
+        }
+        #expect(didRestoreStandardSidebar)
+
+        setSidebarPresentation(false)
+        coordinator.update(
+            showsSidebar: false,
+            showsInspector: false,
+            sidebarChanged: true,
+            inspectorChanged: true,
+            sidebarAnimationRequestID: 2,
+            inspectorAnimationRequestID: 2,
+            animatesSidebar: false,
+            animatesInspector: false
+        )
+        let didCollapseImmediately = await waitUntil {
+            sidebarItem.isCollapsed && inspectorItem.isCollapsed
+        }
+        #expect(didCollapseImmediately)
+
+        window.setContentSize(CGSize(width: 1_440, height: 900))
+        controller.view.layoutSubtreeIfNeeded()
+        controller.splitView.adjustSubviews()
+
+        setSidebarPresentation(true)
+        coordinator.update(
+            showsSidebar: true,
+            showsInspector: false,
+            sidebarChanged: true,
+            inspectorChanged: false,
+            sidebarAnimationRequestID: 2,
+            inspectorAnimationRequestID: 2,
+            animatesSidebar: false,
+            animatesInspector: false
+        )
+        setInspectorPresentation(true)
+        coordinator.update(
+            showsSidebar: true,
+            showsInspector: true,
+            sidebarChanged: false,
+            inspectorChanged: true,
+            sidebarAnimationRequestID: 2,
+            inspectorAnimationRequestID: 2,
+            animatesSidebar: false,
+            animatesInspector: false
+        )
+        let didRestoreCoalescedGeometry = await waitUntil {
+            !sidebarItem.isCollapsed
+                && !inspectorItem.isCollapsed
+                && sidebarController.view.frame.width
+                    >= AtelierMetrics.workspaceSidebarMinWidth
+                && inspectorController.view.frame.width
+                    >= AtelierMetrics.inspectorMinWidth
+                && abs(
+                    sidebarContentView.frame.width
+                        - sidebarController.view.bounds.width
+                ) < 1
+                && abs(
+                    inspectorContentView.frame.width
+                        - inspectorController.view.bounds.width
+                ) < 1
+                && abs(sidebarContentView.frame.minX) < 1
+                && abs(inspectorContentView.frame.minX) < 1
+        }
+        #expect(didRestoreCoalescedGeometry)
     }
 
     @Test("Project command menu centers against the full app window")
