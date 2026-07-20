@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Status | Current implementation baseline |
-| Updated | 2026-07-19 |
+| Updated | 2026-07-20 |
 | Baseline commit | `02ebe5b` |
 | Platform | macOS 26+ |
 | UI stack | SwiftUI, AppKit, Luminare |
@@ -212,15 +212,16 @@ Depth rules:
 | `headline` | 15 | Panel headers |
 | `title` | 17 | Section titles and strong empty states |
 | `display` | 24 | Large empty-state titles |
-| `editorSize` | 13 | Source editor |
-| `terminalSize` | 14 | Terminal |
+| `editorSize` | 16 | Source editor |
+| `terminalSize` | 20 | Terminal |
 
 Type rules:
 
 - Use the native system face for interface text.
 - Use serif only for editorial headers and empty-state titles.
 - Use monospaced text for paths, code, shortcuts, counts, and technical metadata.
-- Prefer JetBrains Mono for code. Fall back to the system monospaced font.
+- Use JetBrains Mono Regular (400) for code. Fall back to the system monospaced font.
+- Keep contextual code ligatures enabled in the editor and terminal.
 - Use semibold for hierarchy. Avoid broad use of bold text.
 - Snap scaled sizes to device pixels to keep text crisp.
 

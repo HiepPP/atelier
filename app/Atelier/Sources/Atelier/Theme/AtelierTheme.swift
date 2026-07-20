@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SwiftUI
 @_spi(Advanced) import SwiftUIIntrospect
 
@@ -154,6 +155,9 @@ enum AtelierMetrics {
 
 enum AtelierTypography {
     // Typographic scale: micro < caption < label < body < uiSize < headline < display.
+    static let codeFontFamily = "JetBrains Mono"
+    static let codeFontWeight = NSFont.Weight.regular
+    static let codeFontLigaturesEnabled = true
     static let micro: CGFloat = 11
     static let caption: CGFloat = 11
     static let label: CGFloat = 11.5
@@ -162,12 +166,26 @@ enum AtelierTypography {
     static let headline: CGFloat = 15
     static let title: CGFloat = 17
     static let display: CGFloat = 24
-    static let editorSize: CGFloat = 13
-    static let terminalSize: CGFloat = 14
+    static let editorSize: CGFloat = 16
+    static let terminalSize: CGFloat = 20
 
     static func codeFont(size: CGFloat) -> NSFont {
-        NSFont(name: "JetBrains Mono", size: size)
-            ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+        let descriptor = NSFontDescriptor(fontAttributes: [
+            .family: codeFontFamily,
+            .traits: [NSFontDescriptor.TraitKey.weight: codeFontWeight]
+        ])
+        let baseFont = NSFont(descriptor: descriptor, size: size)
+            ?? .monospacedSystemFont(ofSize: size, weight: codeFontWeight)
+        guard codeFontLigaturesEnabled else { return baseFont }
+
+        let featureSettings: [[NSFontDescriptor.FeatureKey: Any]] = [[
+            .typeIdentifier: kContextualAlternatesType,
+            .selectorIdentifier: kContextualAlternatesOnSelector
+        ]]
+        let ligatureDescriptor = baseFont.fontDescriptor.addingAttributes([
+            .featureSettings: featureSettings
+        ])
+        return NSFont(descriptor: ligatureDescriptor, size: size) ?? baseFont
     }
 }
 

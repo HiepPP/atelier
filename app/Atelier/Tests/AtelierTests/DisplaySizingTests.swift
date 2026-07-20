@@ -94,8 +94,11 @@ struct DisplaySizingTests {
         #expect(AtelierTypography.micro == 11)
         #expect(AtelierTypography.caption == 11)
         #expect(AtelierTypography.uiSize == 13)
-        #expect(AtelierTypography.editorSize == 13)
-        #expect(AtelierTypography.terminalSize == 14)
+        #expect(AtelierTypography.codeFontFamily == "JetBrains Mono")
+        #expect(AtelierTypography.codeFontWeight == .regular)
+        #expect(AtelierTypography.codeFontLigaturesEnabled)
+        #expect(AtelierTypography.editorSize == 16)
+        #expect(AtelierTypography.terminalSize == 20)
         #expect(AtelierZoomModel.baseMinimumSize == CGSize(width: 760, height: 512))
     }
 
