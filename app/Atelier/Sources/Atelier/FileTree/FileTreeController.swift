@@ -427,6 +427,15 @@ private final class FileTreeCellView: NSTableCellView {
 private final class FileTreeOutlineView: NSOutlineView {
     var menuProvider: ((Int) -> NSMenu?)?
 
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        let visibleRows = rows(in: visibleRect)
+        guard visibleRows.location != NSNotFound else { return }
+        for row in visibleRows.location..<NSMaxRange(visibleRows) {
+            addCursorRect(rect(ofRow: row).intersection(visibleRect), cursor: .pointingHand)
+        }
+    }
+
     override func menu(for event: NSEvent) -> NSMenu? {
         let location = convert(event.locationInWindow, from: nil)
         return menuProvider?(row(at: location))
@@ -470,13 +479,7 @@ private final class FileTreeRowView: NSTableRowView {
         }
         let area = NSTrackingArea(
             rect: .zero,
-            options: [
-                .activeInKeyWindow,
-                .inVisibleRect,
-                .mouseEnteredAndExited,
-                .mouseMoved,
-                .cursorUpdate
-            ],
+            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited],
             owner: self,
             userInfo: nil
         )
@@ -488,22 +491,11 @@ private final class FileTreeRowView: NSTableRowView {
     override func mouseEntered(with event: NSEvent) {
         isHovering = true
         needsDisplay = true
-        NSCursor.pointingHand.set()
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
-        NSCursor.pointingHand.set()
-    }
-
-    override func cursorUpdate(with event: NSEvent) {
-        NSCursor.pointingHand.set()
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovering = false
         needsDisplay = true
-        NSCursor.arrow.set()
     }
 
     override func drawBackground(in dirtyRect: NSRect) {
