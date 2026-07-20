@@ -232,6 +232,18 @@ struct TerminalTabsNavigationTests {
         #expect(tabs.recentFileURLs.isEmpty)
     }
 
+    @Test("Path paste targets only the selected terminal")
+    func pathPasteTarget() throws {
+        let fixture = try Fixture(names: ["A.swift"])
+        defer { fixture.remove() }
+        let tabs = TerminalTabsModel(workspacePath: fixture.root.path)
+        defer { tabs.closeAll() }
+
+        #expect(tabs.pasteIntoSelectedTerminal("@Sources/App.swift "))
+        tabs.openFile(fixture.url("A.swift"))
+        #expect(!tabs.pasteIntoSelectedTerminal("@Sources/App.swift "))
+    }
+
     @Test("Removing a tree item closes descendant tabs and clears stale history")
     func closeFilesForTreeMutation() throws {
         let fixture = try Fixture(names: ["Keep.swift"])

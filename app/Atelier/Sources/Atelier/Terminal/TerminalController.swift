@@ -62,6 +62,11 @@ final class TerminalController {
         terminal.layoutSubtreeIfNeeded()
     }
 
+    func paste(_ text: String) {
+        guard !isClosed, !text.isEmpty else { return }
+        terminal.pasteText(text)
+    }
+
     func close() {
         guard !isClosed else { return }
         isClosed = true
@@ -82,6 +87,21 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
     func requestFocusWhenAttached() {
         shouldFocusWhenAttached = true
         focusIfPossible()
+    }
+
+    func pasteText(_ text: String) {
+        guard !text.isEmpty else { return }
+        requestFocusWhenAttached()
+        let terminal = getTerminal()
+        if terminal.bracketedPasteMode {
+            let bracketedPasteStart: [UInt8] = [0x1b, 0x5b, 0x32, 0x30, 0x30, 0x7e]
+            send(data: bracketedPasteStart[...])
+        }
+        send(txt: text)
+        if terminal.bracketedPasteMode {
+            let bracketedPasteEnd: [UInt8] = [0x1b, 0x5b, 0x32, 0x30, 0x31, 0x7e]
+            send(data: bracketedPasteEnd[...])
+        }
     }
 
     func releaseFocusIfNeeded() {

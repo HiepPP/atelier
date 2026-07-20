@@ -9,6 +9,7 @@ struct FileTreeView: View {
     let onRenameItem: (URL, String) -> Void
     let onMoveItemToTrash: (URL) -> Void
     let onAddItemToGitIgnore: (URL) -> Void
+    let onPasteRelativePath: (String) -> Bool
     let onPreview: (URL) -> Void
     let onOpen: (URL) -> Void
 
@@ -22,6 +23,7 @@ struct FileTreeView: View {
             onRenameItem: onRenameItem,
             onMoveItemToTrash: onMoveItemToTrash,
             onAddItemToGitIgnore: onAddItemToGitIgnore,
+            onPasteRelativePath: onPasteRelativePath,
             onPreview: onPreview,
             onOpen: onOpen
         )

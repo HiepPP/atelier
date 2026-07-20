@@ -155,6 +155,28 @@ struct AtelierTests {
         }
     }
 
+    @Test("File tree paths stay relative to the workspace")
+    func fileTreeRelativePaths() {
+        let root = URL(fileURLWithPath: "/tmp/atelier-workspace", isDirectory: true)
+
+        #expect(FileTreePathPolicy.relativePath(
+            of: root.appendingPathComponent("Sources", isDirectory: true),
+            within: root
+        ) == "Sources")
+        #expect(FileTreePathPolicy.relativePath(
+            of: root.appendingPathComponent("Sources/App.swift"),
+            within: root
+        ) == "Sources/App.swift")
+        #expect(FileTreePathPolicy.relativePath(
+            of: URL(fileURLWithPath: "/tmp/atelier-workspace-copy/App.swift"),
+            within: root
+        ) == nil)
+        #expect(
+            FileTreePathPolicy.terminalReference(for: "Sources/App.swift")
+                == "@Sources/App.swift "
+        )
+    }
+
     @Test("File tree renames items and appends stable Git ignore patterns")
     func fileTreeItemActions() async throws {
         let root = temporaryDirectory("file-tree-actions")

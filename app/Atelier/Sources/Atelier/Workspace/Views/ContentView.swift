@@ -999,6 +999,7 @@ struct WorkspaceView: View {
                         }
                     }
                 },
+                onPasteRelativePath: terminalTabs.pasteIntoSelectedTerminal,
                 onPreview: terminalTabs.previewFile,
                 onOpen: terminalTabs.openFile
             )

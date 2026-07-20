@@ -10,6 +10,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     private var onRenameItem: (URL, String) -> Void
     private var onMoveItemToTrash: (URL) -> Void
     private var onAddItemToGitIgnore: (URL) -> Void
+    private var onPasteRelativePath: (String) -> Bool
     private var onPreview: (URL) -> Void
     private var onOpen: (URL) -> Void
     private var scale: CGFloat = 1
@@ -28,6 +29,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         onRenameItem: @escaping (URL, String) -> Void,
         onMoveItemToTrash: @escaping (URL) -> Void,
         onAddItemToGitIgnore: @escaping (URL) -> Void,
+        onPasteRelativePath: @escaping (String) -> Bool,
         onPreview: @escaping (URL) -> Void,
         onOpen: @escaping (URL) -> Void
     ) {
@@ -38,6 +40,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         self.onRenameItem = onRenameItem
         self.onMoveItemToTrash = onMoveItemToTrash
         self.onAddItemToGitIgnore = onAddItemToGitIgnore
+        self.onPasteRelativePath = onPasteRelativePath
         self.onPreview = onPreview
         self.onOpen = onOpen
     }
@@ -98,6 +101,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         onRenameItem: @escaping (URL, String) -> Void,
         onMoveItemToTrash: @escaping (URL) -> Void,
         onAddItemToGitIgnore: @escaping (URL) -> Void,
+        onPasteRelativePath: @escaping (String) -> Bool,
         onPreview: @escaping (URL) -> Void,
         onOpen: @escaping (URL) -> Void
     ) {
@@ -108,6 +112,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         self.onRenameItem = onRenameItem
         self.onMoveItemToTrash = onMoveItemToTrash
         self.onAddItemToGitIgnore = onAddItemToGitIgnore
+        self.onPasteRelativePath = onPasteRelativePath
         self.onPreview = onPreview
         self.onOpen = onOpen
         if root.url != rootURL {
@@ -216,6 +221,11 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         let row = sender.clickedRow >= 0 ? sender.clickedRow : sender.selectedRow
         guard row >= 0,
               let node = sender.item(atRow: row) as? FileTreeNode else { return }
+        if NSApp.currentEvent?.modifierFlags.contains(.command) == true,
+           let relativePath = FileTreePathPolicy.relativePath(of: node.url, within: root.url),
+           onPasteRelativePath(FileTreePathPolicy.terminalReference(for: relativePath)) {
+            return
+        }
         if node.isDirectory {
             sender.isItemExpanded(node) ? sender.collapseItem(node) : sender.expandItem(node)
         } else {

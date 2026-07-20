@@ -208,6 +208,14 @@ final class TerminalTabsModel {
         return true
     }
 
+    func pasteIntoSelectedTerminal(_ text: String) -> Bool {
+        guard !text.isEmpty,
+              let selectedTab,
+              case .terminal(let session) = selectedTab.content else { return false }
+        session.controller.paste(text)
+        return true
+    }
+
     var canCloseSelectedTab: Bool {
         guard let selectedTab else { return false }
         return canClose(selectedTab)

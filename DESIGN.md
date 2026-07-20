@@ -440,6 +440,9 @@ Persistence boundaries:
 - Expose the ignored state through row help text so it is not conveyed by color alone.
 - Explorer single-click opens one replaceable preview.
 - Explorer double-click opens or promotes a permanent tab.
+- Command-clicking a file or folder inserts its workspace-relative path into the selected terminal.
+  Prefix the path with `@` and append one space. If a terminal is not selected, preserve the
+  normal single-click behavior.
 - Right-clicking a file or folder exposes Rename, Move to Trash, Copy Path, and Add to `.gitignore`.
 - Rename requires a new-name prompt. Move to Trash requires destructive confirmation.
 - Disable Add to `.gitignore` when the item is already ignored or is the `.gitignore` file itself.

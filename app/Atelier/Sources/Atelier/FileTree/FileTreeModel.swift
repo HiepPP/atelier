@@ -31,6 +31,10 @@ nonisolated enum FileTreePathPolicy {
         return itemComponents.dropFirst(rootComponents.count).joined(separator: "/")
     }
 
+    static func terminalReference(for relativePath: String) -> String {
+        "@\(relativePath) "
+    }
+
     static func contains(_ candidateURL: URL, within rootURL: URL) -> Bool {
         let candidatePath = candidateURL.standardizedFileURL.path
         let rootPath = rootURL.standardizedFileURL.path
