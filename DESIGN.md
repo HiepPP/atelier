@@ -434,6 +434,7 @@ Persistence boundaries:
 - Keep selected file labels in the primary text color. Use one rounded, warm-tinted native material
   surface with no accent edge and no inverted text.
 - Vertically center the disclosure, icon, and label within every file-tree row.
+- Use overlay Explorer scroll indicators that fade away when scrolling stops.
 - Keep the base file or folder icon and add an `arrow.turn.up.right` badge after symlink names.
 - Do not expand directory symlinks from Explorer.
 - Keep Git-ignored files and folders visible, but render their row content at reduced opacity.
@@ -489,6 +490,9 @@ Persistence boundaries:
 - Keep the center work surface the brightest large region. It must remain matte, quiet, and highly legible.
 - Keep code gutters and terminal backgrounds aligned with the editor token.
 - Use the editor surface color for source, diff, and terminal content.
+- Inset the native terminal view by `spaceM` horizontally and `spaceS` vertically. Fill the
+  inset area with the editor surface color.
+- Hide the terminal scroll indicator. Keep mouse and trackpad scrolling available.
 - Use native AppKit text and terminal views through narrow representable bridges.
 - Use the native AppKit find bar for editable and read-only text files.
 - Open file search with `Cmd-F`. Search incrementally and highlight visible matches without dimming

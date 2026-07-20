@@ -23,6 +23,7 @@ final class TerminalController {
         terminal.nativeBackgroundColor = AppKitThemeAdapter.terminalBackground
         terminal.nativeForegroundColor = AppKitThemeAdapter.terminalForeground
         terminal.font = AtelierTypography.codeFont(size: AtelierTypography.terminalSize)
+        terminal.hideScrollIndicator()
         terminal.applyAtelierAppearance()
         processService.start(in: terminal, workspacePath: workspacePath)
         AppLogger.terminal.info("Started terminal session")
@@ -83,6 +84,12 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
     private var shouldFocusWhenAttached = false
     private var preciseScrollRemainder: CGFloat = 0
     private var scrollWheelMonitor: Any?
+
+    func hideScrollIndicator() {
+        for case let scroller as NSScroller in subviews {
+            scroller.isHidden = true
+        }
+    }
 
     func requestFocusWhenAttached() {
         shouldFocusWhenAttached = true

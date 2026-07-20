@@ -11,5 +11,8 @@ struct TerminalView: View {
             scale: scale,
             isActive: isActive
         )
+        .padding(.horizontal, AtelierMetrics.spaceM)
+        .padding(.vertical, AtelierMetrics.spaceS)
+        .background(AtelierTheme.editor)
     }
 }

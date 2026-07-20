@@ -79,6 +79,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
+        scrollView.scrollerStyle = .overlay
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
         scrollView.backgroundColor = AppKitThemeAdapter.sidebar
