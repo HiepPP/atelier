@@ -174,6 +174,10 @@ struct FileViewer: NSViewRepresentable {
         private var saveGeneration = 0
         private var saveTask: Task<Void, Never>?
         private var isApplyingText = false
+        // Mirror of the current document text, kept in sync on content set and on
+        // edit. Selection changes read this instead of rematerializing the whole
+        // STTextView document string on every cursor move.
+        private var cachedText = ""
         private weak var surfaceOwner: EditorSession?
         private var onEdit: () -> Void = {}
         private(set) var document: EditorDocument?
@@ -318,7 +322,11 @@ struct FileViewer: NSViewRepresentable {
                   let textView = notification.object as? STTextView,
                   let fileURL else { return }
             let text = textView.text ?? ""
+            cachedText = text
             lineNumberView?.updateText(text)
+            // Editing changes line structure, so the pinned document height is
+            // stale. Unfreeze now and re-measure after the burst settles.
+            (textView as? StableFileTextView)?.invalidateStabilizedHeightForEdit()
             onEdit()
             scheduleSave(text: text, url: fileURL)
             scheduleHighlight(text: text, language: language, delayed: true)
@@ -426,33 +434,44 @@ struct FileViewer: NSViewRepresentable {
             sourceText: String,
             expectedGeneration: Int
         ) {
+            // cachedText shares its buffer with the string the highlight was
+            // requested for, so this stale-check is O(1) on the common path and
+            // never rematerializes the whole document.
             guard highlightGeneration == expectedGeneration,
-                  textView?.text == sourceText else { return }
+                  cachedText == sourceText,
+                  let textView,
+                  let textStorage = (textView.textContentManager as? NSTextContentStorage)?
+                    .textStorage else { return }
             let nativeHighlight = NSAttributedString(highlightedText)
-            let nativeText = NSMutableAttributedString(
-                string: sourceText,
-                attributes: baseAttributes(
-                    foregroundColor: AppKitThemeAdapter.foreground
-                )
-            )
+            let storageLength = textStorage.length
+            // The highlighter trims outer whitespace; locate the trimmed span so
+            // color runs land on the right document offsets.
             let sourceRange = (sourceText as NSString).range(of: nativeHighlight.string)
-            if sourceRange.location != NSNotFound {
+            let baseColor = AppKitThemeAdapter.foreground
+            // Recolor the live text storage in place instead of replacing the
+            // whole attributedText. Foreground color does not change glyph
+            // metrics, so layout stays valid and no height re-measure is needed.
+            textView.textContentManager.performEditingTransaction {
+                textStorage.addAttribute(
+                    .foregroundColor,
+                    value: baseColor,
+                    range: NSRange(location: 0, length: storageLength)
+                )
+                guard sourceRange.location != NSNotFound else { return }
                 nativeHighlight.enumerateAttribute(
                     .foregroundColor,
                     in: NSRange(location: 0, length: nativeHighlight.length)
                 ) { value, range, _ in
                     guard let value else { return }
-                    nativeText.addAttribute(
-                        .foregroundColor,
-                        value: value,
-                        range: NSRange(
-                            location: sourceRange.location + range.location,
-                            length: range.length
-                        )
+                    let target = NSRange(
+                        location: sourceRange.location + range.location,
+                        length: range.length
                     )
+                    guard NSMaxRange(target) <= storageLength else { return }
+                    textStorage.addAttribute(.foregroundColor, value: value, range: target)
                 }
             }
-            apply(nativeText)
+            textView.needsLayout = true
         }
 
         @MainActor
@@ -461,10 +480,12 @@ struct FileViewer: NSViewRepresentable {
                   let textView = scrollView.documentView as? STTextView else { return }
             let origin = scrollView.contentView.bounds.origin
             let selection = textView.textSelection
+            let string = text.string
+            cachedText = string
             isApplyingText = true
             textView.attributedText = text
             isApplyingText = false
-            lineNumberView?.updateText(text.string)
+            lineNumberView?.updateText(string)
             ensureStableDocumentHeight()
             if selection.location <= text.length {
                 textView.textSelection = NSRange(
@@ -546,10 +567,14 @@ struct FileViewer: NSViewRepresentable {
         }
 
         private func updateSelectionState(_ textView: STTextView) {
-            surfaceOwner?.updateSelection(
-                text: textView.text ?? "",
-                range: textView.textSelection
-            )
+            let selection = textView.textSelection
+            // A caret (empty selection) yields no line range; skip the cached
+            // text entirely so plain cursor moves stay O(1).
+            guard selection.length > 0 else {
+                surfaceOwner?.updateSelection(text: "", range: selection)
+                return
+            }
+            surfaceOwner?.updateSelection(text: cachedText, range: selection)
         }
     }
 }
@@ -557,6 +582,7 @@ struct FileViewer: NSViewRepresentable {
 private final class StableFileTextView: STTextView {
     private var stabilizedDocumentHeight: CGFloat?
     private var stabilizationTask: Task<Void, Never>?
+    private var editHeightTask: Task<Void, Never>?
     private var allowsNextFindRelocationHeight = false
     private var findRelocationResetTask: Task<Void, Never>?
 
@@ -697,6 +723,21 @@ private final class StableFileTextView: STTextView {
             await Task.yield()
             guard let self else { return }
             stabilizationTask = nil
+            stabilizeDocumentHeight()
+        }
+    }
+
+    // Called on every text edit. Unfreezes the pinned height so TextKit lays
+    // the document out naturally while the user types, then re-measures once
+    // after the typing burst settles. Coalesces rapid keystrokes into a single
+    // full measurement instead of one per keystroke.
+    func invalidateStabilizedHeightForEdit() {
+        stabilizedDocumentHeight = nil
+        editHeightTask?.cancel()
+        editHeightTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled, let self else { return }
+            editHeightTask = nil
             stabilizeDocumentHeight()
         }
     }

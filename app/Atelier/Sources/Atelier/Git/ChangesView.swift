@@ -15,6 +15,8 @@ nonisolated struct DiffSelection: Equatable, Sendable {
 }
 
 nonisolated enum GitCommitPolicy {
+    private static let maximumChangedFiles = 100
+
     static func canCommit(message: String, status: GitStatus) -> Bool {
         !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !status.changes.isEmpty
@@ -22,6 +24,73 @@ nonisolated enum GitCommitPolicy {
 
     static func shouldStageAll(status: GitStatus) -> Bool {
         status.staged.isEmpty && !status.changes.isEmpty
+    }
+
+    static func generationRequest(paths: [String]) -> OllamaChatRequest {
+        let uniquePaths = Array(Set(paths)).sorted()
+        let includedPaths = uniquePaths.prefix(maximumChangedFiles)
+        var lines = includedPaths.map { "- \($0)" }
+        if uniquePaths.count > maximumChangedFiles {
+            lines.append("- and \(uniquePaths.count - maximumChangedFiles) more changed files")
+        }
+        return OllamaChatRequest(
+            messages: [
+                OllamaChatMessage(
+                    role: .system,
+                    content: """
+                    Write one concise Conventional Commit subject from changed file paths. \
+                    Infer the most likely intent. Return exactly one plain-text line with no quotes, \
+                    bullets, explanation, or Markdown. Keep it under 72 characters.
+                    """
+                ),
+                OllamaChatMessage(
+                    role: .user,
+                    content: "Changed file paths:\n\(lines.joined(separator: "\n"))"
+                )
+            ],
+            tools: []
+        )
+    }
+
+    static func normalizedGeneratedMessage(_ response: String) -> String? {
+        let lines = response.split(whereSeparator: \.isNewline)
+        guard let first = lines.first(where: { line in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !trimmed.isEmpty && trimmed != "```"
+        }) else { return nil }
+        let message = first.trimmingCharacters(
+            in: CharacterSet.whitespacesAndNewlines.union(
+                CharacterSet(charactersIn: "`\"'")
+            )
+        )
+        return message.isEmpty ? nil : message
+    }
+}
+
+actor GitCommitMessageGenerator {
+    private let client: any OllamaChatStreaming
+
+    init(client: any OllamaChatStreaming = OllamaCloudClient()) {
+        self.client = client
+    }
+
+    func generate(paths: [String]) async throws -> String {
+        let request = GitCommitPolicy.generationRequest(paths: paths)
+        let stream = await client.stream(request: request)
+        var response = ""
+        for try await chunk in stream {
+            if let content = chunk.message?.content {
+                response.append(content)
+            }
+        }
+        guard let message = GitCommitPolicy.normalizedGeneratedMessage(response) else {
+            throw GemmaAgentRuntimeError.emptyResponse
+        }
+        return message
+    }
+
+    func cancel() async {
+        await client.cancel()
     }
 }
 
@@ -35,21 +104,31 @@ final class GitWorkspaceModel {
     )
     private(set) var isLoading = false
     private(set) var errorMessage: String?
+    private(set) var isGeneratingCommitMessage = false
+    private(set) var commitMessageGenerationError: String?
 
     let workspacePath: String
     private let service = GitService()
+    private let commitMessageGenerator: GitCommitMessageGenerator
     private let onRepositoryChange: () -> Void
     private var refreshTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
     private var invalidateTask: Task<Void, Never>?
+    private var commitMessageTask: Task<Void, Never>?
     private var refreshID = UUID()
 
     init(
         workspacePath: String,
-        onRepositoryChange: @escaping () -> Void = {}
+        onRepositoryChange: @escaping () -> Void = {},
+        commitMessageClient: any OllamaChatStreaming = OllamaCloudClient()
     ) {
         self.workspacePath = workspacePath
         self.onRepositoryChange = onRepositoryChange
+        commitMessageGenerator = GitCommitMessageGenerator(client: commitMessageClient)
+    }
+
+    var canGenerateCommitMessage: Bool {
+        !snapshot.status.changes.isEmpty && !isGeneratingCommitMessage
     }
 
     func refresh() {
@@ -96,6 +175,44 @@ final class GitWorkspaceModel {
         actionTask?.cancel()
         invalidateTask?.cancel()
         invalidateTask = nil
+        cancelCommitMessageGeneration()
+    }
+
+    func generateCommitMessage(onSuccess: @escaping (String) -> Void) {
+        guard canGenerateCommitMessage else { return }
+        let paths = snapshot.status.changes.map(\.path)
+        isGeneratingCommitMessage = true
+        commitMessageGenerationError = nil
+        let generator = commitMessageGenerator
+        commitMessageTask = Task { [weak self] in
+            do {
+                let message = try await generator.generate(paths: paths)
+                guard let self, !Task.isCancelled else { return }
+                isGeneratingCommitMessage = false
+                commitMessageTask = nil
+                onSuccess(message)
+            } catch is CancellationError {
+                return
+            } catch let error as OllamaCloudError where error == .cancelled {
+                return
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                isGeneratingCommitMessage = false
+                commitMessageTask = nil
+                commitMessageGenerationError = error.localizedDescription
+                AppLogger.git.error(
+                    "Commit message generation failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    func cancelCommitMessageGeneration() {
+        commitMessageTask?.cancel()
+        commitMessageTask = nil
+        isGeneratingCommitMessage = false
+        let generator = commitMessageGenerator
+        Task { await generator.cancel() }
     }
 
     func stage(_ change: GitChange) {
@@ -306,9 +423,37 @@ struct ChangesView: View {
 
     private var commitInput: some View {
         VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
-            Text("Commit message")
-                .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                .foregroundStyle(.secondary)
+            HStack(spacing: AtelierMetrics.spaceS) {
+                Text("Commit message")
+                    .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+                    .foregroundStyle(.secondary)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    model.generateCommitMessage { message in
+                        commitMessage = message
+                        isCommitFieldFocused = true
+                    }
+                } label: {
+                    HStack(spacing: AtelierMetrics.spaceXS) {
+                        if model.isGeneratingCommitMessage {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "sparkles")
+                        }
+                        Text("Gemma")
+                    }
+                }
+                .buttonStyle(AtelierGhostButtonStyle())
+                .disabled(!model.canGenerateCommitMessage)
+                .accessibilityLabel("Generate commit message with Gemma")
+                .accessibilityValue(
+                    model.isGeneratingCommitMessage ? "Generating" : "Ready"
+                )
+                .help("Generate commit message from changed file names")
+            }
 
             TextField(commitPlaceholder, text: $commitMessage)
                 .textFieldStyle(.plain)
@@ -321,6 +466,13 @@ struct ChangesView: View {
                 .onExitCommand {
                     isCommitFieldFocused = false
                 }
+
+            if let message = model.commitMessageGenerationError {
+                Text(message)
+                    .atelierFont(size: AtelierTypography.micro)
+                    .foregroundStyle(AtelierTheme.danger)
+                    .accessibilityLabel("Gemma error: \(message)")
+            }
         }
         .padding(.horizontal, AtelierMetrics.spaceM)
         .environment(\.atelierZoomScale, zoom.sidebarScale)
@@ -416,6 +568,7 @@ struct ChangesView: View {
 
     private func commit() {
         isCommitFieldFocused = false
+        model.cancelCommitMessageGeneration()
         model.commit(
             message: commitMessage,
             stageAll: GitCommitPolicy.shouldStageAll(status: model.snapshot.status)

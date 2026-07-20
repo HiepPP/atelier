@@ -28,6 +28,11 @@ nonisolated struct TerminalTabInspectorContext: Equatable, Sendable {
     let showsActivity: Bool
 }
 
+nonisolated struct TerminalCloseConfirmation: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let title: String
+}
+
 nonisolated enum AgentSidecarLayoutPolicy {
     static let width: CGFloat = 360
 }
@@ -127,6 +132,7 @@ final class TerminalTabsModel {
     private var fileNavigationHistory = FileNavigationHistory()
     private var lastSelectedTerminalID: UUID?
     private var terminalCommandFinished: ((Int32) -> Void)?
+    private(set) var pendingTerminalCloseConfirmation: TerminalCloseConfirmation?
     var selectedID: UUID?
 
     fileprivate let workspacePath: String
@@ -473,6 +479,7 @@ final class TerminalTabsModel {
         recentFiles.removeAll()
         fileNavigationHistory.clear()
         lastSelectedTerminalID = nil
+        pendingTerminalCloseConfirmation = nil
         selectedID = nil
     }
 
@@ -598,7 +605,18 @@ final class TerminalTabsModel {
 
     func closeSelectedTab() {
         guard let selectedTab else { return }
-        close(selectedTab)
+        requestClose(selectedTab)
+    }
+
+    func confirmTerminalClose(id: UUID) {
+        pendingTerminalCloseConfirmation = nil
+        guard let tab = tabs.first(where: { $0.id == id }),
+              case .terminal = tab.content else { return }
+        close(tab)
+    }
+
+    func cancelTerminalClose() {
+        pendingTerminalCloseConfirmation = nil
     }
 
     func closeFiles(atOrUnder url: URL) {
@@ -636,20 +654,38 @@ final class TerminalTabsModel {
         }
     }
 
-    fileprivate func canClose(_ tab: CenterTab) -> Bool {
-        // The last terminal must always stay open.
-        if case .terminal = tab.content, terminalCount == 1 { return false }
-        return true
-    }
-
     fileprivate func close(_ tab: CenterTab) {
         guard canClose(tab),
               let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         removeTab(at: index, recordsClosedFile: true)
     }
 
+    fileprivate func requestClose(_ tab: CenterTab) {
+        guard canClose(tab),
+              tabs.contains(where: { $0.id == tab.id }) else { return }
+        if case .terminal(let session) = tab.content,
+           session.controller.isProcessRunning {
+            pendingTerminalCloseConfirmation = TerminalCloseConfirmation(
+                id: tab.id,
+                title: tab.title
+            )
+            return
+        }
+        close(tab)
+    }
+
+    fileprivate func canClose(_ tab: CenterTab) -> Bool {
+        if case .terminal = tab.content, terminalCount == 1 {
+            return false
+        }
+        return true
+    }
+
     private func removeTab(at index: Int, recordsClosedFile: Bool) {
         let tab = tabs[index]
+        if pendingTerminalCloseConfirmation?.id == tab.id {
+            pendingTerminalCloseConfirmation = nil
+        }
         if recordsClosedFile,
            let target = navigationTarget(for: tab) {
             fileNavigationHistory.recordClosed(target)
@@ -761,10 +797,6 @@ private struct ToggleWordWrapKey: FocusedValueKey {
     typealias Value = () -> Void
 }
 
-private struct CloseActiveTabKey: FocusedValueKey {
-    typealias Value = () -> Void
-}
-
 private struct InsertSelectionReferenceKey: FocusedValueKey {
     typealias Value = () -> Void
 }
@@ -782,11 +814,6 @@ extension FocusedValues {
         set { self[ToggleWordWrapKey.self] = newValue }
     }
 
-    var closeActiveTab: (() -> Void)? {
-        get { self[CloseActiveTabKey.self] }
-        set { self[CloseActiveTabKey.self] = newValue }
-    }
-
     var insertSelectionReference: (() -> Void)? {
         get { self[InsertSelectionReferenceKey.self] }
         set { self[InsertSelectionReferenceKey.self] = newValue }
@@ -798,7 +825,6 @@ struct AtelierTabCommands: Commands {
     @FocusedValue(\.insertSelectionReference) private var insertSelectionReference
     @FocusedValue(\.renameActiveTab) private var renameActiveTab
     @FocusedValue(\.toggleWordWrap) private var toggleWordWrap
-    @FocusedValue(\.closeActiveTab) private var closeActiveTab
 
     var body: some Commands {
         CommandGroup(after: .pasteboard) {
@@ -842,12 +868,6 @@ struct AtelierTabCommands: Commands {
         }
 
         CommandGroup(after: .toolbar) {
-            Button("Close Tab") {
-                closeActiveTab?()
-            }
-            .keyboardShortcut("w", modifiers: .command)
-            .disabled(closeActiveTab == nil)
-
             Button("Rename Tab...") {
                 renameActiveTab?()
             }
@@ -930,7 +950,7 @@ struct TerminalTabs: View {
 
                                 if model.canClose(tab) {
                                     TabCloseButton(help: tab.closeHelp) {
-                                        model.close(tab)
+                                        model.requestClose(tab)
                                     }
                                     .opacity(
                                         model.selectedID == tab.id || hoveredTabID == tab.id
@@ -998,7 +1018,7 @@ struct TerminalTabs: View {
                                 if model.canClose(tab) {
                                     Divider()
                                     Button("Close Tab") {
-                                        model.close(tab)
+                                        model.requestClose(tab)
                                     }
                                 }
                             }
@@ -1154,7 +1174,20 @@ struct TerminalTabs: View {
             beginRename(selectedID)
         }
         .focusedSceneValue(\.toggleWordWrap, toggleWordWrapAction)
-        .focusedSceneValue(\.closeActiveTab, closeActiveTabAction)
+        .alert(
+            "Close Running Terminal?",
+            isPresented: terminalCloseAlertPresented,
+            presenting: model.pendingTerminalCloseConfirmation
+        ) { confirmation in
+            Button("Cancel", role: .cancel) {
+                model.cancelTerminalClose()
+            }
+            Button("Close Terminal", role: .destructive) {
+                model.confirmTerminalClose(id: confirmation.id)
+            }
+        } message: { confirmation in
+            Text("\(confirmation.title) is still running. Closing it will stop its process.")
+        }
         .sheet(isPresented: renameSheetPresented) {
             TabRenameSheet(currentTitle: renameTargetTitle) { title in
                 guard let renameTargetID else { return }
@@ -1185,9 +1218,15 @@ struct TerminalTabs: View {
         return { model.pasteSelectedEditorReferenceIntoTerminal() }
     }
 
-    private var closeActiveTabAction: (() -> Void)? {
-        guard let tab = model.selectedTab, model.canClose(tab) else { return nil }
-        return { model.close(tab) }
+    private var terminalCloseAlertPresented: Binding<Bool> {
+        Binding(
+            get: { model.pendingTerminalCloseConfirmation != nil },
+            set: { isPresented in
+                if !isPresented {
+                    model.cancelTerminalClose()
+                }
+            }
+        )
     }
 
     private var renameTargetTitle: String {

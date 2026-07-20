@@ -298,6 +298,41 @@ struct AtelierTests {
         #expect(!GitCommitPolicy.shouldStageAll(status: staged))
     }
 
+    @Test("Gemma commit message uses changed file paths without tools")
+    func gitCommitMessageGeneration() async throws {
+        let client = ScriptedOllamaClient(
+            responses: [
+                .chunks([
+                    OllamaChatChunk(
+                        message: OllamaChatMessage(
+                            role: .assistant,
+                            content: "fix(git): generate commit message"
+                        ),
+                        done: true
+                    )
+                ])
+            ]
+        )
+        let generator = GitCommitMessageGenerator(client: client)
+
+        let message = try await generator.generate(
+            paths: ["README.md", "app/Atelier/Sources/Atelier/Git/ChangesView.swift", "README.md"]
+        )
+
+        #expect(message == "fix(git): generate commit message")
+        let requests = await client.requests
+        let request = try #require(requests.first)
+        #expect(request.tools.isEmpty)
+        #expect(request.messages.count == 2)
+        #expect(
+            request.messages.last?.content == """
+            Changed file paths:
+            - README.md
+            - app/Atelier/Sources/Atelier/Git/ChangesView.swift
+            """
+        )
+    }
+
     @Test("Git service stages tracked and untracked changes together")
     func gitStageAll() async throws {
         let repository = temporaryDirectory("git-stage-all")

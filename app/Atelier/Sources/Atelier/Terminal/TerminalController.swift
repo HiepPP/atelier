@@ -33,6 +33,10 @@ final class TerminalController {
     /// code. Never fires when the shell emits no OSC 133 marks.
     var onCommandFinished: ((Int32) -> Void)?
 
+    var isProcessRunning: Bool {
+        !isClosed && terminal.process.running
+    }
+
     init(workspacePath: String, processService: TerminalProcessService = TerminalProcessService()) {
         self.processService = processService
         terminal.nativeBackgroundColor = AppKitThemeAdapter.terminalBackground

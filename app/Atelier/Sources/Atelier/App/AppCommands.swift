@@ -4,6 +4,14 @@ struct AppCommands: Commands {
     let model: AppModel
 
     var body: some Commands {
+        CommandGroup(replacing: .saveItem) {
+            Button(title(.closeTab)) {
+                perform(.closeTab)
+            }
+            .keyboardShortcut("w", modifiers: .command)
+            .disabled(!isEnabled(.closeTab))
+        }
+
         CommandGroup(after: .newItem) {
             Button(title(.openFolder)) {
                 perform(.openFolder)

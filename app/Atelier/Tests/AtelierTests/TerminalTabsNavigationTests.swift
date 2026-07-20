@@ -232,6 +232,33 @@ struct TerminalTabsNavigationTests {
         #expect(tabs.recentFileURLs.isEmpty)
     }
 
+    @Test("Final terminal stays open while another running terminal requires confirmation")
+    func finalTerminalCloseInvariant() throws {
+        let fixture = try Fixture(names: [])
+        defer { fixture.remove() }
+        let tabs = TerminalTabsModel(workspacePath: fixture.root.path)
+        defer { tabs.closeAll() }
+
+        #expect(!tabs.canCloseSelectedTab)
+        tabs.closeSelectedTab()
+
+        #expect(tabs.terminalCount == 1)
+        #expect(tabs.pendingTerminalCloseConfirmation == nil)
+
+        tabs.add()
+        #expect(tabs.canCloseSelectedTab)
+        tabs.closeSelectedTab()
+
+        let confirmation = try #require(tabs.pendingTerminalCloseConfirmation)
+        #expect(tabs.terminalCount == 2)
+
+        tabs.confirmTerminalClose(id: confirmation.id)
+
+        #expect(tabs.terminalCount == 1)
+        #expect(tabs.selectedID != nil)
+        #expect(!tabs.canCloseSelectedTab)
+    }
+
     @Test("Path paste targets only the selected terminal")
     func pathPasteTarget() throws {
         let fixture = try Fixture(names: ["A.swift"])

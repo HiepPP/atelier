@@ -56,7 +56,7 @@ After completing any implementation task, automatically run `app/Atelier/scripts
 
 Use four-space indentation and standard Swift API naming. Types use `UpperCamelCase`; properties, methods, and enum cases use `lowerCamelCase`. Name SwiftUI views with a `View` suffix and observable models with a `Model` suffix. Prefer small extensions and native SwiftUI modifiers before adding abstractions. Keep AppKit customization defensive and idempotent.
 
-Use `rg` for repository search. Do not add or use GitNexus metadata in this repository.
+Use `rg` for plain-text repository search: literal strings, symbol names, file globs, quick greps. Use GitNexus for code intelligence: impact analysis before edits, caller/callee context, execution-flow tracing, safe renames, and pre-commit change detection. Pick the tool by purpose; do not use GitNexus as a text grep, and do not use `rg` to reason about the call graph.
 
 ## Performance Rules
 
@@ -138,7 +138,7 @@ Pull requests should include a short problem statement, implementation summary, 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **atelier** (6680 symbols, 42598 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **atelier** (6681 symbols, 42604 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

@@ -454,6 +454,8 @@ Persistence boundaries:
 
 - Use titanium chrome for the strip and porcelain for the selected editor surface.
 - Keep Back and Forward available through menus and shortcuts, not inside the tab strip.
+- Keep the final remaining terminal tab open and non-closable.
+- Confirm before closing any other terminal while its process is still running.
 - Keep tab widths between 112 and 220 points, with 152 ideal.
 - Render the selected center tab as an inset `rowRadius` rounded pill of translucent `chromeSelection` glass with a
   top-lit hairline highlight. Keep the full strip-cell envelope as the hit target. Use
@@ -480,6 +482,9 @@ Persistence boundaries:
 ### Git
 
 - Keep repository, branch, summary, commit input, and change groups in the sidebar.
+- Place a compact Gemma action beside the commit-message label.
+- Generate one editable Conventional Commit subject from changed file paths only. Never send diff or file contents.
+- Show progress while Gemma runs, disable duplicate generation, and keep commit as an explicit user action.
 - Open file diffs as center tabs, not inside the Git sidebar.
 - Use semantic green, orange, red, and teal only for Git meaning.
 - Keep diff line numbers in a fixed 48-point gutter.
@@ -601,6 +606,7 @@ The five background features, all read-only and cancellable:
 | `Cmd-Shift-G` | Previous file-search match |
 | `Cmd-E` | Use editor selection for file search |
 | `Cmd-Shift-C` | Insert selected editor line reference into terminal |
+| `Cmd-W` | Close active closable center tab |
 | `Ctrl--` | Back |
 | `Ctrl-Shift--` | Forward |
 | `Cmd-Shift-T` | Reopen Closed Tab |
@@ -614,6 +620,7 @@ The five background features, all read-only and cancellable:
 Rules:
 
 - Menu items, palette actions, and toolbar controls must call the same typed action.
+- `Cmd-W` never closes the workspace window. With no active tab or only the final terminal active, it does nothing.
 - Show live enabled state in every action surface.
 - Do not reuse an existing shortcut for a new action.
 - Keep shortcut labels monospaced in the command palette.

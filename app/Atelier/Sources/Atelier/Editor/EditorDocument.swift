@@ -17,16 +17,16 @@ enum EditorFindAction: CaseIterable, Equatable {
 
 nonisolated enum EditorSelectionReferencePolicy {
     static func lineRange(in text: String, selection: NSRange) -> ClosedRange<Int>? {
-        let source = text as NSString
+        let length = text.utf16.count
         guard selection.location != NSNotFound,
-              selection.location < source.length,
+              selection.location < length,
               selection.length > 0 else { return nil }
-        let selectedLength = min(selection.length, source.length - selection.location)
+        let selectedLength = min(selection.length, length - selection.location)
         guard selectedLength > 0 else { return nil }
-        let startLine = lineNumber(at: selection.location, in: source)
+        let startLine = lineNumber(atUTF16Offset: selection.location, in: text)
         let endLine = lineNumber(
-            at: selection.location + selectedLength - 1,
-            in: source
+            atUTF16Offset: selection.location + selectedLength - 1,
+            in: text
         )
         return startLine...endLine
     }
@@ -43,10 +43,17 @@ nonisolated enum EditorSelectionReferencePolicy {
         return "@\(relativePath):\(lineRange.lowerBound)~\(lineRange.upperBound) "
     }
 
-    private static func lineNumber(at utf16Offset: Int, in source: NSString) -> Int {
-        source.substring(to: utf16Offset).reduce(into: 1) { line, character in
-            if character == "\n" { line += 1 }
+    // Counts newlines in the UTF-16 prefix without allocating a substring, so
+    // selection changes on a large document stay allocation-free.
+    private static func lineNumber(atUTF16Offset offset: Int, in text: String) -> Int {
+        var line = 1
+        var index = 0
+        for unit in text.utf16 {
+            if index >= offset { break }
+            if unit == 0x0A { line += 1 }
+            index += 1
         }
+        return line
     }
 }
 
