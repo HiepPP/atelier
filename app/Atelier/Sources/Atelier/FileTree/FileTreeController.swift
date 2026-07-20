@@ -395,11 +395,13 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             do {
                 let entries = try await service.children(of: url)
                 guard !Task.isCancelled, node.url == url else { return }
-                node.apply(entries)
+                let changed = node.apply(entries)
                 AppLogger.fileTree.debug(
                     "Loaded \(entries.count) entries from \(url.lastPathComponent, privacy: .public)"
                 )
-                reload(node, isInitialLoad: isInitialLoad)
+                if changed || isInitialLoad {
+                    reload(node, isInitialLoad: isInitialLoad)
+                }
             } catch is CancellationError {
                 return
             } catch {

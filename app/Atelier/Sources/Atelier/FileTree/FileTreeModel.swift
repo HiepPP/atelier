@@ -113,9 +113,12 @@ final class FileTreeNode {
         return true
     }
 
-    func apply(_ entries: [FileTreeEntry]) {
+    /// Applies a fresh directory listing and reports whether the visible
+    /// children actually changed, so callers can skip outline reloads for
+    /// no-op refreshes.
+    func apply(_ entries: [FileTreeEntry]) -> Bool {
         let existing = Dictionary(uniqueKeysWithValues: (children ?? []).map { ($0.url, $0) })
-        children = entries.map { entry in
+        let updated = entries.map { entry in
             if let node = existing[entry.url],
                node.isDirectory == entry.isDirectory,
                node.isSymbolicLink == entry.isSymbolicLink,
@@ -129,7 +132,16 @@ final class FileTreeNode {
                 symbolicLinkTargetIsDirectory: entry.symbolicLinkTargetIsDirectory
             )
         }
+        let changed: Bool
+        if let current = children {
+            changed = current.count != updated.count
+                || zip(current, updated).contains { $0 !== $1 }
+        } else {
+            changed = true
+        }
+        children = updated
         isLoading = false
+        return changed
     }
 
     func failLoading() {
