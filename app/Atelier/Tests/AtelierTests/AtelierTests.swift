@@ -369,7 +369,7 @@ struct AtelierTests {
 
     @Test("Selected tab exposes stable inspector context")
     @MainActor
-    func selectedTabInspectorContext() throws {
+    func selectedTabInspectorContext() async throws {
         let root = temporaryDirectory("tab-inspector-context")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let fileURL = root.appendingPathComponent("main.swift")
@@ -403,12 +403,18 @@ struct AtelierTests {
         #expect(file.details.contains { $0.label == "Word wrap" && $0.value == "On" })
 
         tabs.openGitDiff(selection)
-        let diff = try #require(tabs.selectedInspectorContext)
+        var diff = try #require(tabs.selectedInspectorContext)
         #expect(diff.kind == .gitDiff)
-        #expect(diff.status == "No diff")
         #expect(diff.details.contains {
             $0.label == "Change" && $0.value == "Untracked"
         })
+
+        // Untracked files load an all-additions diff via git diff --no-index.
+        for _ in 0..<100 where diff.status == "Loading" {
+            try await Task.sleep(for: .milliseconds(20))
+            diff = try #require(tabs.selectedInspectorContext)
+        }
+        #expect(diff.status == "Ready")
     }
 
     @Test("Editor documents use standardized URL identity")

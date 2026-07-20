@@ -427,30 +427,24 @@ private struct GitChangeRow: View {
 
     var body: some View {
         HStack(spacing: AtelierMetrics.spaceS) {
-            Button(action: onOpen) {
-                HStack(spacing: AtelierMetrics.spaceS) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(URL(fileURLWithPath: change.path).lastPathComponent)
-                            .atelierFont(size: AtelierTypography.label, weight: .medium)
-                            .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(URL(fileURLWithPath: change.path).lastPathComponent)
+                    .atelierFont(size: AtelierTypography.label, weight: .medium)
+                    .lineLimit(1)
 
-                        let parent = (change.path as NSString).deletingLastPathComponent
-                        if !parent.isEmpty {
-                            Text(parent)
-                                .atelierFont(size: AtelierTypography.micro, design: .monospaced)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                let parent = (change.path as NSString).deletingLastPathComponent
+                if !parent.isEmpty {
+                    Text(parent)
+                        .atelierFont(size: AtelierTypography.micro, design: .monospaced)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Spacer()
                 }
             }
-            .buttonStyle(.plain)
-            .atelierPointerCursor()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { onOpen() }
 
             HStack(spacing: AtelierMetrics.spaceXS) {
                 Text(statusLabel)
@@ -469,6 +463,9 @@ private struct GitChangeRow: View {
             RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
                 .fill(isHovering ? AtelierTheme.hoverFill : Color.clear)
         }
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen() }
+        .atelierPointerCursor()
         .onHover { hovering in
             guard isHovering != hovering else { return }
             isHovering = hovering

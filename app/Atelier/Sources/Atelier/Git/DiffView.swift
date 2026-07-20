@@ -169,21 +169,25 @@ final class GitDiffSession {
         loadTask?.cancel()
         needsReload = false
 
-        guard selection.change.kind != .untracked else {
-            state = .message("Untracked file. Stage it to view a unified diff.")
-            return
-        }
-
         state = .loading
+        let isUntracked = selection.change.kind == .untracked
         loadTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let output = try await service.diff(
-                    path: selection.change.path,
-                    originalPath: selection.change.originalPath,
-                    staged: selection.staged,
-                    workspacePath: workspacePath
-                )
+                let output: String
+                if isUntracked {
+                    output = try await service.untrackedDiff(
+                        path: selection.change.path,
+                        workspacePath: workspacePath
+                    )
+                } else {
+                    output = try await service.diff(
+                        path: selection.change.path,
+                        originalPath: selection.change.originalPath,
+                        staged: selection.staged,
+                        workspacePath: workspacePath
+                    )
+                }
                 guard !Task.isCancelled, loadGeneration == generation else { return }
                 state = output.isEmpty
                     ? .message("No diff output for this file.")

@@ -70,7 +70,8 @@ nonisolated final class GitCommand: Sendable {
     func run(
         arguments: [String],
         workspacePath: String,
-        maxOutputBytes: Int? = nil
+        maxOutputBytes: Int? = nil,
+        allowedExitCodes: Set<Int32> = [0]
     ) throws -> Data {
         let process = Process()
         let output = Pipe()
@@ -118,7 +119,7 @@ nonisolated final class GitCommand: Sendable {
             throw GitServiceError.outputRead(readError)
         }
         let errorData = errorResult.data
-        guard process.terminationStatus == 0 else {
+        guard allowedExitCodes.contains(process.terminationStatus) else {
             throw GitServiceError.failed(
                 arguments: arguments,
                 code: process.terminationStatus,
@@ -199,10 +200,26 @@ nonisolated final class GitService: Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
+    func untrackedDiff(path: String, workspacePath: String) async throws -> String {
+        // git diff --no-index compares the file against /dev/null, so an
+        // untracked file renders as an all-additions unified diff. It exits
+        // with code 1 whenever the two inputs differ, which is expected here.
+        let data = try await run(
+            arguments: [
+                "diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", path
+            ],
+            workspacePath: workspacePath,
+            maxOutputBytes: 4_000_000,
+            allowedExitCodes: [0, 1]
+        )
+        return String(decoding: data, as: UTF8.self)
+    }
+
     func run(
         arguments: [String],
         workspacePath: String,
-        maxOutputBytes: Int? = nil
+        maxOutputBytes: Int? = nil,
+        allowedExitCodes: Set<Int32> = [0]
     ) async throws -> Data {
         let command = GitCommand()
         return try await withTaskCancellationHandler {
@@ -210,7 +227,8 @@ nonisolated final class GitService: Sendable {
                 try command.run(
                     arguments: arguments,
                     workspacePath: workspacePath,
-                    maxOutputBytes: maxOutputBytes
+                    maxOutputBytes: maxOutputBytes,
+                    allowedExitCodes: allowedExitCodes
                 )
             }.value
         } onCancel: {
