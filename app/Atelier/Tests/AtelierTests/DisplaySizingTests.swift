@@ -245,6 +245,34 @@ struct DisplaySizingTests {
         )
     }
 
+    @Test("Project command toolbar remeasures after native window resize")
+    func projectCommandToolbarRemeasuresAfterWindowResize() async {
+        let window = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 900, height: 600),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        var corrections: [CGFloat] = []
+        let marker = ProjectCommandToolbarMarkerView(
+            frame: CGRect(x: 240, y: 0, width: 420, height: 28)
+        ) { correction in
+            corrections.append(correction)
+        }
+        window.contentView?.addSubview(marker)
+
+        await Task.yield()
+        corrections.removeAll()
+        marker.setFrameOrigin(CGPoint(x: 100, y: 0))
+        NotificationCenter.default.post(name: NSWindow.didResizeNotification, object: window)
+        for _ in 0..<4 {
+            await Task.yield()
+        }
+
+        #expect(corrections.count == 1)
+        #expect(corrections.first.map { abs($0) >= 0.5 } == true)
+    }
+
     @Test("Titlebar zoom accepts only empty-background double clicks")
     func titlebarZoomInteraction() {
         #expect(WorkspaceTitlebarInteractionPolicy.shouldToggleZoom(

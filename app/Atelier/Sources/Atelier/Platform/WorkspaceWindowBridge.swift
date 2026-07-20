@@ -49,6 +49,7 @@ struct ProjectCommandToolbarCenterBridge: NSViewRepresentable {
 final class ProjectCommandToolbarMarkerView: NSView {
     var onCorrection: (CGFloat) -> Void
     private var measurementGeneration = 0
+    private weak var observedWindow: NSWindow?
 
     init(frame frameRect: NSRect, onCorrection: @escaping (CGFloat) -> Void) {
         self.onCorrection = onCorrection
@@ -57,6 +58,30 @@ final class ProjectCommandToolbarMarkerView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        observeWindowResize()
+        scheduleMeasurement()
+    }
+
+    private func observeWindowResize() {
+        if let observedWindow {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: NSWindow.didResizeNotification,
+                object: observedWindow
+            )
+        }
+
+        observedWindow = window
+        guard let window else { return }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidResize(_:)),
+            name: NSWindow.didResizeNotification,
+            object: window
+        )
+    }
+
+    @objc private func windowDidResize(_ notification: Notification) {
         scheduleMeasurement()
     }
 
@@ -84,5 +109,9 @@ final class ProjectCommandToolbarMarkerView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 }
