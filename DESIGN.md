@@ -428,8 +428,13 @@ Persistence boundaries:
 - Vertically center the disclosure, icon, and label within every file-tree row.
 - Keep the base file or folder icon and add an `arrow.turn.up.right` badge after symlink names.
 - Do not expand directory symlinks from Explorer.
+- Keep Git-ignored files and folders visible, but render their row content at reduced opacity.
+- Expose the ignored state through row help text so it is not conveyed by color alone.
 - Explorer single-click opens one replaceable preview.
 - Explorer double-click opens or promotes a permanent tab.
+- Right-clicking a file or folder exposes Rename, Move to Trash, Copy Path, and Add to `.gitignore`.
+- Rename requires a new-name prompt. Move to Trash requires destructive confirmation.
+- Disable Add to `.gitignore` when the item is already ignored or is the `.gitignore` file itself.
 - Quick Open and every non-Explorer route open permanent tabs.
 
 ### Center Tabs

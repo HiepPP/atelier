@@ -80,6 +80,15 @@ nonisolated struct FileNavigationHistory: Sendable {
         closed.removeAll(keepingCapacity: false)
     }
 
+    mutating func removeItem(at url: URL) {
+        if let current, FileTreePathPolicy.contains(current.url, within: url) {
+            self.current = nil
+        }
+        backward.removeAll { FileTreePathPolicy.contains($0.url, within: url) }
+        forward.removeAll { FileTreePathPolicy.contains($0.url, within: url) }
+        closed.removeAll { FileTreePathPolicy.contains($0.url, within: url) }
+    }
+
     private func promoted(_ target: FileNavigationTarget, matching url: URL) -> FileNavigationTarget {
         guard target.url == url else { return target }
         return FileNavigationTarget(url: target.url, disposition: .permanent)

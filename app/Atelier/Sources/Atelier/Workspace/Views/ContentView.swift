@@ -964,12 +964,40 @@ struct WorkspaceView: View {
             FileTreeView(
                 rootURL: workspaceURL,
                 revision: session.fileTreeRevision,
+                ignoredPaths: gitModel.snapshot.status.ignoredPaths,
                 onTargetDirectoryChange: { fileTreeTargetDirectory = $0 },
                 onCreateItem: { kind, parentURL in
                     fileTreeCreationRequest = FileTreeCreationRequest(
                         kind: kind,
                         parentURL: parentURL
                     )
+                },
+                onRenameItem: { url, name in
+                    Task {
+                        do {
+                            try await session.renameItem(at: url, to: name)
+                        } catch {
+                            app.presentedError = .workspace(error)
+                        }
+                    }
+                },
+                onMoveItemToTrash: { url in
+                    Task {
+                        do {
+                            try await session.moveItemToTrash(at: url)
+                        } catch {
+                            app.presentedError = .workspace(error)
+                        }
+                    }
+                },
+                onAddItemToGitIgnore: { url in
+                    Task {
+                        do {
+                            try await session.addItemToGitIgnore(url)
+                        } catch {
+                            app.presentedError = .workspace(error)
+                        }
+                    }
                 },
                 onPreview: terminalTabs.previewFile,
                 onOpen: terminalTabs.openFile

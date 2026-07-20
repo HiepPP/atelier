@@ -7,16 +7,24 @@ struct FileTreeRepresentable: NSViewRepresentable {
 
     let rootURL: URL
     let revision: Int
+    let ignoredPaths: Set<String>
     let onTargetDirectoryChange: (URL) -> Void
     let onCreateItem: (FileTreeCreationKind, URL) -> Void
+    let onRenameItem: (URL, String) -> Void
+    let onMoveItemToTrash: (URL) -> Void
+    let onAddItemToGitIgnore: (URL) -> Void
     let onPreview: (URL) -> Void
     let onOpen: (URL) -> Void
 
     func makeCoordinator() -> FileTreeController {
         FileTreeController(
             rootURL: rootURL,
+            ignoredPaths: ignoredPaths,
             onTargetDirectoryChange: onTargetDirectoryChange,
             onCreateItem: onCreateItem,
+            onRenameItem: onRenameItem,
+            onMoveItemToTrash: onMoveItemToTrash,
+            onAddItemToGitIgnore: onAddItemToGitIgnore,
             onPreview: onPreview,
             onOpen: onOpen
         )
@@ -30,10 +38,14 @@ struct FileTreeRepresentable: NSViewRepresentable {
         context.coordinator.update(
             rootURL: rootURL,
             revision: revision,
+            ignoredPaths: ignoredPaths,
             scale: scale,
             displayScale: displayScale,
             onTargetDirectoryChange: onTargetDirectoryChange,
             onCreateItem: onCreateItem,
+            onRenameItem: onRenameItem,
+            onMoveItemToTrash: onMoveItemToTrash,
+            onAddItemToGitIgnore: onAddItemToGitIgnore,
             onPreview: onPreview,
             onOpen: onOpen
         )

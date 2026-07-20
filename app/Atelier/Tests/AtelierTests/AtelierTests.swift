@@ -129,6 +129,54 @@ struct AtelierTests {
         }
     }
 
+    @Test("File tree renames items and appends stable Git ignore patterns")
+    func fileTreeItemActions() async throws {
+        let root = temporaryDirectory("file-tree-actions")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let service = FileTreeService()
+        let original = try await service.createFile(named: "Draft[1]*.md", in: root)
+
+        let renamed = try await service.renameItem(at: original, to: "Final[1]*.md")
+        #expect(!FileManager.default.fileExists(atPath: original.path))
+        #expect(FileManager.default.fileExists(atPath: renamed.path))
+
+        try await service.addToGitIgnore(renamed, workspaceRoot: root)
+        try await service.addToGitIgnore(renamed, workspaceRoot: root)
+        let gitIgnore = try String(
+            contentsOf: root.appendingPathComponent(".gitignore"),
+            encoding: .utf8
+        )
+        #expect(gitIgnore == "/Final\\[1\\]\\*.md\n")
+    }
+
+    @Test("Git ignore presentation matches exact items and descendants")
+    func fileTreeGitIgnorePresentation() {
+        let root = URL(fileURLWithPath: "/workspace", isDirectory: true)
+        let ignoredPaths: Set<String> = ["tmp/", "generated.txt"]
+
+        #expect(FileTreeGitIgnorePresentation.isIgnored(
+            root.appendingPathComponent("tmp", isDirectory: true),
+            rootURL: root,
+            ignoredPaths: ignoredPaths
+        ))
+        #expect(FileTreeGitIgnorePresentation.isIgnored(
+            root.appendingPathComponent("tmp/result.txt"),
+            rootURL: root,
+            ignoredPaths: ignoredPaths
+        ))
+        #expect(FileTreeGitIgnorePresentation.isIgnored(
+            root.appendingPathComponent("generated.txt"),
+            rootURL: root,
+            ignoredPaths: ignoredPaths
+        ))
+        #expect(!FileTreeGitIgnorePresentation.isIgnored(
+            root.appendingPathComponent("tmp-copy/result.txt"),
+            rootURL: root,
+            ignoredPaths: ignoredPaths
+        ))
+    }
+
     @Test("Git porcelain parser preserves rename and conflict details")
     func gitParsing() {
         let sample = [
@@ -136,6 +184,7 @@ struct AtelierTests {
             "old.txt",
             "u UU N... 100644 100644 100644 100644 abcdef1 abcdef2 abcdef3 conflict.txt",
             "? new file.txt",
+            "! tmp/",
             ""
         ].joined(separator: "\0")
 
@@ -146,6 +195,7 @@ struct AtelierTests {
         })
         #expect(status.changes.contains { $0.path == "conflict.txt" && $0.kind == .conflicted })
         #expect(status.untracked.map(\.path) == ["new file.txt"])
+        #expect(status.ignoredPaths == ["tmp/"])
     }
 
     @Test("Git commit enables for working changes and stages all when needed")

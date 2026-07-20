@@ -98,6 +98,36 @@ final class WorkspaceSession {
         AppLogger.fileTree.info("Created folder: \(url.lastPathComponent, privacy: .public)")
     }
 
+    func renameItem(at url: URL, to name: String) async throws {
+        let selectedFileURL = terminalTabs.selectedFileURL
+        let destination = try await fileTreeService.renameItem(at: url, to: name)
+        let replacement = selectedFileURL.flatMap {
+            FileTreePathPolicy.replacingRoot(of: $0, from: url, to: destination)
+        }
+        terminalTabs.closeFiles(atOrUnder: url)
+        if let replacement { terminalTabs.openFile(replacement) }
+        invalidateFileTree()
+        gitModel.invalidate()
+        AppLogger.fileTree.info(
+            "Renamed item: \(url.lastPathComponent, privacy: .public) to \(destination.lastPathComponent, privacy: .public)"
+        )
+    }
+
+    func moveItemToTrash(at url: URL) async throws {
+        try await fileTreeService.moveToTrash(url)
+        terminalTabs.closeFiles(atOrUnder: url)
+        invalidateFileTree()
+        gitModel.invalidate()
+        AppLogger.fileTree.info("Moved item to Trash: \(url.lastPathComponent, privacy: .public)")
+    }
+
+    func addItemToGitIgnore(_ url: URL) async throws {
+        try await fileTreeService.addToGitIgnore(url, workspaceRoot: rootURL)
+        invalidateFileTree()
+        gitModel.invalidate()
+        AppLogger.fileTree.info("Added item to .gitignore: \(url.lastPathComponent, privacy: .public)")
+    }
+
     func openGemma() {
         terminalTabs.openGemma(gemmaAgent)
     }

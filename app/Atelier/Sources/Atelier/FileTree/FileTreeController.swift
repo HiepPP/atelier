@@ -4,8 +4,12 @@ import AppKit
 final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private let service = FileTreeService()
     private var root: FileTreeNode
+    private var ignoredPaths: Set<String>
     private var onTargetDirectoryChange: (URL) -> Void
     private var onCreateItem: (FileTreeCreationKind, URL) -> Void
+    private var onRenameItem: (URL, String) -> Void
+    private var onMoveItemToTrash: (URL) -> Void
+    private var onAddItemToGitIgnore: (URL) -> Void
     private var onPreview: (URL) -> Void
     private var onOpen: (URL) -> Void
     private var scale: CGFloat = 1
@@ -14,17 +18,26 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     private weak var outlineView: NSOutlineView?
     private var loadTasks: [URL: Task<Void, Never>] = [:]
     private var contextMenuTarget: URL?
+    private var contextMenuItem: FileTreeNode?
 
     init(
         rootURL: URL,
+        ignoredPaths: Set<String>,
         onTargetDirectoryChange: @escaping (URL) -> Void,
         onCreateItem: @escaping (FileTreeCreationKind, URL) -> Void,
+        onRenameItem: @escaping (URL, String) -> Void,
+        onMoveItemToTrash: @escaping (URL) -> Void,
+        onAddItemToGitIgnore: @escaping (URL) -> Void,
         onPreview: @escaping (URL) -> Void,
         onOpen: @escaping (URL) -> Void
     ) {
         root = FileTreeNode(url: rootURL, isDirectory: true)
+        self.ignoredPaths = ignoredPaths
         self.onTargetDirectoryChange = onTargetDirectoryChange
         self.onCreateItem = onCreateItem
+        self.onRenameItem = onRenameItem
+        self.onMoveItemToTrash = onMoveItemToTrash
+        self.onAddItemToGitIgnore = onAddItemToGitIgnore
         self.onPreview = onPreview
         self.onOpen = onOpen
     }
@@ -77,15 +90,24 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     func update(
         rootURL: URL,
         revision: Int,
+        ignoredPaths: Set<String>,
         scale: CGFloat,
         displayScale: CGFloat,
         onTargetDirectoryChange: @escaping (URL) -> Void,
         onCreateItem: @escaping (FileTreeCreationKind, URL) -> Void,
+        onRenameItem: @escaping (URL, String) -> Void,
+        onMoveItemToTrash: @escaping (URL) -> Void,
+        onAddItemToGitIgnore: @escaping (URL) -> Void,
         onPreview: @escaping (URL) -> Void,
         onOpen: @escaping (URL) -> Void
     ) {
+        let ignoredPathsChanged = self.ignoredPaths != ignoredPaths
+        self.ignoredPaths = ignoredPaths
         self.onTargetDirectoryChange = onTargetDirectoryChange
         self.onCreateItem = onCreateItem
+        self.onRenameItem = onRenameItem
+        self.onMoveItemToTrash = onMoveItemToTrash
+        self.onAddItemToGitIgnore = onAddItemToGitIgnore
         self.onPreview = onPreview
         self.onOpen = onOpen
         if root.url != rootURL {
@@ -99,6 +121,8 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             self.revision = revision
             refreshExpandedDirectories()
         }
+
+        if ignoredPathsChanged { refreshVisibleCells() }
 
         guard self.scale != scale || self.displayScale != displayScale else { return }
         self.scale = scale
@@ -146,13 +170,25 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         let identifier = NSUserInterfaceItemIdentifier("FileTreeCell")
         let cell = (outlineView.makeView(withIdentifier: identifier, owner: nil) as? FileTreeCellView)
             ?? makeCell(identifier: identifier)
+        configure(cell, for: node)
+        return cell
+    }
+
+    private func configure(_ cell: FileTreeCellView, for node: FileTreeNode) {
         cell.textField?.stringValue = node.name
         cell.textField?.font = font
         cell.textField?.textColor = AppKitThemeAdapter.fileTreeForeground
         cell.imageView?.image = icon(for: node)
         cell.imageView?.contentTintColor = iconColor(for: node)
         cell.setSymbolicLink(node.isSymbolicLink)
-        return cell
+        let isIgnored = FileTreeGitIgnorePresentation.isIgnored(
+            node.url,
+            rootURL: root.url,
+            ignoredPaths: ignoredPaths
+        )
+        cell.alphaValue = isIgnored ? 0.5 : 1
+        cell.toolTip = isIgnored ? "Ignored by Git" : nil
+        cell.setAccessibilityHelp(isIgnored ? "Ignored by Git" : nil)
     }
 
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
@@ -204,35 +240,137 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         onCreateItem(.folder, contextMenuTarget)
     }
 
+    @objc private func renameItemFromMenu(_ sender: NSMenuItem) {
+        guard let node = contextMenuItem,
+              let window = outlineView?.window else { return }
+        let field = NSTextField(string: node.name)
+        field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+
+        let alert = NSAlert()
+        alert.messageText = "Rename \(node.name)"
+        alert.informativeText = "Enter a new name for this item."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name != node.name else { return }
+            self?.onRenameItem(node.url, name)
+        }
+    }
+
+    @objc private func moveItemToTrashFromMenu(_ sender: NSMenuItem) {
+        guard let node = contextMenuItem,
+              let window = outlineView?.window else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Move \(node.name) to Trash?"
+        alert.informativeText = "This item can be recovered from Trash."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons.first?.hasDestructiveAction = true
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.onMoveItemToTrash(node.url)
+        }
+    }
+
+    @objc private func copyPathFromMenu(_ sender: NSMenuItem) {
+        guard let node = contextMenuItem else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(node.url.path, forType: .string)
+    }
+
+    @objc private func addItemToGitIgnoreFromMenu(_ sender: NSMenuItem) {
+        guard let node = contextMenuItem,
+              node.name != ".gitignore",
+              !FileTreeGitIgnorePresentation.isIgnored(
+                  node.url,
+                  rootURL: root.url,
+                  ignoredPaths: ignoredPaths
+              ) else { return }
+        onAddItemToGitIgnore(node.url)
+    }
+
     private func contextMenu(for row: Int, in outlineView: NSOutlineView) -> NSMenu? {
+        let node: FileTreeNode?
         let target: URL
         if row < 0 {
+            node = nil
             target = root.url
         } else {
-            guard let node = outlineView.item(atRow: row) as? FileTreeNode,
-                  node.isDirectory else { return nil }
-            target = node.url
+            guard let item = outlineView.item(atRow: row) as? FileTreeNode else { return nil }
+            node = item
+            target = item.isDirectory
+                ? item.url
+                : ((outlineView.parent(forItem: item) as? FileTreeNode)?.url ?? root.url)
             outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
         }
+        contextMenuItem = node
         contextMenuTarget = target
         onTargetDirectoryChange(target)
 
         let menu = NSMenu(title: "Explorer")
-        let newFile = NSMenuItem(
-            title: "New File...",
-            action: #selector(createFileFromMenu(_:)),
-            keyEquivalent: ""
-        )
-        newFile.target = self
-        menu.addItem(newFile)
-        let newFolder = NSMenuItem(
-            title: "New Folder...",
-            action: #selector(createFolderFromMenu(_:)),
-            keyEquivalent: ""
-        )
-        newFolder.target = self
-        menu.addItem(newFolder)
+        menu.autoenablesItems = false
+        if node?.isDirectory != false {
+            menu.addItem(menuItem(
+                title: "New File...",
+                symbol: "doc.badge.plus",
+                action: #selector(createFileFromMenu(_:))
+            ))
+            menu.addItem(menuItem(
+                title: "New Folder...",
+                symbol: "folder.badge.plus",
+                action: #selector(createFolderFromMenu(_:))
+            ))
+        }
+
+        if let node {
+            if !menu.items.isEmpty { menu.addItem(.separator()) }
+            menu.addItem(menuItem(
+                title: "Rename...",
+                symbol: "pencil",
+                action: #selector(renameItemFromMenu(_:))
+            ))
+            menu.addItem(menuItem(
+                title: "Copy Path",
+                symbol: "doc.on.doc",
+                action: #selector(copyPathFromMenu(_:))
+            ))
+            let addToGitIgnore = menuItem(
+                title: "Add to .gitignore",
+                symbol: "eye.slash",
+                action: #selector(addItemToGitIgnoreFromMenu(_:))
+            )
+            addToGitIgnore.isEnabled = node.name != ".gitignore"
+                && !FileTreeGitIgnorePresentation.isIgnored(
+                    node.url,
+                    rootURL: root.url,
+                    ignoredPaths: ignoredPaths
+                )
+            menu.addItem(addToGitIgnore)
+            menu.addItem(.separator())
+            menu.addItem(menuItem(
+                title: "Move to Trash",
+                symbol: "trash",
+                action: #selector(moveItemToTrashFromMenu(_:))
+            ))
+        }
         return menu
+    }
+
+    private func menuItem(
+        title: String,
+        symbol: String,
+        action: Selector
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        return item
     }
 
     private func load(_ node: FileTreeNode) {
@@ -272,6 +410,19 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             nodes.append(node)
         }
         for node in nodes { load(node) }
+    }
+
+    private func refreshVisibleCells() {
+        guard let outlineView else { return }
+        for row in 0..<outlineView.numberOfRows {
+            guard let node = outlineView.item(atRow: row) as? FileTreeNode,
+                  let cell = outlineView.view(
+                      atColumn: 0,
+                      row: row,
+                      makeIfNecessary: false
+                  ) as? FileTreeCellView else { continue }
+            configure(cell, for: node)
+        }
     }
 
     private func cancelLoads() {

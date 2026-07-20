@@ -22,6 +22,64 @@ struct FileTreeCreationRequest: Equatable, Identifiable {
     let parentURL: URL
 }
 
+nonisolated enum FileTreePathPolicy {
+    static func relativePath(of url: URL, within rootURL: URL) -> String? {
+        let rootComponents = rootURL.standardizedFileURL.pathComponents
+        let itemComponents = url.standardizedFileURL.pathComponents
+        guard itemComponents.count > rootComponents.count,
+              itemComponents.starts(with: rootComponents) else { return nil }
+        return itemComponents.dropFirst(rootComponents.count).joined(separator: "/")
+    }
+
+    static func contains(_ candidateURL: URL, within rootURL: URL) -> Bool {
+        let candidatePath = candidateURL.standardizedFileURL.path
+        let rootPath = rootURL.standardizedFileURL.path
+        return candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")
+    }
+
+    static func replacingRoot(
+        of candidateURL: URL,
+        from sourceURL: URL,
+        to destinationURL: URL
+    ) -> URL? {
+        let sourcePath = sourceURL.standardizedFileURL.path
+        let candidatePath = candidateURL.standardizedFileURL.path
+        guard candidatePath == sourcePath || candidatePath.hasPrefix(sourcePath + "/") else {
+            return nil
+        }
+        let suffix = String(candidatePath.dropFirst(sourcePath.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !suffix.isEmpty else { return destinationURL.standardizedFileURL }
+        return destinationURL.appendingPathComponent(suffix).standardizedFileURL
+    }
+}
+
+nonisolated enum FileTreeGitIgnorePresentation {
+    static func isIgnored(
+        _ url: URL,
+        rootURL: URL,
+        ignoredPaths: Set<String>
+    ) -> Bool {
+        guard let relativePath = FileTreePathPolicy.relativePath(of: url, within: rootURL) else {
+            return false
+        }
+        return ignoredPaths.contains { ignoredPath in
+            let normalized = ignoredPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return relativePath == normalized || relativePath.hasPrefix(normalized + "/")
+        }
+    }
+}
+
+nonisolated enum GitIgnorePattern {
+    static func pattern(relativePath: String, isDirectory: Bool) -> String {
+        let escaped = relativePath.reduce(into: "") { result, character in
+            if "\\*?[]".contains(character) { result.append("\\") }
+            result.append(character)
+        }
+        return "/\(escaped)\(isDirectory ? "/" : "")"
+    }
+}
+
 @MainActor
 final class FileTreeNode {
     let url: URL

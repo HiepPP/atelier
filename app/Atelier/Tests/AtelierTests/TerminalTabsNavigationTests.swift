@@ -232,6 +232,27 @@ struct TerminalTabsNavigationTests {
         #expect(tabs.recentFileURLs.isEmpty)
     }
 
+    @Test("Removing a tree item closes descendant tabs and clears stale history")
+    func closeFilesForTreeMutation() throws {
+        let fixture = try Fixture(names: ["Keep.swift"])
+        defer { fixture.remove() }
+        let folder = fixture.url("Sources")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let nestedFile = folder.appendingPathComponent("Feature.swift")
+        try Data("let feature = true\n".utf8).write(to: nestedFile)
+        let tabs = TerminalTabsModel(workspacePath: fixture.root.path)
+        defer { tabs.closeAll() }
+
+        tabs.openFile(nestedFile)
+        tabs.openFile(fixture.url("Keep.swift"))
+        tabs.closeFiles(atOrUnder: folder)
+
+        #expect(tabs.fileTabCount == 1)
+        #expect(tabs.selectedFileURL == fixture.url("Keep.swift").standardizedFileURL)
+        #expect(tabs.recentFileURLs == [fixture.url("Keep.swift").standardizedFileURL])
+        #expect(!tabs.canNavigateBack)
+    }
+
     private func target(_ name: String) -> FileNavigationTarget {
         FileNavigationTarget(
             url: URL(fileURLWithPath: "/tmp/\(name)"),

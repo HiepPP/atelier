@@ -25,6 +25,7 @@ nonisolated struct GitChange: Identifiable, Equatable, Sendable {
 
 nonisolated struct GitStatus: Equatable, Sendable {
     var changes: [GitChange]
+    var ignoredPaths: Set<String> = []
 
     var staged: [GitChange] {
         changes.filter(\.isStaged)
@@ -41,6 +42,7 @@ nonisolated struct GitStatus: Equatable, Sendable {
     static func parse(_ data: Data) -> GitStatus {
         let records = data.split(separator: 0, omittingEmptySubsequences: true)
         var changes: [GitChange] = []
+        var ignoredPaths = Set<String>()
         var index = 0
 
         while index < records.count {
@@ -54,6 +56,8 @@ nonisolated struct GitStatus: Equatable, Sendable {
                     isStaged: false,
                     isUnstaged: true
                 ))
+            } else if record.hasPrefix("! ") {
+                ignoredPaths.insert(String(record.dropFirst(2)))
             } else if record.hasPrefix("1 "), let change = parseOrdinary(record) {
                 changes.append(change)
             } else if record.hasPrefix("2 ") {
@@ -71,7 +75,10 @@ nonisolated struct GitStatus: Equatable, Sendable {
             index += 1
         }
 
-        return GitStatus(changes: changes.sorted { $0.path < $1.path })
+        return GitStatus(
+            changes: changes.sorted { $0.path < $1.path },
+            ignoredPaths: ignoredPaths
+        )
     }
 
     private static func parseOrdinary(_ record: String) -> GitChange? {

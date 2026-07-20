@@ -154,7 +154,7 @@ nonisolated final class GitCommand: Sendable {
 nonisolated final class GitService: Sendable {
     func snapshot(workspacePath: String) async throws -> GitSnapshot {
         async let statusData = run(
-            arguments: ["status", "--porcelain=v2", "-z"],
+            arguments: ["status", "--ignored=matching", "--porcelain=v2", "-z"],
             workspacePath: workspacePath
         )
         async let branchData = run(

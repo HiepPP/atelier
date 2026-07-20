@@ -497,6 +497,18 @@ final class TerminalTabsModel {
         close(selectedTab)
     }
 
+    func closeFiles(atOrUnder url: URL) {
+        let indexes = tabs.indices.filter { index in
+            guard case .file(let file) = tabs[index].content else { return false }
+            return FileTreePathPolicy.contains(file.document.url, within: url)
+        }
+        for index in indexes.reversed() {
+            removeTab(at: index, recordsClosedFile: false)
+        }
+        recentFiles.removeItem(at: url)
+        fileNavigationHistory.removeItem(at: url)
+    }
+
     func openGemma(_ model: GemmaAgentModel) {
         if let tab = tabs.first(where: { tab in
             guard case .gemma(let existing) = tab.content else { return false }

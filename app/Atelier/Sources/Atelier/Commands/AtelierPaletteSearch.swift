@@ -41,6 +41,10 @@ nonisolated struct RecentFileHistory: Equatable, Sendable {
     mutating func removeAll() {
         urls.removeAll(keepingCapacity: false)
     }
+
+    mutating func removeItem(at url: URL) {
+        urls.removeAll { FileTreePathPolicy.contains($0, within: url) }
+    }
 }
 
 nonisolated enum AtelierPaletteSearch {

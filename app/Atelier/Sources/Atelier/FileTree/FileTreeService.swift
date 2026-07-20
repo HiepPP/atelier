@@ -5,6 +5,9 @@ nonisolated enum FileTreeServiceError: LocalizedError, Sendable {
     case invalidName(String)
     case alreadyExists(String)
     case create(path: String, message: String)
+    case rename(path: String, message: String)
+    case trash(path: String, message: String)
+    case gitIgnore(path: String, message: String)
 
     var errorDescription: String? {
         switch self {
@@ -16,6 +19,12 @@ nonisolated enum FileTreeServiceError: LocalizedError, Sendable {
             "An item already exists at \(path)."
         case .create(let path, let message):
             "Could not create \(path): \(message)"
+        case .rename(let path, let message):
+            "Could not rename \(path): \(message)"
+        case .trash(let path, let message):
+            "Could not move \(path) to Trash: \(message)"
+        case .gitIgnore(let path, let message):
+            "Could not update \(path): \(message)"
         }
     }
 }
@@ -88,6 +97,84 @@ actor FileTreeService {
         } catch {
             throw FileTreeServiceError.create(
                 path: url.path,
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    func renameItem(at url: URL, to name: String) throws -> URL {
+        let isDirectory: Bool
+        do {
+            isDirectory = try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+        } catch {
+            throw FileTreeServiceError.rename(
+                path: url.path,
+                message: error.localizedDescription
+            )
+        }
+        let destination = try destination(
+            named: name,
+            in: url.deletingLastPathComponent(),
+            isDirectory: isDirectory
+        )
+        do {
+            try FileManager.default.moveItem(at: url, to: destination)
+            return destination
+        } catch {
+            throw FileTreeServiceError.rename(
+                path: url.path,
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    func moveToTrash(_ url: URL) throws {
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        } catch {
+            throw FileTreeServiceError.trash(
+                path: url.path,
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    func addToGitIgnore(_ url: URL, workspaceRoot: URL) throws {
+        guard let relativePath = FileTreePathPolicy.relativePath(of: url, within: workspaceRoot) else {
+            throw FileTreeServiceError.gitIgnore(
+                path: url.path,
+                message: "The item is outside the workspace."
+            )
+        }
+        let isDirectory: Bool
+        do {
+            isDirectory = try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+        } catch {
+            throw FileTreeServiceError.gitIgnore(
+                path: url.path,
+                message: error.localizedDescription
+            )
+        }
+        let pattern = GitIgnorePattern.pattern(
+            relativePath: relativePath,
+            isDirectory: isDirectory
+        )
+        let gitIgnoreURL = workspaceRoot.appendingPathComponent(".gitignore")
+
+        do {
+            var contents = FileManager.default.fileExists(atPath: gitIgnoreURL.path)
+                ? try String(contentsOf: gitIgnoreURL, encoding: .utf8)
+                : ""
+            let existingPatterns = Set(
+                contents.split(whereSeparator: \Character.isNewline).map(String.init)
+            )
+            guard !existingPatterns.contains(pattern) else { return }
+            if !contents.isEmpty, !contents.hasSuffix("\n") { contents.append("\n") }
+            contents.append("\(pattern)\n")
+            try contents.write(to: gitIgnoreURL, atomically: true, encoding: .utf8)
+        } catch {
+            throw FileTreeServiceError.gitIgnore(
+                path: gitIgnoreURL.path,
                 message: error.localizedDescription
             )
         }
