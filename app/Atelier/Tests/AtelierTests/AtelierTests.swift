@@ -49,6 +49,32 @@ struct AtelierTests {
         #expect(!FileLayoutPolicy.usesFullLayout(byteCount: FileLoader.defaultLimit + 1))
     }
 
+    @Test("Editor session routes every file find action to its surface")
+    func editorFindActions() async throws {
+        let root = temporaryDirectory("editor-find")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let fileURL = root.appendingPathComponent("Search.swift")
+        try Data("let searchTarget = true\n".utf8).write(to: fileURL)
+        let session = EditorSession(url: fileURL)
+        let surface = EditorFindSurfaceRecorder(document: session.document)
+        session.attach(surface: surface)
+
+        for _ in 0..<100 where !session.canFindInFile {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(session.canFindInFile)
+
+        for action in EditorFindAction.allCases {
+            session.performFindAction(action)
+        }
+        #expect(surface.actions == EditorFindAction.allCases)
+
+        session.detach(surface: surface)
+        session.performFindAction(.nextMatch)
+        #expect(surface.actions == EditorFindAction.allCases)
+        session.close()
+    }
+
     @Test("File tree filters ignored paths and sorts directories first")
     func fileTree() async throws {
         let root = temporaryDirectory("file-tree")
@@ -487,5 +513,28 @@ struct AtelierTests {
     private func temporaryDirectory(_ name: String) -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("atelier-tests-\(name)-\(UUID().uuidString)", isDirectory: true)
+    }
+}
+
+private final class EditorFindSurfaceRecorder: EditorSurface {
+    var document: EditorDocument?
+    private(set) var actions: [EditorFindAction] = []
+
+    init(document: EditorDocument) {
+        self.document = document
+    }
+
+    func open(_ document: EditorDocument) {
+        self.document = document
+    }
+
+    func save() async throws {}
+
+    func reveal(line: Int, column: Int) {}
+
+    func focus() {}
+
+    func performFindAction(_ action: EditorFindAction) {
+        actions.append(action)
     }
 }

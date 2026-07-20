@@ -30,6 +30,7 @@ struct FileViewer: NSViewRepresentable {
     let fileURL: URL?
     let language: HighlightLanguage?
     let isWordWrapEnabled: Bool
+    let surfaceOwner: EditorSession?
     let onEdit: () -> Void
 
     init(
@@ -37,12 +38,14 @@ struct FileViewer: NSViewRepresentable {
         fileURL: URL? = nil,
         language: HighlightLanguage? = nil,
         isWordWrapEnabled: Bool = true,
+        surfaceOwner: EditorSession? = nil,
         onEdit: @escaping () -> Void = {}
     ) {
         self.content = content
         self.fileURL = fileURL
         self.language = language ?? fileURL.flatMap(FileViewerLanguage.language(for:))
         self.isWordWrapEnabled = isWordWrapEnabled
+        self.surfaceOwner = surfaceOwner
         self.onEdit = onEdit
     }
 
@@ -58,6 +61,8 @@ struct FileViewer: NSViewRepresentable {
 
         textView.isEditable = false
         textView.isSelectable = true
+        textView.isIncrementalSearchingEnabled = true
+        textView.textFinder.incrementalSearchingShouldDimContentView = false
         textView.allowsUndo = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
@@ -112,6 +117,7 @@ struct FileViewer: NSViewRepresentable {
             displayScale: displayScale,
             usesDarkAppearance: usesDarkAppearance,
             isWordWrapEnabled: isWordWrapEnabled,
+            surfaceOwner: surfaceOwner,
             onEdit: onEdit
         )
     }
@@ -152,6 +158,7 @@ struct FileViewer: NSViewRepresentable {
         private var saveGeneration = 0
         private var saveTask: Task<Void, Never>?
         private var isApplyingText = false
+        private weak var surfaceOwner: EditorSession?
         private var onEdit: () -> Void = {}
         private(set) var document: EditorDocument?
 
@@ -171,6 +178,7 @@ struct FileViewer: NSViewRepresentable {
             displayScale: CGFloat,
             usesDarkAppearance: Bool,
             isWordWrapEnabled: Bool,
+            surfaceOwner: EditorSession?,
             onEdit: @escaping () -> Void
         ) {
             let contentChanged = renderedContent != content
@@ -189,6 +197,11 @@ struct FileViewer: NSViewRepresentable {
             renderedDisplayScale = displayScale
             self.usesDarkAppearance = usesDarkAppearance
             renderedWordWrapEnabled = isWordWrapEnabled
+            if self.surfaceOwner !== surfaceOwner {
+                self.surfaceOwner?.detach(surface: self)
+                self.surfaceOwner = surfaceOwner
+                surfaceOwner?.attach(surface: self)
+            }
             self.onEdit = onEdit
             textView?.isEditable = fileURL != nil && content.isEditableText
             textView?.allowsUndo = textView?.isEditable == true
@@ -215,6 +228,8 @@ struct FileViewer: NSViewRepresentable {
             saveTask?.cancel()
             saveTask = nil
             textView?.textDelegate = nil
+            surfaceOwner?.detach(surface: self)
+            surfaceOwner = nil
             textView = nil
             scrollView = nil
             document = nil
@@ -244,6 +259,26 @@ struct FileViewer: NSViewRepresentable {
         func focus() {
             guard let textView, let window = textView.window else { return }
             window.makeFirstResponder(textView)
+        }
+
+        func performFindAction(_ action: EditorFindAction) {
+            guard let textView else { return }
+            let finderAction: NSTextFinder.Action
+            switch action {
+            case .showFindInterface:
+                finderAction = .showFindInterface
+            case .showReplaceInterface:
+                finderAction = .showReplaceInterface
+            case .nextMatch:
+                finderAction = .nextMatch
+            case .previousMatch:
+                finderAction = .previousMatch
+            case .setSearchString:
+                finderAction = .setSearchString
+            }
+            focus()
+            guard textView.textFinder.validateAction(finderAction) else { return }
+            textView.textFinder.performAction(finderAction)
         }
 
         func textViewDidChangeText(_ notification: Notification) {

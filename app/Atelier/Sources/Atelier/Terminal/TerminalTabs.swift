@@ -619,6 +619,8 @@ private struct CloseActiveTabKey: FocusedValueKey {
 }
 
 extension FocusedValues {
+    @Entry var activeEditor: EditorSession?
+
     var renameActiveTab: (() -> Void)? {
         get { self[RenameActiveTabKey.self] }
         set { self[RenameActiveTabKey.self] = newValue }
@@ -636,11 +638,46 @@ extension FocusedValues {
 }
 
 struct AtelierTabCommands: Commands {
+    @FocusedValue(\.activeEditor) private var activeEditor
     @FocusedValue(\.renameActiveTab) private var renameActiveTab
     @FocusedValue(\.toggleWordWrap) private var toggleWordWrap
     @FocusedValue(\.closeActiveTab) private var closeActiveTab
 
     var body: some Commands {
+        CommandGroup(after: .pasteboard) {
+            Divider()
+
+            Button("Find...") {
+                activeEditor?.performFindAction(.showFindInterface)
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .disabled(!canFindInFile)
+
+            Button("Find and Replace...") {
+                activeEditor?.performFindAction(.showReplaceInterface)
+            }
+            .keyboardShortcut("f", modifiers: [.command, .option])
+            .disabled(!canFindInFile)
+
+            Button("Find Next") {
+                activeEditor?.performFindAction(.nextMatch)
+            }
+            .keyboardShortcut("g", modifiers: .command)
+            .disabled(!canFindInFile)
+
+            Button("Find Previous") {
+                activeEditor?.performFindAction(.previousMatch)
+            }
+            .keyboardShortcut("g", modifiers: [.command, .shift])
+            .disabled(!canFindInFile)
+
+            Button("Use Selection for Find") {
+                activeEditor?.performFindAction(.setSearchString)
+            }
+            .keyboardShortcut("e", modifiers: .command)
+            .disabled(!canFindInFile)
+        }
+
         CommandGroup(after: .toolbar) {
             Button("Close Tab") {
                 closeActiveTab?()
@@ -660,6 +697,10 @@ struct AtelierTabCommands: Commands {
             .keyboardShortcut("z", modifiers: .option)
             .disabled(toggleWordWrap == nil)
         }
+    }
+
+    private var canFindInFile: Bool {
+        activeEditor?.canFindInFile == true
     }
 }
 
@@ -943,6 +984,7 @@ struct TerminalTabs: View {
                 }
             }
         }
+        .focusedSceneValue(\.activeEditor, model.selectedEditor)
         .focusedSceneValue(\.renameActiveTab) {
             guard let selectedID = model.selectedID else { return }
             beginRename(selectedID)
@@ -1116,6 +1158,7 @@ private struct FileTabView: View {
                 content: file.content,
                 fileURL: file.document.url,
                 isWordWrapEnabled: file.isWordWrapEnabled,
+                surfaceOwner: file,
                 onEdit: onEdit
             )
         }

@@ -486,6 +486,11 @@ Persistence boundaries:
 - Keep code gutters and terminal backgrounds aligned with the editor token.
 - Use the editor surface color for source, diff, and terminal content.
 - Use native AppKit text and terminal views through narrow representable bridges.
+- Use the native AppKit find bar for editable and read-only text files.
+- Open file search with `Cmd-F`. Search incrementally and highlight visible matches without dimming
+  the editor content.
+- Keep native previous, next, replace, replace-all, selection, match-mode, and result-count behavior.
+- Keep search inside the file scroll view. Closing search restores focus to the editor.
 - Keep editor word wrap as a per-file setting.
 - Promote a preview before the first edit is saved.
 - Preserve first responder across palette, zoom, inspector, and sidecar transitions.
@@ -516,6 +521,11 @@ Persistence boundaries:
 | `Cmd-T` | New Terminal |
 | `Cmd-P` | Quick Open |
 | `Cmd-Shift-P` | Command Palette |
+| `Cmd-F` | Find in active text file |
+| `Cmd-Option-F` | Find and replace in active text file |
+| `Cmd-G` | Next file-search match |
+| `Cmd-Shift-G` | Previous file-search match |
+| `Cmd-E` | Use editor selection for file search |
 | `Ctrl--` | Back |
 | `Ctrl-Shift--` | Forward |
 | `Cmd-Shift-T` | Reopen Closed Tab |

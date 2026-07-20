@@ -7,6 +7,14 @@ nonisolated struct EditorDocument: Identifiable, Equatable, Sendable {
     var displayName: String { url.lastPathComponent }
 }
 
+enum EditorFindAction: CaseIterable, Equatable {
+    case showFindInterface
+    case showReplaceInterface
+    case nextMatch
+    case previousMatch
+    case setSearchString
+}
+
 @MainActor
 protocol EditorSurface: AnyObject {
     var document: EditorDocument? { get }
@@ -15,4 +23,5 @@ protocol EditorSurface: AnyObject {
     func save() async throws
     func reveal(line: Int, column: Int)
     func focus()
+    func performFindAction(_ action: EditorFindAction)
 }
