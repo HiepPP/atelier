@@ -244,4 +244,32 @@ struct DisplaySizingTests {
             ) == 0
         )
     }
+
+    @Test("Titlebar zoom accepts only empty-background double clicks")
+    func titlebarZoomInteraction() {
+        #expect(WorkspaceTitlebarInteractionPolicy.shouldToggleZoom(
+            clickCount: 2,
+            locationY: 590,
+            contentLayoutMaxY: 560,
+            hitsInteractiveControl: false
+        ))
+        #expect(!WorkspaceTitlebarInteractionPolicy.shouldToggleZoom(
+            clickCount: 1,
+            locationY: 590,
+            contentLayoutMaxY: 560,
+            hitsInteractiveControl: false
+        ))
+        #expect(!WorkspaceTitlebarInteractionPolicy.shouldToggleZoom(
+            clickCount: 2,
+            locationY: 540,
+            contentLayoutMaxY: 560,
+            hitsInteractiveControl: false
+        ))
+        #expect(!WorkspaceTitlebarInteractionPolicy.shouldToggleZoom(
+            clickCount: 2,
+            locationY: 590,
+            contentLayoutMaxY: 560,
+            hitsInteractiveControl: true
+        ))
+    }
 }

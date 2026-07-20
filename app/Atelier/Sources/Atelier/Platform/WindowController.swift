@@ -14,12 +14,26 @@ nonisolated enum WorkspaceResponderPolicy {
     }
 }
 
+nonisolated enum WorkspaceTitlebarInteractionPolicy {
+    static func shouldToggleZoom(
+        clickCount: Int,
+        locationY: CGFloat,
+        contentLayoutMaxY: CGFloat,
+        hitsInteractiveControl: Bool
+    ) -> Bool {
+        clickCount == 2
+            && locationY >= contentLayoutMaxY
+            && !hitsInteractiveControl
+    }
+}
+
 @MainActor
 final class WindowController {
     var onScreenDidChange: (() -> Void)?
 
     private weak var workspaceWindow: NSWindow?
     private var shortcutInstalled = false
+    private var titlebarEventMonitor: Any?
     private var activeWorkspaceID: String?
     private var responderRevision: UInt64 = 0
     private let responderOwners = NSMapTable<NSResponder, NSString>(
@@ -125,6 +139,54 @@ final class WindowController {
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .line
+        installTitlebarEventMonitor()
         AppLogger.window.debug("Configured workspace window")
+    }
+
+    private func installTitlebarEventMonitor() {
+        guard titlebarEventMonitor == nil else { return }
+        titlebarEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) {
+            [weak self] event in
+            guard let self else { return event }
+            return interceptTitlebarDoubleClick(event)
+        }
+    }
+
+    private func interceptTitlebarDoubleClick(_ event: NSEvent) -> NSEvent? {
+        guard let window = workspaceWindow,
+              event.window === window else { return event }
+        let hitView = Self.hitView(at: event.locationInWindow, in: window)
+        guard WorkspaceTitlebarInteractionPolicy.shouldToggleZoom(
+            clickCount: event.clickCount,
+            locationY: event.locationInWindow.y,
+            contentLayoutMaxY: window.contentLayoutRect.maxY,
+            hitsInteractiveControl: Self.isInteractiveTitlebarView(hitView)
+        ) else { return event }
+
+        window.zoom(nil)
+        return nil
+    }
+
+    private static func hitView(at location: NSPoint, in window: NSWindow) -> NSView? {
+        guard let frameView = window.contentView?.superview else { return nil }
+        return frameView.hitTest(frameView.convert(location, from: nil))
+    }
+
+    private static func isInteractiveTitlebarView(_ hitView: NSView?) -> Bool {
+        var candidate = hitView
+        while let view = candidate {
+            if view is NSControl { return true }
+            let role = view.accessibilityRole()
+            if role == .button
+                || role == .popUpButton
+                || role == .checkBox
+                || role == .radioButton
+                || role == .textField
+            {
+                return true
+            }
+            candidate = view.superview
+        }
+        return false
     }
 }

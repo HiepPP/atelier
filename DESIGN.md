@@ -346,6 +346,8 @@ Interaction geometry rules:
 - Keep project command rows keyboard-focusable without drawing the native accent focus ring.
 - Draw one project-command glass surface. Hide the toolbar item's shared background.
 - Use a quiet native label inside the system toolbar material. Do not add a tinted icon tile, nested pill, glow, or heavy shadow.
+- Double-clicking visually empty titlebar or toolbar background toggles native window zoom reliably.
+- Toolbar controls keep their own click behavior and never trigger window zoom.
 - Put Gemma, focus mode, and inspector in primary actions.
 - Synchronize the focus control with effective side-panel visibility. Its master transition must
   animate every split item whose visibility changes with the same duration.
