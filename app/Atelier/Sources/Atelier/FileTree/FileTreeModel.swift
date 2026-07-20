@@ -59,6 +59,15 @@ nonisolated enum FileTreePathPolicy {
 }
 
 nonisolated enum FileTreeGitIgnorePresentation {
+    private static let slashes = CharacterSet(charactersIn: "/")
+
+    /// Strips leading/trailing slashes once so `isIgnored` never allocates per
+    /// element on the per-row hot path.
+    static func normalized(_ ignoredPaths: Set<String>) -> Set<String> {
+        Set(ignoredPaths.map { $0.trimmingCharacters(in: slashes) })
+    }
+
+    /// Expects `ignoredPaths` already passed through `normalized(_:)`.
     static func isIgnored(
         _ url: URL,
         rootURL: URL,
@@ -67,10 +76,8 @@ nonisolated enum FileTreeGitIgnorePresentation {
         guard let relativePath = FileTreePathPolicy.relativePath(of: url, within: rootURL) else {
             return false
         }
-        return ignoredPaths.contains { ignoredPath in
-            let normalized = ignoredPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            return relativePath == normalized || relativePath.hasPrefix(normalized + "/")
-        }
+        if ignoredPaths.contains(relativePath) { return true }
+        return ignoredPaths.contains { relativePath.hasPrefix($0 + "/") }
     }
 }
 

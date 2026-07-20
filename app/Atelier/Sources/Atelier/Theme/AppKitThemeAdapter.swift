@@ -45,9 +45,12 @@ nonisolated enum AppKitThemeAdapter {
     }
 
     private static func dynamic(light: UInt32, dark: UInt32) -> NSColor {
-        NSColor(name: nil) { appearance in
-            let match = appearance.bestMatch(from: [.aqua, .darkAqua])
-            return color(match == .darkAqua ? dark : light)
+        // The provider runs on every draw-time resolution; precompute both
+        // variants so it never allocates.
+        let lightColor = color(light)
+        let darkColor = color(dark)
+        return NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? darkColor : lightColor
         }
     }
 

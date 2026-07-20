@@ -41,6 +41,7 @@ final class GitWorkspaceModel {
     private let onRepositoryChange: () -> Void
     private var refreshTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
+    private var invalidateTask: Task<Void, Never>?
     private var refreshID = UUID()
 
     init(
@@ -78,14 +79,23 @@ final class GitWorkspaceModel {
         }
     }
 
+    /// Filesystem-driven invalidations arrive in bursts; debounce the git
+    /// subprocess refresh so a stream of events yields one snapshot.
     func invalidate() {
         onRepositoryChange()
-        refresh()
+        invalidateTask?.cancel()
+        invalidateTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            self?.refresh()
+        }
     }
 
     func stop() {
         refreshTask?.cancel()
         actionTask?.cancel()
+        invalidateTask?.cancel()
+        invalidateTask = nil
     }
 
     func stage(_ change: GitChange) {

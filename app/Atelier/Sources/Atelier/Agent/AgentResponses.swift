@@ -738,6 +738,10 @@ final class AgentResponsesModel {
         responses.sort {
             $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp
         }
+        // Bound retained transcript memory across long monitoring sessions.
+        if responses.count > 300 {
+            responses.removeFirst(responses.count - 300)
+        }
         if selectedSession == nil {
             selectedSession = sessionSummaries.first?.session
         }

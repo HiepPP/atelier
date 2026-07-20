@@ -8,7 +8,23 @@ final class FileLineNumberRulerView: NSView {
         didSet { needsDisplay = true }
     }
     var font = AtelierTypography.codeFont(size: AtelierTypography.editorSize) {
-        didSet { scheduleVisibleLineRefresh() }
+        didSet {
+            cachedDrawAttributes = nil
+            scheduleVisibleLineRefresh()
+        }
+    }
+
+    // draw() runs per scroll frame; rebuild the attribute dictionary only when
+    // the font changes instead of per line per frame.
+    private var cachedDrawAttributes: [NSAttributedString.Key: Any]?
+    private var drawAttributes: [NSAttributedString.Key: Any] {
+        if let cachedDrawAttributes { return cachedDrawAttributes }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: AppKitThemeAdapter.secondary
+        ]
+        cachedDrawAttributes = attributes
+        return attributes
     }
 
     private var textLength = 0
@@ -157,10 +173,7 @@ final class FileLineNumberRulerView: NSView {
 
     private func drawLineNumber(_ number: Int, centeredAt centerY: CGFloat) {
         let value = "\(number)" as NSString
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: AppKitThemeAdapter.secondary
-        ]
+        let attributes = drawAttributes
         let size = value.size(withAttributes: attributes)
         value.draw(
             at: NSPoint(

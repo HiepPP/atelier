@@ -112,15 +112,18 @@ struct FileViewer: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         let usesDarkAppearance = colorScheme == .dark
-        let background = AppKitThemeAdapter.editor(
-            usesDarkAppearance: usesDarkAppearance
-        )
-        scrollView.backgroundColor = background
-        if let textView = scrollView.documentView as? STTextView {
-            textView.backgroundColor = background
-            textView.gutterView?.subviews
-                .compactMap { $0 as? FileLineNumberRulerView }
-                .first?.backgroundColor = background
+        if context.coordinator.appliedBackgroundIsDark != usesDarkAppearance {
+            context.coordinator.appliedBackgroundIsDark = usesDarkAppearance
+            let background = AppKitThemeAdapter.editor(
+                usesDarkAppearance: usesDarkAppearance
+            )
+            scrollView.backgroundColor = background
+            if let textView = scrollView.documentView as? STTextView {
+                textView.backgroundColor = background
+                textView.gutterView?.subviews
+                    .compactMap { $0 as? FileLineNumberRulerView }
+                    .first?.backgroundColor = background
+            }
         }
         context.coordinator.update(
             content: content,
@@ -174,6 +177,9 @@ struct FileViewer: NSViewRepresentable {
         private weak var surfaceOwner: EditorSession?
         private var onEdit: () -> Void = {}
         private(set) var document: EditorDocument?
+        // Tracks the applied background so updateNSView skips redundant
+        // AppKit writes on unrelated SwiftUI updates.
+        var appliedBackgroundIsDark: Bool?
 
         func attach(_ scrollView: NSScrollView) {
             self.scrollView = scrollView
@@ -201,7 +207,9 @@ struct FileViewer: NSViewRepresentable {
             let wordWrapChanged = renderedWordWrapEnabled != isWordWrapEnabled
             self.fileURL = fileURL
             if let fileURL {
-                open(EditorDocument(url: fileURL))
+                if document?.url != fileURL {
+                    open(EditorDocument(url: fileURL))
+                }
             } else {
                 document = nil
             }

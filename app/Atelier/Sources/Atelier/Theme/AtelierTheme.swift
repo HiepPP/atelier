@@ -169,7 +169,18 @@ enum AtelierTypography {
     static let editorSize: CGFloat = 16
     static let terminalSize: CGFloat = 20
 
+    // Resolving the descriptor + ligature features is expensive; callers hit
+    // this per layout/zoom, so cache per size.
+    private static var codeFontCache: [CGFloat: NSFont] = [:]
+
     static func codeFont(size: CGFloat) -> NSFont {
+        if let cached = codeFontCache[size] { return cached }
+        let font = makeCodeFont(size: size)
+        codeFontCache[size] = font
+        return font
+    }
+
+    private static func makeCodeFont(size: CGFloat) -> NSFont {
         let descriptor = NSFontDescriptor(fontAttributes: [
             .family: codeFontFamily,
             .traits: [NSFontDescriptor.TraitKey.weight: codeFontWeight]

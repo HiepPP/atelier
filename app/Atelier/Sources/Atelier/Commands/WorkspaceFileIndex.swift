@@ -60,9 +60,9 @@ actor WorkspaceFileIndex: WorkspaceFileIndexing {
         }
 
         result.sort { lhs, rhs in
-            let lhsPath = lhs.relativePath.lowercased()
-            let rhsPath = rhs.relativePath.lowercased()
-            if lhsPath != rhsPath { return lhsPath < rhsPath }
+            if lhs.lowercasedRelativePath != rhs.lowercasedRelativePath {
+                return lhs.lowercasedRelativePath < rhs.lowercasedRelativePath
+            }
             return lhs.relativePath < rhs.relativePath
         }
         cachedRevision = revision
@@ -70,8 +70,9 @@ actor WorkspaceFileIndex: WorkspaceFileIndexing {
         return result
     }
 
+    private lazy var rootComponents = rootURL.pathComponents
+
     private func relativePath(for url: URL) -> String? {
-        let rootComponents = rootURL.pathComponents
         let fileComponents = url.standardizedFileURL.pathComponents
         guard fileComponents.starts(with: rootComponents), fileComponents.count > rootComponents.count else {
             return nil

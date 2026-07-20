@@ -58,6 +58,32 @@ Use four-space indentation and standard Swift API naming. Types use `UpperCamelC
 
 Use `rg` for repository search. Do not add or use GitNexus metadata in this repository.
 
+## Performance Rules
+
+These rules come from shipped CPU/RAM regressions (100% CPU file-tree reload loop, per-draw color allocation). Follow them for every change.
+
+### No Redundant Invalidation
+
+- Never call `reloadData`/`reloadItem`/`needsDisplay` after a data refresh that produced no change. Diff first (identity or `Equatable`), reload only on real change. The file tree loop came from unconditional `reloadItem` after every directory load.
+- Debounce filesystem- and watcher-driven refreshes (git status, directory reloads) with a trailing delay; a burst of FSEvents must collapse to one refresh and at most one subprocess spawn.
+- Coalesce high-frequency `@Observable` mutations (streaming LLM deltas, progress ticks) into batched flushes (~80 ms). One mutation per token re-renders and re-parses the whole transcript.
+
+### No Allocation in Draw/Layout/Per-Row Paths
+
+- Never allocate `NSColor`, `NSFont`, `NSImage`, attribute dictionaries, or `NSBezierPath` inside `draw()`, `layout()`, cell `configure`, or dynamic color provider closures. Precompute or cache; invalidate the cache only when the input (scale, appearance, font) changes.
+- `NSColor(name:)` provider closures run on every draw-time resolution: capture precomputed colors, never build them inside the closure.
+- Per-keystroke search/rank paths must not lowercase, `Array(...)`-convert, or build dictionaries per candidate; precompute at index time.
+
+### Bounded Work and Memory
+
+- Iterate visible rows (`rows(in: visibleRect)`), never `0..<numberOfRows`, for refresh loops.
+- Every append-only collection held by a long-lived model needs a cap (messages, responses, activities, caches).
+- Watch the narrowest filesystem scope possible and filter event paths (`IgnoreRules`, `.git` internals) before reacting.
+
+### Verify
+
+- After any perf-relevant change, launch via `app/Atelier/scripts/build_and_run.sh run` and confirm idle CPU stays in the 0.2-2% range (`ps -p PID -o %cpu=`). Sustained CPU with no interaction means an invalidation loop; profile with `sample PID 3` and check for repeating reload/draw frames before shipping.
+
 ## SwiftUI and AppKit Crash Rules
 
 These rules come from a shipped crash: zooming the window crossed a width breakpoint mid-resize, `.onChange` mutated panel `@State` during AppKit's layout pass, and macOS trapped in `-[NSWindow _postWindowNeedsUpdateConstraints]`. `swift build` and `swift test` cannot catch this class of runtime Cocoa exception. Follow these rules to prevent it.

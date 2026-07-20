@@ -3,6 +3,16 @@ import Foundation
 nonisolated struct AtelierFileCandidate: Identifiable, Equatable, Sendable {
     let url: URL
     let relativePath: String
+    // Precomputed at index time so per-keystroke ranking never lowercases.
+    let lowercasedFileName: String
+    let lowercasedRelativePath: String
+
+    init(url: URL, relativePath: String) {
+        self.url = url
+        self.relativePath = relativePath
+        lowercasedFileName = url.lastPathComponent.lowercased()
+        lowercasedRelativePath = relativePath.lowercased()
+    }
 
     var id: String { url.path }
     var fileName: String { url.lastPathComponent }
@@ -59,9 +69,6 @@ nonisolated enum AtelierPaletteSearch {
         let limit = min(max(0, limit), maximumResults)
         guard limit > 0 else { return [] }
 
-        let candidatesByPath = Dictionary(
-            uniqueKeysWithValues: candidates.map { ($0.url.standardizedFileURL.path, $0) }
-        )
         let recentRanks = Dictionary(
             uniqueKeysWithValues: recentURLs.prefix(RecentFileHistory.maximumCount).enumerated().map {
                 ($0.element.standardizedFileURL.path, RecentFileHistory.maximumCount - $0.offset)
@@ -70,6 +77,11 @@ nonisolated enum AtelierPaletteSearch {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         if normalizedQuery.isEmpty {
+            // Only the empty-query branch needs the path lookup; building it
+            // for every keystroke wasted O(candidates) per key.
+            let candidatesByPath = Dictionary(
+                uniqueKeysWithValues: candidates.map { ($0.url.standardizedFileURL.path, $0) }
+            )
             return recentURLs.compactMap { url in
                 guard let candidate = candidatesByPath[url.standardizedFileURL.path] else {
                     return nil
@@ -83,11 +95,13 @@ nonisolated enum AtelierPaletteSearch {
             .map(\.self)
         }
 
+        let queryCharacters = Array(normalizedQuery)
         return candidates.compactMap { candidate in
             guard let score = score(
+                queryCharacters: queryCharacters,
                 query: normalizedQuery,
-                fileName: candidate.fileName.lowercased(),
-                relativePath: candidate.relativePath.lowercased()
+                fileName: candidate.lowercasedFileName,
+                relativePath: candidate.lowercasedRelativePath
             ) else {
                 return nil
             }
@@ -98,8 +112,8 @@ nonisolated enum AtelierPaletteSearch {
         }
         .sorted { lhs, rhs in
             if lhs.score != rhs.score { return lhs.score > rhs.score }
-            let lhsPath = lhs.candidate.relativePath.lowercased()
-            let rhsPath = rhs.candidate.relativePath.lowercased()
+            let lhsPath = lhs.candidate.lowercasedRelativePath
+            let rhsPath = rhs.candidate.lowercasedRelativePath
             if lhsPath != rhsPath { return lhsPath < rhsPath }
             return lhs.candidate.relativePath < rhs.candidate.relativePath
         }
@@ -111,7 +125,7 @@ nonisolated enum AtelierPaletteSearch {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let normalizedText = text.lowercased()
         guard !normalizedQuery.isEmpty else { return 0 }
-        return subsequenceScore(query: normalizedQuery, text: normalizedText)
+        return subsequenceScore(queryCharacters: Array(normalizedQuery), text: normalizedText)
     }
 
     static func rankCommands(
@@ -120,6 +134,9 @@ nonisolated enum AtelierPaletteSearch {
         context: AtelierActionContext
     ) -> [AtelierPaletteCommandMatch] {
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let indexByID = Dictionary(
+            uniqueKeysWithValues: descriptors.enumerated().map { ($0.element.id, $0.offset) }
+        )
         return descriptors.enumerated().compactMap { index, descriptor in
             let title = AtelierActionRegistry.title(for: descriptor.id, context: context)
             let resultScore: Int
@@ -141,18 +158,22 @@ nonisolated enum AtelierPaletteSearch {
         }
         .sorted { lhs, rhs in
             if lhs.score != rhs.score { return lhs.score > rhs.score }
-            let lhsIndex = descriptors.firstIndex { $0.id == lhs.descriptor.id } ?? 0
-            let rhsIndex = descriptors.firstIndex { $0.id == rhs.descriptor.id } ?? 0
+            let lhsIndex = indexByID[lhs.descriptor.id] ?? 0
+            let rhsIndex = indexByID[rhs.descriptor.id] ?? 0
             return lhsIndex < rhsIndex
         }
     }
 
     private static func score(
+        queryCharacters: [Character],
         query: String,
         fileName: String,
         relativePath: String
     ) -> Int? {
-        guard let subsequence = subsequenceScore(query: query, text: relativePath) else {
+        guard let subsequence = subsequenceScore(
+            queryCharacters: queryCharacters,
+            text: relativePath
+        ) else {
             return nil
         }
         if fileName == query {
@@ -167,8 +188,7 @@ nonisolated enum AtelierPaletteSearch {
         return 10_000 + subsequence
     }
 
-    private static func subsequenceScore(query: String, text: String) -> Int? {
-        let queryCharacters = Array(query)
+    private static func subsequenceScore(queryCharacters: [Character], text: String) -> Int? {
         let textCharacters = Array(text)
         var cursor = 0
         var previousIndex: Int?

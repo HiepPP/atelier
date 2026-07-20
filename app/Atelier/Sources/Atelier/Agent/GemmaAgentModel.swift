@@ -45,6 +45,11 @@ final class GemmaAgentModel {
     private var runTask: Task<Void, Never>?
     private var assistantMessageID: UUID?
     private var shouldResetRuntime = false
+    // Streaming deltas are coalesced so the observable transcript mutates at a
+    // bounded rate instead of once per token (each mutation re-renders and
+    // re-parses the whole message).
+    @ObservationIgnored private var pendingDelta = ""
+    @ObservationIgnored private var deltaFlushTask: Task<Void, Never>?
 
     init(runtime: GemmaAgentRuntime) {
         self.runtime = runtime
@@ -131,20 +136,21 @@ final class GemmaAgentModel {
     private func apply(_ event: GemmaAgentEvent) {
         switch event {
         case .assistantDelta(let delta):
-            guard let assistantMessageID,
-                  let index = messages.firstIndex(where: { $0.id == assistantMessageID }) else {
-                return
-            }
-            messages[index].content.append(delta)
+            pendingDelta.append(delta)
+            scheduleDeltaFlush()
+            return
         case .toolStarted(let activity):
+            flushPendingDelta()
             activities.append(activity)
         case .toolFinished(let activity):
+            flushPendingDelta()
             if let index = activities.firstIndex(where: { $0.id == activity.id }) {
                 activities[index] = activity
             } else {
                 activities.append(activity)
             }
         case .completed:
+            flushPendingDelta()
             status = .completed
             runTask = nil
             AppLogger.agent.info("Completed Gemma agent run")
@@ -152,7 +158,31 @@ final class GemmaAgentModel {
         trimPresentationState()
     }
 
+    private func scheduleDeltaFlush() {
+        guard deltaFlushTask == nil else { return }
+        deltaFlushTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(80))
+            guard let self, !Task.isCancelled else { return }
+            deltaFlushTask = nil
+            flushPendingDelta()
+        }
+    }
+
+    private func flushPendingDelta() {
+        deltaFlushTask?.cancel()
+        deltaFlushTask = nil
+        guard !pendingDelta.isEmpty else { return }
+        let delta = pendingDelta
+        pendingDelta = ""
+        guard let assistantMessageID,
+              let index = messages.firstIndex(where: { $0.id == assistantMessageID }) else {
+            return
+        }
+        messages[index].content.append(delta)
+    }
+
     private func stopRunningTask(markCancelled: Bool) {
+        flushPendingDelta()
         let wasRunning = status == .running
         runTask?.cancel()
         runTask = nil
@@ -176,5 +206,6 @@ final class GemmaAgentModel {
 
     isolated deinit {
         runTask?.cancel()
+        deltaFlushTask?.cancel()
     }
 }

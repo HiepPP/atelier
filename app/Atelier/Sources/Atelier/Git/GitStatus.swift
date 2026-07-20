@@ -24,19 +24,19 @@ nonisolated struct GitChange: Identifiable, Equatable, Sendable {
 }
 
 nonisolated struct GitStatus: Equatable, Sendable {
-    var changes: [GitChange]
-    var ignoredPaths: Set<String> = []
+    let changes: [GitChange]
+    let ignoredPaths: Set<String>
+    // Partitions are read several times per render; compute them once.
+    let staged: [GitChange]
+    let unstaged: [GitChange]
+    let untracked: [GitChange]
 
-    var staged: [GitChange] {
-        changes.filter(\.isStaged)
-    }
-
-    var unstaged: [GitChange] {
-        changes.filter { $0.isUnstaged && $0.kind != .untracked }
-    }
-
-    var untracked: [GitChange] {
-        changes.filter { $0.kind == .untracked }
+    init(changes: [GitChange], ignoredPaths: Set<String> = []) {
+        self.changes = changes
+        self.ignoredPaths = ignoredPaths
+        staged = changes.filter(\.isStaged)
+        unstaged = changes.filter { $0.isUnstaged && $0.kind != .untracked }
+        untracked = changes.filter { $0.kind == .untracked }
     }
 
     static func parse(_ data: Data) -> GitStatus {

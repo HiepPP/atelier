@@ -34,7 +34,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         onOpen: @escaping (URL) -> Void
     ) {
         root = FileTreeNode(url: rootURL, isDirectory: true)
-        self.ignoredPaths = ignoredPaths
+        self.ignoredPaths = FileTreeGitIgnorePresentation.normalized(ignoredPaths)
         self.onTargetDirectoryChange = onTargetDirectoryChange
         self.onCreateItem = onCreateItem
         self.onRenameItem = onRenameItem
@@ -106,8 +106,9 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         onPreview: @escaping (URL) -> Void,
         onOpen: @escaping (URL) -> Void
     ) {
-        let ignoredPathsChanged = self.ignoredPaths != ignoredPaths
-        self.ignoredPaths = ignoredPaths
+        let normalizedIgnoredPaths = FileTreeGitIgnorePresentation.normalized(ignoredPaths)
+        let ignoredPathsChanged = self.ignoredPaths != normalizedIgnoredPaths
+        self.ignoredPaths = normalizedIgnoredPaths
         self.onTargetDirectoryChange = onTargetDirectoryChange
         self.onCreateItem = onCreateItem
         self.onRenameItem = onRenameItem
@@ -133,12 +134,12 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         guard self.scale != scale || self.displayScale != displayScale else { return }
         self.scale = scale
         self.displayScale = displayScale
+        cachedFont = nil
+        cachedRowHeight = nil
         guard let outlineView else { return }
         outlineView.rowHeight = rowHeight
-        for row in 0..<outlineView.numberOfRows {
-            let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
-                as? NSTableCellView
-            cell?.textField?.font = font
+        forEachVisibleCell(in: outlineView) { cell, _ in
+            cell.textField?.font = font
         }
     }
 
@@ -427,14 +428,23 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
 
     private func refreshVisibleCells() {
         guard let outlineView else { return }
-        for row in 0..<outlineView.numberOfRows {
+        forEachVisibleCell(in: outlineView) { cell, row in
             guard let node = outlineView.item(atRow: row) as? FileTreeNode,
-                  let cell = outlineView.view(
-                      atColumn: 0,
-                      row: row,
-                      makeIfNecessary: false
-                  ) as? FileTreeCellView else { continue }
+                  let cell = cell as? FileTreeCellView else { return }
             configure(cell, for: node)
+        }
+    }
+
+    private func forEachVisibleCell(
+        in outlineView: NSOutlineView,
+        _ body: (NSTableCellView, Int) -> Void
+    ) {
+        let visibleRows = outlineView.rows(in: outlineView.visibleRect)
+        guard visibleRows.location != NSNotFound else { return }
+        for row in visibleRows.location..<NSMaxRange(visibleRows) {
+            guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                as? NSTableCellView else { continue }
+            body(cell, row)
         }
     }
 
@@ -462,21 +472,31 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         }
     }
 
+    // Font and row height are read per cell; cache them and invalidate only
+    // when scale or displayScale change.
+    private var cachedFont: NSFont?
     private var font: NSFont {
-        .systemFont(
+        if let cachedFont { return cachedFont }
+        let font = NSFont.systemFont(
             ofSize: AtelierFontScaling.snapped(
                 AtelierTypography.uiSize * scale,
                 displayScale: displayScale
             ),
             weight: .regular
         )
+        cachedFont = font
+        return font
     }
 
+    private var cachedRowHeight: CGFloat?
     private var rowHeight: CGFloat {
-        max(
+        if let cachedRowHeight { return cachedRowHeight }
+        let height = max(
             AtelierMetrics.rowHeight * scale,
             ceil(font.ascender - font.descender + font.leading + AtelierMetrics.spaceXS)
         )
+        cachedRowHeight = height
+        return height
     }
 
     private func makeCell(identifier: NSUserInterfaceItemIdentifier) -> FileTreeCellView {
@@ -496,10 +516,14 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             default: symbol = "doc"
             }
         }
+        if let cached = Self.iconCache[symbol] { return cached }
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         image?.isTemplate = true
+        Self.iconCache[symbol] = image
         return image
     }
+
+    private static var iconCache: [String: NSImage?] = [:]
 
     private func iconColor(for node: FileTreeNode) -> NSColor {
         node.isDirectory || node.symbolicLinkTargetIsDirectory

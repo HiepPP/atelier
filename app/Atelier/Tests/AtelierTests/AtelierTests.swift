@@ -226,7 +226,7 @@ struct AtelierTests {
     @Test("Git ignore presentation matches exact items and descendants")
     func fileTreeGitIgnorePresentation() {
         let root = URL(fileURLWithPath: "/workspace", isDirectory: true)
-        let ignoredPaths: Set<String> = ["tmp/", "generated.txt"]
+        let ignoredPaths = FileTreeGitIgnorePresentation.normalized(["tmp/", "generated.txt"])
 
         #expect(FileTreeGitIgnorePresentation.isIgnored(
             root.appendingPathComponent("tmp", isDirectory: true),
