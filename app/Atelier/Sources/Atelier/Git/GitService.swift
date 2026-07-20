@@ -181,6 +181,17 @@ nonisolated final class GitService: Sendable {
         )
     }
 
+    /// Working-tree status only. Filesystem-driven refreshes use this so a burst
+    /// of file edits spawns one `git status` instead of the three subprocesses a
+    /// full snapshot needs; branch and branch-list refresh stay on git actions.
+    func status(workspacePath: String) async throws -> GitStatus {
+        let data = try await run(
+            arguments: ["status", "--ignored=matching", "--porcelain=v2", "-z"],
+            workspacePath: workspacePath
+        )
+        return GitStatus.parse(data)
+    }
+
     func diff(
         path: String,
         originalPath: String?,

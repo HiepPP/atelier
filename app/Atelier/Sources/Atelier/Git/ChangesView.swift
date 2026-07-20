@@ -130,10 +130,12 @@ final class GitWorkspaceModel {
     private let commitMessageGenerator: GitCommitMessageGenerator
     private let onRepositoryChange: () -> Void
     private var refreshTask: Task<Void, Never>?
+    private var statusTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
     private var invalidateTask: Task<Void, Never>?
     private var commitMessageTask: Task<Void, Never>?
     private var refreshID = UUID()
+    private var statusRefreshID = UUID()
 
     init(
         workspacePath: String,
@@ -184,20 +186,52 @@ final class GitWorkspaceModel {
         }
     }
 
+    /// Refresh only the working-tree status, keeping the current branch and
+    /// branch list. Filesystem bursts use this so an edit spawns one `git
+    /// status` instead of the full three-subprocess snapshot. No `isLoading`
+    /// flag: a background status update must not flash the spinner on save.
+    func refreshStatus() {
+        statusTask?.cancel()
+        let requestID = UUID()
+        statusRefreshID = requestID
+        statusTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let status = try await service.status(workspacePath: workspacePath)
+                guard !Task.isCancelled, statusRefreshID == requestID else { return }
+                if snapshot.status != status {
+                    snapshot = GitSnapshot(
+                        status: status,
+                        branch: snapshot.branch,
+                        branches: snapshot.branches
+                    )
+                }
+                errorMessage = nil
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled, statusRefreshID == requestID else { return }
+                errorMessage = error.localizedDescription
+                AppLogger.git.error("Git status refresh failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
     /// Filesystem-driven invalidations arrive in bursts; debounce the git
-    /// subprocess refresh so a stream of events yields one snapshot.
+    /// subprocess refresh so a stream of events yields one status refresh.
     func invalidate() {
         onRepositoryChange()
         invalidateTask?.cancel()
         invalidateTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            self?.refresh()
+            self?.refreshStatus()
         }
     }
 
     func stop() {
         refreshTask?.cancel()
+        statusTask?.cancel()
         actionTask?.cancel()
         invalidateTask?.cancel()
         invalidateTask = nil

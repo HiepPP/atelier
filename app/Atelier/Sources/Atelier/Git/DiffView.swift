@@ -140,6 +140,65 @@ nonisolated enum GitDiffLoadState: Equatable, Sendable {
     case failed(String)
 }
 
+/// Shared LRU cache of raw `git diff` output, keyed by the diff request plus a
+/// revision that bumps whenever the repository changes. Reselecting a file in
+/// the Changes panel then serves from memory instead of respawning `git diff`.
+/// Bounded by entry count and total bytes so large diffs cannot grow unbounded.
+@MainActor
+final class GitDiffCache {
+    struct Key: Hashable {
+        let path: String
+        let originalPath: String?
+        let staged: Bool
+        let isUntracked: Bool
+        let revision: Int
+    }
+
+    private(set) var revision = 0
+    private var entries: [Key: String] = [:]
+    private var order: [Key] = []
+    private var totalBytes = 0
+    private let maximumEntries = 24
+    private let maximumBytes = 16 * 1024 * 1024
+
+    func value(for key: Key) -> String? {
+        guard let value = entries[key] else { return nil }
+        if let index = order.firstIndex(of: key) {
+            order.remove(at: index)
+            order.append(key)
+        }
+        return value
+    }
+
+    func store(_ value: String, for key: Key) {
+        let byteCount = value.utf8.count
+        guard byteCount <= maximumBytes else { return }
+        if let existing = entries[key] {
+            totalBytes -= existing.utf8.count
+            if let index = order.firstIndex(of: key) { order.remove(at: index) }
+        }
+        entries[key] = value
+        order.append(key)
+        totalBytes += byteCount
+        while entries.count > maximumEntries || totalBytes > maximumBytes {
+            guard let oldest = order.first else { break }
+            order.removeFirst()
+            if let removed = entries.removeValue(forKey: oldest) {
+                totalBytes -= removed.utf8.count
+            }
+        }
+    }
+
+    /// The repository changed. Bump the revision so an in-flight load stores its
+    /// result under the now-stale key and later lookups miss, then drop entries.
+    func invalidateAll() {
+        revision &+= 1
+        entries.removeAll(keepingCapacity: true)
+        order.removeAll(keepingCapacity: true)
+        totalBytes = 0
+    }
+}
+
 @MainActor
 @Observable
 final class GitDiffSession {
@@ -149,17 +208,20 @@ final class GitDiffSession {
     private(set) var needsReload = false
 
     private let service: GitService
+    private let cache: GitDiffCache
     private var loadTask: Task<Void, Never>?
     private var loadGeneration = 0
 
     init(
         selection: DiffSelection,
         workspacePath: String,
-        service: GitService = GitService()
+        service: GitService = GitService(),
+        cache: GitDiffCache = GitDiffCache()
     ) {
         self.selection = selection
         self.workspacePath = workspacePath
         self.service = service
+        self.cache = cache
         reload()
     }
 
@@ -169,8 +231,23 @@ final class GitDiffSession {
         loadTask?.cancel()
         needsReload = false
 
-        state = .loading
         let isUntracked = selection.change.kind == .untracked
+        let key = GitDiffCache.Key(
+            path: selection.change.path,
+            originalPath: selection.change.originalPath,
+            staged: selection.staged,
+            isUntracked: isUntracked,
+            revision: cache.revision
+        )
+
+        if let cached = cache.value(for: key) {
+            state = cached.isEmpty
+                ? .message("No diff output for this file.")
+                : .loaded(GitDiffDocument(text: cached))
+            return
+        }
+
+        state = .loading
         loadTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -189,6 +266,7 @@ final class GitDiffSession {
                     )
                 }
                 guard !Task.isCancelled, loadGeneration == generation else { return }
+                cache.store(output, for: key)
                 state = output.isEmpty
                     ? .message("No diff output for this file.")
                     : .loaded(GitDiffDocument(text: output))
