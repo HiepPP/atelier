@@ -484,7 +484,10 @@ Persistence boundaries:
 - Keep repository, branch, summary, commit input, and change groups in the sidebar.
 - Place a compact Gemma action beside the commit-message label.
 - Generate one editable Conventional Commit subject from changed file paths only. Never send diff or file contents.
-- Show progress while Gemma runs, disable duplicate generation, and keep commit as an explicit user action.
+- Replace the commit action with Push. Push must generate a fresh Gemma subject, commit the
+  selected changes, then push the current branch.
+- Show progress across generation, staging, commit, and push. Disable duplicate generation and
+  push while the pipeline runs.
 - Open file diffs as center tabs, not inside the Git sidebar.
 - Use semantic green, orange, red, and teal only for Git meaning.
 - Keep diff line numbers in a fixed 48-point gutter.

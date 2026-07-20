@@ -274,6 +274,10 @@ nonisolated final class GitService: Sendable {
         )
     }
 
+    func push(workspacePath: String) async throws {
+        _ = try await run(arguments: ["push"], workspacePath: workspacePath)
+    }
+
     func switchBranch(_ branch: String, workspacePath: String) async throws {
         _ = try await run(arguments: ["checkout", branch], workspacePath: workspacePath)
     }

@@ -17,9 +17,8 @@ nonisolated struct DiffSelection: Equatable, Sendable {
 nonisolated enum GitCommitPolicy {
     private static let maximumChangedFiles = 100
 
-    static func canCommit(message: String, status: GitStatus) -> Bool {
-        !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !status.changes.isEmpty
+    static func canPush(status: GitStatus) -> Bool {
+        !status.changes.isEmpty
     }
 
     static func shouldStageAll(status: GitStatus) -> Bool {
@@ -67,6 +66,24 @@ nonisolated enum GitCommitPolicy {
     }
 }
 
+nonisolated enum GitPushPhase: Equatable {
+    case idle
+    case generatingMessage
+    case staging
+    case committing
+    case pushing
+
+    var label: String {
+        switch self {
+        case .idle: "Push"
+        case .generatingMessage: "Generating..."
+        case .staging: "Staging..."
+        case .committing: "Committing..."
+        case .pushing: "Pushing..."
+        }
+    }
+}
+
 actor GitCommitMessageGenerator {
     private let client: any OllamaChatStreaming
 
@@ -106,6 +123,7 @@ final class GitWorkspaceModel {
     private(set) var errorMessage: String?
     private(set) var isGeneratingCommitMessage = false
     private(set) var commitMessageGenerationError: String?
+    private(set) var pushPhase = GitPushPhase.idle
 
     let workspacePath: String
     private let service = GitService()
@@ -128,7 +146,15 @@ final class GitWorkspaceModel {
     }
 
     var canGenerateCommitMessage: Bool {
-        !snapshot.status.changes.isEmpty && !isGeneratingCommitMessage
+        !snapshot.status.changes.isEmpty
+            && !isGeneratingCommitMessage
+            && pushPhase == .idle
+    }
+
+    var canPush: Bool {
+        GitCommitPolicy.canPush(status: snapshot.status)
+            && !isGeneratingCommitMessage
+            && pushPhase == .idle
     }
 
     func refresh() {
@@ -176,6 +202,7 @@ final class GitWorkspaceModel {
         invalidateTask?.cancel()
         invalidateTask = nil
         cancelCommitMessageGeneration()
+        pushPhase = .idle
     }
 
     func generateCommitMessage(onSuccess: @escaping (String) -> Void) {
@@ -237,18 +264,67 @@ final class GitWorkspaceModel {
         }
     }
 
-    func commit(
-        message: String,
-        stageAll: Bool,
+    func push(
+        onGeneratedMessage: @escaping (String) -> Void,
         onSuccess: @escaping () -> Void
     ) {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        perform(onSuccess: onSuccess) { service, path in
-            if stageAll {
-                try await service.stageAll(workspacePath: path)
+        guard canPush else { return }
+        let paths = snapshot.status.changes.map(\.path)
+        let shouldStageAll = GitCommitPolicy.shouldStageAll(status: snapshot.status)
+        let generator = commitMessageGenerator
+        actionTask?.cancel()
+        pushPhase = .generatingMessage
+        isGeneratingCommitMessage = true
+        commitMessageGenerationError = nil
+        errorMessage = nil
+        actionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let message = try await generator.generate(paths: paths)
+                try Task.checkCancellation()
+                isGeneratingCommitMessage = false
+                onGeneratedMessage(message)
+                if shouldStageAll {
+                    pushPhase = .staging
+                    try await service.stageAll(workspacePath: workspacePath)
+                }
+                try Task.checkCancellation()
+                pushPhase = .committing
+                try await service.commit(message: message, workspacePath: workspacePath)
+                try Task.checkCancellation()
+                pushPhase = .pushing
+                try await service.push(workspacePath: workspacePath)
+                try Task.checkCancellation()
+                pushPhase = .idle
+                actionTask = nil
+                onRepositoryChange()
+                onSuccess()
+                refresh()
+            } catch is CancellationError {
+                isGeneratingCommitMessage = false
+                pushPhase = .idle
+                actionTask = nil
+            } catch let error as OllamaCloudError where error == .cancelled {
+                isGeneratingCommitMessage = false
+                pushPhase = .idle
+                actionTask = nil
+            } catch {
+                let failedDuringGeneration = pushPhase == .generatingMessage
+                isGeneratingCommitMessage = false
+                pushPhase = .idle
+                actionTask = nil
+                if failedDuringGeneration {
+                    commitMessageGenerationError = error.localizedDescription
+                    AppLogger.git.error(
+                        "Commit message generation failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                } else {
+                    errorMessage = error.localizedDescription
+                    AppLogger.git.error(
+                        "Git push pipeline failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
             }
-            try await service.commit(message: trimmed, workspacePath: path)
         }
     }
 
@@ -354,7 +430,7 @@ struct ChangesView: View {
             } else {
                 changeSummary
                 commitInput
-                commitButton
+                pushButton
 
                 List {
                     changeSection("Staged Changes", changes: model.snapshot.status.staged, staged: true)
@@ -462,7 +538,7 @@ struct ChangesView: View {
                 .padding(.horizontal, AtelierMetrics.spaceS)
                 .frame(height: AtelierMetrics.fieldHeight)
                 .atelierField(isFocused: isCommitFieldFocused)
-                .onSubmit(commit)
+                .onSubmit(push)
                 .onExitCommand {
                     isCommitFieldFocused = false
                 }
@@ -478,10 +554,23 @@ struct ChangesView: View {
         .environment(\.atelierZoomScale, zoom.sidebarScale)
     }
 
-    private var commitButton: some View {
-        Button("Commit", action: commit)
+    private var pushButton: some View {
+        Button(action: push) {
+            HStack(spacing: AtelierMetrics.spaceXS) {
+                if model.pushPhase == .idle {
+                    Image(systemName: "arrow.up")
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                Text(model.pushPhase.label)
+            }
+        }
             .buttonStyle(AtelierFilledButtonStyle())
-            .disabled(!canCommit)
+            .disabled(!model.canPush)
+            .accessibilityLabel("Generate commit message, commit changes, and push")
+            .accessibilityValue(model.pushPhase.label)
+            .help("Generate a Gemma commit message, commit changes, and push the current branch")
             .padding(.horizontal, AtelierMetrics.spaceM)
             .padding(.top, AtelierMetrics.spaceS)
             .padding(.bottom, AtelierMetrics.spaceS)
@@ -556,23 +645,14 @@ struct ChangesView: View {
 
     private var commitPlaceholder: String {
         let branch = model.snapshot.branch.isEmpty ? "HEAD" : model.snapshot.branch
-        return "Message (⌘Enter to commit on \"\(branch)\")"
+        return "Message (⌘Enter to generate and push \"\(branch)\")"
     }
 
-    private var canCommit: Bool {
-        GitCommitPolicy.canCommit(
-            message: commitMessage,
-            status: model.snapshot.status
-        )
-    }
-
-    private func commit() {
+    private func push() {
         isCommitFieldFocused = false
-        model.cancelCommitMessageGeneration()
-        model.commit(
-            message: commitMessage,
-            stageAll: GitCommitPolicy.shouldStageAll(status: model.snapshot.status)
-        ) {
+        model.push(onGeneratedMessage: { message in
+            commitMessage = message
+        }) {
             commitMessage = ""
         }
     }

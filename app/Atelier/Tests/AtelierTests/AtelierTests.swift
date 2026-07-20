@@ -271,8 +271,8 @@ struct AtelierTests {
         #expect(status.ignoredPaths == ["tmp/"])
     }
 
-    @Test("Git commit enables for working changes and stages all when needed")
-    func gitCommitPolicy() {
+    @Test("Git push enables for changes and stages all when needed")
+    func gitPushPolicy() {
         let workingOnly = GitStatus(changes: [
             GitChange(
                 path: "main.swift",
@@ -292,8 +292,9 @@ struct AtelierTests {
             )
         ])
 
-        #expect(GitCommitPolicy.canCommit(message: "Fix focus", status: workingOnly))
-        #expect(!GitCommitPolicy.canCommit(message: "   ", status: workingOnly))
+        #expect(GitCommitPolicy.canPush(status: workingOnly))
+        #expect(GitCommitPolicy.canPush(status: staged))
+        #expect(!GitCommitPolicy.canPush(status: GitStatus(changes: [])))
         #expect(GitCommitPolicy.shouldStageAll(status: workingOnly))
         #expect(!GitCommitPolicy.shouldStageAll(status: staged))
     }
@@ -331,6 +332,87 @@ struct AtelierTests {
             - app/Atelier/Sources/Atelier/Git/ChangesView.swift
             """
         )
+    }
+
+    @Test("Git push generates a message, commits all changes, and pushes")
+    func gitGeneratedPush() async throws {
+        let root = temporaryDirectory("git-generated-push")
+        let repository = root.appendingPathComponent("working", isDirectory: true)
+        let remote = root.appendingPathComponent("remote.git", isDirectory: true)
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+        let command = GitCommand()
+        func git(_ arguments: [String], at directory: URL? = nil) throws -> Data {
+            try command.run(
+                arguments: arguments,
+                workspacePath: (directory ?? repository).path
+            )
+        }
+
+        _ = try git(["init", "--bare", "-q", remote.path], at: root)
+        _ = try git(["init", "-q"])
+        _ = try git(["config", "user.name", "Atelier Tests"])
+        _ = try git(["config", "user.email", "atelier-tests@example.invalid"])
+        _ = try git(["branch", "-M", "main"])
+        _ = try git(["remote", "add", "origin", remote.path])
+        let tracked = repository.appendingPathComponent("tracked.txt")
+        try Data("before\n".utf8).write(to: tracked)
+        _ = try git(["add", "--", "tracked.txt"])
+        _ = try git(["commit", "-qm", "initial"])
+        _ = try git(["push", "-qu", "origin", "main"])
+
+        try Data("after\n".utf8).write(to: tracked)
+        try Data("new\n".utf8).write(
+            to: repository.appendingPathComponent("untracked.txt")
+        )
+        let client = ScriptedOllamaClient(
+            responses: [
+                .chunks([
+                    OllamaChatChunk(
+                        message: OllamaChatMessage(
+                            role: .assistant,
+                            content: "feat(git): push generated changes"
+                        ),
+                        done: true
+                    )
+                ])
+            ]
+        )
+        let model = GitWorkspaceModel(
+            workspacePath: repository.path,
+            commitMessageClient: client
+        )
+        model.refresh()
+        for _ in 0..<200 where model.isLoading || model.snapshot.status.changes.isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(model.canPush)
+
+        var generatedMessage: String?
+        var didPush = false
+        model.push(onGeneratedMessage: { generatedMessage = $0 }) {
+            didPush = true
+        }
+        for _ in 0..<400 where !didPush && model.errorMessage == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(didPush)
+        #expect(model.pushPhase == .idle)
+        #expect(model.errorMessage == nil)
+        #expect(generatedMessage == "feat(git): push generated changes")
+        let localHead = String(decoding: try git(["rev-parse", "HEAD"]), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let remoteHead = String(
+            decoding: try git(
+                ["--git-dir", remote.path, "rev-parse", "refs/heads/main"],
+                at: root
+            ),
+            as: UTF8.self
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = String(decoding: try git(["log", "-1", "--pretty=%s"]), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(localHead == remoteHead)
+        #expect(subject == "feat(git): push generated changes")
     }
 
     @Test("Git service stages tracked and untracked changes together")
