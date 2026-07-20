@@ -52,6 +52,7 @@ final class AppModel {
     private let environment: AppEnvironment
     private var startupTask: Task<Void, Never>?
     private var persistenceTask: Task<Void, Never>?
+    private var sessionPersistTask: Task<Void, Never>?
     private var pendingPersistence: WorkspaceCatalogState?
     private var catalogMutationRevision: UInt64 = 0
     private var hasStarted = false
@@ -214,6 +215,8 @@ final class AppModel {
         hasStopped = true
         startupTask?.cancel()
         startupTask = nil
+        sessionPersistTask?.cancel()
+        sessionPersistTask = nil
         persistCatalog()
         finishStartupRestore()
         sessionsByID.values.forEach { $0.stop() }
@@ -230,7 +233,8 @@ final class AppModel {
         let session = WorkspaceSession(
             state: state,
             rootURL: rootURL,
-            workspaceAccess: workspaceAccess
+            workspaceAccess: workspaceAccess,
+            onSessionChange: { [weak self] in self?.scheduleSessionPersist() }
         )
         sessionsByID[state.id] = session
         session.start()
@@ -299,12 +303,30 @@ final class AppModel {
     }
 
     private func persistCatalog() {
+        let workspaces = workspaceStates.map { state -> WorkspaceState in
+            guard let session = sessionsByID[state.id] else { return state }
+            var updated = state
+            updated.session = session.sessionSnapshot()
+            return updated
+        }
         pendingPersistence = WorkspaceCatalogState(
-            workspaces: workspaceStates,
+            workspaces: workspaces,
             selectedWorkspaceID: selectedWorkspaceID
         )
         guard !isStartupRestorePending else { return }
         startPersistenceIfNeeded()
+    }
+
+    /// Debounce persistence for high-frequency tab and selection changes so a
+    /// burst of edits collapses to one save.
+    private func scheduleSessionPersist() {
+        guard !isStartupRestorePending, !hasStopped else { return }
+        sessionPersistTask?.cancel()
+        sessionPersistTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            self?.persistCatalog()
+        }
     }
 
     private func startPersistenceIfNeeded() {

@@ -1,10 +1,32 @@
 import Foundation
 
+nonisolated enum PersistedTabKind: String, Codable, Sendable {
+    case file
+    case terminal
+}
+
+/// One restorable center tab. File tabs carry a path and view state; terminal
+/// tabs carry only a title (the running process and scrollback cannot persist).
+nonisolated struct PersistedTab: Codable, Equatable, Sendable {
+    var kind: PersistedTabKind
+    var path: String?
+    var isPreview: Bool
+    var isWordWrapEnabled: Bool
+    var title: String?
+}
+
+/// A workspace's open center tabs, restored on relaunch.
+nonisolated struct WorkspaceSessionState: Codable, Equatable, Sendable {
+    var tabs: [PersistedTab]
+    var selectedTabIndex: Int?
+}
+
 /// Trạng thái workspace được persist ra JSON.
 nonisolated struct WorkspaceState: Codable, Equatable, Sendable, Identifiable {
     var path: String
     var bookmark: Data?
     var lastOpenedAt: Date
+    var session: WorkspaceSessionState?
 
     var id: String {
         URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path

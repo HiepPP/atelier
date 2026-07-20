@@ -267,8 +267,9 @@ struct WorkspaceLifecycleTests {
 
         await loadGate.open()
         await waitUntil { FileManager.default.fileExists(atPath: persistenceURL.path) }
-        #expect(try await WorkspacePersistenceService(fileURL: persistenceURL).load()
-            == WorkspaceCatalogState(workspaces: [user], selectedWorkspaceID: user.id))
+        let persisted = try await WorkspacePersistenceService(fileURL: persistenceURL).load()
+        #expect(persisted?.workspaces.map(\.id) == [user.id])
+        #expect(persisted?.selectedWorkspaceID == user.id)
         await model.stop().value
     }
 
@@ -299,8 +300,9 @@ struct WorkspaceLifecycleTests {
         await loadGate.open()
         await waitUntil { (try? Data(contentsOf: persistenceURL)) != invalidData }
         #expect(model.presentedError != nil)
-        #expect(try await WorkspacePersistenceService(fileURL: persistenceURL).load()
-            == WorkspaceCatalogState(workspaces: [user], selectedWorkspaceID: user.id))
+        let persisted = try await WorkspacePersistenceService(fileURL: persistenceURL).load()
+        #expect(persisted?.workspaces.map(\.id) == [user.id])
+        #expect(persisted?.selectedWorkspaceID == user.id)
         await model.stop().value
     }
 
@@ -328,8 +330,9 @@ struct WorkspaceLifecycleTests {
         try model.openWorkspace(user)
         await model.stop().value
 
-        #expect(try await WorkspacePersistenceService(fileURL: persistenceURL).load()
-            == WorkspaceCatalogState(workspaces: [user], selectedWorkspaceID: user.id))
+        let persisted = try await WorkspacePersistenceService(fileURL: persistenceURL).load()
+        #expect(persisted?.workspaces.map(\.id) == [user.id])
+        #expect(persisted?.selectedWorkspaceID == user.id)
         await loadGate.open()
     }
 

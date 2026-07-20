@@ -318,6 +318,69 @@ struct TerminalTabsNavigationTests {
         #expect(!tabs.canNavigateBack)
     }
 
+    @Test("Session snapshot captures open file and terminal tabs")
+    func sessionSnapshotCapturesTabs() throws {
+        let fixture = try Fixture(names: ["A.swift", "B.swift"])
+        defer { fixture.remove() }
+        let tabs = TerminalTabsModel(workspacePath: fixture.root.path)
+        defer { tabs.closeAll() }
+
+        tabs.openFile(fixture.url("A.swift"))
+        tabs.openFile(fixture.url("B.swift"))
+
+        let snapshot = tabs.sessionSnapshot()
+        // One default terminal plus the two opened files, B selected last.
+        #expect(snapshot.tabs.count == 3)
+        #expect(snapshot.tabs.first?.kind == .terminal)
+        #expect(snapshot.tabs.filter { $0.kind == .file }.count == 2)
+        #expect(snapshot.selectedTabIndex == 2)
+        #expect(snapshot.tabs.last?.path == fixture.url("B.swift").standardizedFileURL.path)
+    }
+
+    @Test("Session restore rebuilds tabs, skips missing files, and keeps view state")
+    func sessionRestoreRebuildsTabs() throws {
+        let fixture = try Fixture(names: ["A.swift"])
+        defer { fixture.remove() }
+        let session = WorkspaceSessionState(
+            tabs: [
+                PersistedTab(
+                    kind: .terminal, path: nil, isPreview: false,
+                    isWordWrapEnabled: false, title: "Terminal 1"
+                ),
+                PersistedTab(
+                    kind: .file, path: fixture.url("A.swift").path, isPreview: true,
+                    isWordWrapEnabled: false, title: nil
+                ),
+                PersistedTab(
+                    kind: .file, path: fixture.url("Gone.swift").path, isPreview: false,
+                    isWordWrapEnabled: true, title: nil
+                )
+            ],
+            selectedTabIndex: 1
+        )
+        let tabs = TerminalTabsModel(workspacePath: fixture.root.path, restoring: session)
+        defer { tabs.closeAll() }
+
+        #expect(tabs.terminalCount == 1)
+        #expect(tabs.fileTabCount == 1)
+        #expect(tabs.selectedFileURL == fixture.url("A.swift").standardizedFileURL)
+        #expect(tabs.selectedFileDisposition == .preview)
+        let editor = try #require(tabs.selectedEditor)
+        #expect(editor.isWordWrapEnabled == false)
+    }
+
+    @Test("Empty session restore falls back to a single terminal")
+    func emptySessionRestoreFallsBack() {
+        let tabs = TerminalTabsModel(
+            workspacePath: FileManager.default.temporaryDirectory.path,
+            restoring: WorkspaceSessionState(tabs: [], selectedTabIndex: nil)
+        )
+        defer { tabs.closeAll() }
+
+        #expect(tabs.terminalCount == 1)
+        #expect(tabs.fileTabCount == 0)
+    }
+
     private func target(_ name: String) -> FileNavigationTarget {
         FileNavigationTarget(
             url: URL(fileURLWithPath: "/tmp/\(name)"),

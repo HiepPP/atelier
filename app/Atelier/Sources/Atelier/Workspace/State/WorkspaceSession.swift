@@ -26,12 +26,17 @@ final class WorkspaceSession {
         rootURL: URL,
         workspaceAccess: WorkspaceAccessController? = nil,
         gemmaAgent: GemmaAgentModel? = nil,
-        agentResponses: AgentResponsesModel? = nil
+        agentResponses: AgentResponsesModel? = nil,
+        onSessionChange: @escaping () -> Void = {}
     ) {
         self.state = state
         self.rootURL = rootURL
         self.workspaceAccess = workspaceAccess
-        let tabs = TerminalTabsModel(workspacePath: rootURL.path)
+        let tabs = TerminalTabsModel(
+            workspacePath: rootURL.path,
+            restoring: state.session
+        )
+        tabs.onSessionChange = onSessionChange
         terminalTabs = tabs
         paletteModel = AtelierPaletteModel(
             fileIndex: WorkspaceFileIndex(rootURL: rootURL),
@@ -150,6 +155,11 @@ final class WorkspaceSession {
 
     func closeAgentSidecar() {
         isAgentSidecarPresented = false
+    }
+
+    /// Current open tabs, for catalog persistence.
+    func sessionSnapshot() -> WorkspaceSessionState {
+        terminalTabs.sessionSnapshot()
     }
 
     private func invalidateFileTree() {

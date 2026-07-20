@@ -53,7 +53,7 @@ AtelierApp
 | SwiftUI | App shell, workspace catalog, active selection, layout, tabs, commands, settings, visible state |
 | AppKit | File outline, editor, terminal, window focus, cursor, native tracking |
 | Models | Ordered live sessions, tab lifecycle, navigation history, Git state, palette state, zoom state |
-| Services | Catalog persistence, file loading, watching, Git, terminal processes, per-session workspace access |
+| Services | Catalog and session persistence, file loading, watching, Git, terminal processes, per-session workspace access |
 | Theme bridge | Shared colors and native view chrome across SwiftUI and AppKit |
 
 ## Layout System
@@ -467,6 +467,11 @@ Persistence boundaries:
 - Keep terminal response, new-terminal, and editor actions in one trailing group after the scroller.
 - Give the trailing action group `spaceXS` horizontal insets and `spaceXS` spacing between controls.
 - Reopen Closed Tab restores permanent file tabs only.
+- Restore the previous session per workspace on relaunch: reopen file tabs (path, order,
+  preview or permanent disposition, word wrap) and terminal tabs (count and titles) at the
+  workspace root, and reselect the active tab. Skip missing files, Git diff tabs, and Gemma
+  tabs. Terminal processes and scrollback are not restored; restored terminals start fresh
+  shells. Fall back to a single terminal when nothing is restorable.
 
 ### Quick Open and Command Palette
 

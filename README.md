@@ -40,7 +40,7 @@ Main state owners:
 
 Side effects stay behind focused services for persistence, workspace access, file loading, file watching, Git, and terminal processes. Long-lived tasks and native resources have explicit cancellation paths.
 
-The persisted app catalog stores ordered workspace identity, folder access data, and the selected workspace. Each live `WorkspaceSession` owns its runtime state and security-scoped access. Switching changes selection only, so inactive terminals and watchers stay alive. Tabs, terminals, navigation, Git presentation, agents, and palette state remain session-only and are not restored after app termination.
+The persisted app catalog stores ordered workspace identity, folder access data, the selected workspace, and each workspace's open session (file and terminal tabs). Each live `WorkspaceSession` owns its runtime state and security-scoped access. Switching changes selection only, so inactive terminals and watchers stay alive. On relaunch each workspace restores its file tabs (path, order, disposition, word wrap) and terminal tabs (count and titles) and reselects the active tab. Terminal processes and scrollback cannot be restored, so restored terminals start fresh shells at the workspace root. Navigation history, Git presentation, agents, palette state, and Git diff and Gemma tabs remain session-only and are not restored after app termination.
 
 ## Project Structure
 

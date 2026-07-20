@@ -132,15 +132,105 @@ final class TerminalTabsModel {
     private var fileNavigationHistory = FileNavigationHistory()
     private var lastSelectedTerminalID: UUID?
     private var terminalCommandFinished: ((Int32) -> Void)?
+    private let gitDiffCache = GitDiffCache()
     private(set) var pendingTerminalCloseConfirmation: TerminalCloseConfirmation?
-    var selectedID: UUID?
+    var selectedID: UUID? {
+        didSet {
+            guard selectedID != oldValue else { return }
+            onSessionChange?()
+        }
+    }
+
+    /// Fires (after init) when the open tab set or selection changes, so the app
+    /// can debounce-persist the session. Nil during init/restore to stay quiet.
+    var onSessionChange: (() -> Void)?
 
     fileprivate let workspacePath: String
     private var nextNumber = 1
 
-    init(workspacePath: String) {
+    init(workspacePath: String, restoring session: WorkspaceSessionState? = nil) {
         self.workspacePath = workspacePath
-        add()
+        if let session, !session.tabs.isEmpty {
+            restore(from: session)
+        } else {
+            add()
+        }
+    }
+
+    /// Snapshot the open center tabs for persistence. Git diff and Gemma tabs are
+    /// not restorable, so they are omitted.
+    func sessionSnapshot() -> WorkspaceSessionState {
+        var persisted: [PersistedTab] = []
+        var selectedTabIndex: Int?
+        for tab in tabs {
+            switch tab.content {
+            case .file(let file):
+                persisted.append(PersistedTab(
+                    kind: .file,
+                    path: file.document.url.path,
+                    isPreview: tab.isPreview,
+                    isWordWrapEnabled: file.isWordWrapEnabled,
+                    title: nil
+                ))
+            case .terminal(let session):
+                persisted.append(PersistedTab(
+                    kind: .terminal,
+                    path: nil,
+                    isPreview: false,
+                    isWordWrapEnabled: false,
+                    title: tab.customTitle ?? session.title
+                ))
+            case .gitDiff, .gemma:
+                continue
+            }
+            if tab.id == selectedID {
+                selectedTabIndex = persisted.count - 1
+            }
+        }
+        return WorkspaceSessionState(tabs: persisted, selectedTabIndex: selectedTabIndex)
+    }
+
+    /// Rebuild tabs from a saved session. Skips files that no longer exist and
+    /// reopens terminals as fresh shells. Falls back to one terminal if empty.
+    private func restore(from session: WorkspaceSessionState) {
+        var selectedTabID: UUID?
+        for (index, persisted) in session.tabs.enumerated() {
+            let restoredTab: CenterTab
+            switch persisted.kind {
+            case .file:
+                guard let path = persisted.path else { continue }
+                let url = URL(fileURLWithPath: path).standardizedFileURL
+                guard FileManager.default.fileExists(atPath: url.path) else { continue }
+                let editor = EditorSession(url: url)
+                editor.isWordWrapEnabled = persisted.isWordWrapEnabled
+                restoredTab = CenterTab(
+                    content: .file(editor),
+                    fileDisposition: persisted.isPreview ? .preview : .permanent
+                )
+                if !persisted.isPreview { recentFiles.record(url) }
+            case .terminal:
+                let terminal = TerminalSession(number: nextNumber, workspacePath: workspacePath)
+                terminal.controller.onCommandFinished = terminalCommandFinished
+                nextNumber += 1
+                restoredTab = CenterTab(
+                    content: .terminal(terminal),
+                    customTitle: persisted.title
+                )
+            }
+            tabs.append(restoredTab)
+            if index == session.selectedTabIndex { selectedTabID = restoredTab.id }
+        }
+
+        guard !tabs.isEmpty else {
+            add()
+            return
+        }
+        let selection = selectedTabID ?? tabs.last?.id
+        selectedID = selection
+        if let selection,
+           case .terminal = tabs.first(where: { $0.id == selection })?.content {
+            lastSelectedTerminalID = selection
+        }
     }
 
     /// Installs a command-finished handler on every terminal controller,
@@ -577,6 +667,7 @@ final class TerminalTabsModel {
         )
         recentFiles.record(file.document.url)
         fileNavigationHistory.promote(file.document.url)
+        onSessionChange?()
     }
 
     func openGitDiff(_ selection: DiffSelection) {
@@ -590,13 +681,18 @@ final class TerminalTabsModel {
             return
         }
 
-        let diff = GitDiffSession(selection: selection, workspacePath: workspacePath)
+        let diff = GitDiffSession(
+            selection: selection,
+            workspacePath: workspacePath,
+            cache: gitDiffCache
+        )
         let tab = CenterTab(content: .gitDiff(diff))
         tabs.append(tab)
         selectedID = tab.id
     }
 
     func invalidateGitDiffs() {
+        gitDiffCache.invalidateAll()
         for tab in tabs {
             guard case .gitDiff(let diff) = tab.content else { continue }
             diff.invalidate()
@@ -712,6 +808,7 @@ final class TerminalTabsModel {
             }
         }
         repairLastSelectedTerminal()
+        onSessionChange?()
     }
 
     private var workspaceRootURL: URL {
@@ -770,6 +867,7 @@ final class TerminalTabsModel {
             customTitle: title,
             fileDisposition: tab.fileDisposition
         )
+        onSessionChange?()
     }
 
     fileprivate func moveTab(id: UUID, over destinationID: UUID) {
@@ -782,6 +880,7 @@ final class TerminalTabsModel {
             fromOffsets: IndexSet(integer: sourceIndex),
             toOffset: destinationIndex > sourceIndex ? destinationIndex + 1 : destinationIndex
         )
+        onSessionChange?()
     }
 
     isolated deinit {
