@@ -80,6 +80,16 @@ struct FileViewer: NSViewRepresentable {
             gutterView.frame.size.width = max(gutterView.frame.width, gutterView.minimumThickness)
             gutterView.textColor = AppKitThemeAdapter.secondary
             gutterView.separatorColor = AppKitThemeAdapter.border
+            let lineNumberView = FileLineNumberRulerView(
+                scrollView: scrollView,
+                textView: textView,
+                gutterView: gutterView
+            )
+            gutterView.addSubview(
+                lineNumberView,
+                positioned: .below,
+                relativeTo: gutterView.subviews.last
+            )
             textView.setFrameSize(textView.frame.size)
         }
 
@@ -108,6 +118,9 @@ struct FileViewer: NSViewRepresentable {
         scrollView.backgroundColor = background
         if let textView = scrollView.documentView as? STTextView {
             textView.backgroundColor = background
+            textView.gutterView?.subviews
+                .compactMap { $0 as? FileLineNumberRulerView }
+                .first?.backgroundColor = background
         }
         context.coordinator.update(
             content: content,
@@ -281,11 +294,21 @@ struct FileViewer: NSViewRepresentable {
             textView.textFinder.performAction(finderAction)
         }
 
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard notification.object as? STTextView === textView,
+                  scrollView?.isFindBarVisible == true else { return }
+            lineNumberView?.scheduleVisibleLineRefresh()
+            if let textView = textView as? StableFileTextView {
+                textView.prepareForFindRelocation()
+            }
+        }
+
         func textViewDidChangeText(_ notification: Notification) {
             guard !isApplyingText,
                   let textView = notification.object as? STTextView,
                   let fileURL else { return }
             let text = textView.text ?? ""
+            lineNumberView?.updateText(text)
             onEdit()
             scheduleSave(text: text, url: fileURL)
             scheduleHighlight(text: text, language: language, delayed: true)
@@ -431,6 +454,7 @@ struct FileViewer: NSViewRepresentable {
             isApplyingText = true
             textView.attributedText = text
             isApplyingText = false
+            lineNumberView?.updateText(text.string)
             ensureStableDocumentHeight()
             if selection.location <= text.length {
                 textView.textSelection = NSRange(
@@ -461,6 +485,7 @@ struct FileViewer: NSViewRepresentable {
                     displayScale: backingScale
                 )
             )
+            lineNumberView?.font = font
             ensureStableDocumentHeight()
         }
 
@@ -502,14 +527,27 @@ struct FileViewer: NSViewRepresentable {
                 )
             )
         }
+
+        private var lineNumberView: FileLineNumberRulerView? {
+            textView?.gutterView?.subviews
+                .compactMap { $0 as? FileLineNumberRulerView }
+                .first
+        }
     }
 }
 
 private final class StableFileTextView: STTextView {
     private var stabilizedDocumentHeight: CGFloat?
     private var stabilizationTask: Task<Void, Never>?
+    private var allowsNextFindRelocationHeight = false
+    private var findRelocationResetTask: Task<Void, Never>?
 
     override func setFrameSize(_ newSize: NSSize) {
+        if allowsNextFindRelocationHeight {
+            allowsNextFindRelocationHeight = false
+            super.setFrameSize(newSize)
+            return
+        }
         guard let stabilizedDocumentHeight else {
             super.setFrameSize(newSize)
             return
@@ -544,11 +582,54 @@ private final class StableFileTextView: STTextView {
         textStorage.addLayoutManager(layoutManager)
         layoutManager.ensureLayout(for: measurementContainer)
 
+        let lineStarts = Self.lineStarts(in: attributedText.string)
+        var measuredLineCenters = Array<CGFloat?>(
+            repeating: nil,
+            count: lineStarts.count
+        )
+        var logicalLineIndex = 0
+        let glyphRange = NSRange(location: 0, length: layoutManager.numberOfGlyphs)
+        layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) {
+            lineRect,
+            _,
+            _,
+            fragmentGlyphRange,
+            _ in
+            let characterRange = layoutManager.characterRange(
+                forGlyphRange: fragmentGlyphRange,
+                actualGlyphRange: nil
+            )
+            while logicalLineIndex + 1 < lineStarts.count,
+                  lineStarts[logicalLineIndex + 1] <= characterRange.location {
+                logicalLineIndex += 1
+            }
+            if measuredLineCenters[logicalLineIndex] == nil {
+                measuredLineCenters[logicalLineIndex] = lineRect.midY
+            }
+        }
+
+        if measuredLineCenters.last == nil,
+           !layoutManager.extraLineFragmentRect.isEmpty {
+            measuredLineCenters[measuredLineCenters.count - 1] =
+                layoutManager.extraLineFragmentRect.midY
+        }
+
+        let lineHeight = layoutManager.defaultLineHeight(for: font)
+        var nextLineCenter = lineHeight / 2
+        let lineCenters = measuredLineCenters.map { measuredCenter in
+            let center = measuredCenter ?? nextLineCenter
+            nextLineCenter = center + lineHeight
+            return center
+        }
+
         let measuredHeight = ceil(layoutManager.usedRect(for: measurementContainer).height)
         let viewportHeight = enclosingScrollView?.contentView.bounds.height ?? 0
         let stableHeight = max(measuredHeight, viewportHeight)
         stabilizedDocumentHeight = stableHeight
         super.setFrameSize(NSSize(width: frame.width, height: stableHeight))
+        gutterView?.subviews
+            .compactMap { $0 as? FileLineNumberRulerView }
+            .first?.updateLineCenters(lineCenters)
     }
 
     private func scheduleDocumentHeightStabilization() {
@@ -559,6 +640,30 @@ private final class StableFileTextView: STTextView {
             stabilizationTask = nil
             stabilizeDocumentHeight()
         }
+    }
+
+    func prepareForFindRelocation() {
+        allowsNextFindRelocationHeight = true
+        findRelocationResetTask?.cancel()
+        findRelocationResetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled, let self else { return }
+            allowsNextFindRelocationHeight = false
+            findRelocationResetTask = nil
+        }
+    }
+
+    private static func lineStarts(in text: String) -> [Int] {
+        var starts = [0]
+        starts.reserveCapacity(max(1, text.utf16.count / 40))
+        var offset = 0
+        for codeUnit in text.utf16 {
+            offset += 1
+            if codeUnit == 0x0A {
+                starts.append(offset)
+            }
+        }
+        return starts
     }
 }
 
