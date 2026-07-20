@@ -68,6 +68,18 @@ final class EditorSession {
         )
     }
 
+    /// Bounded plain text of the current selection's line range, for the Gemma
+    /// sidecar's "explain selection" action. Nil when there is no selection.
+    var selectedText: String? {
+        guard let selectedLineRange, case .text(let text) = content else { return nil }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        let lower = min(max(0, selectedLineRange.lowerBound - 1), lines.count)
+        let upper = min(lines.count, selectedLineRange.upperBound)
+        guard lower < upper else { return nil }
+        let joined = lines[lower..<upper].joined(separator: "\n")
+        return String(joined.prefix(4_000))
+    }
+
     var canFindInFile: Bool {
         if case .text = content { return true }
         return false

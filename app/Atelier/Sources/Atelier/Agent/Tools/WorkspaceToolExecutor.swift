@@ -10,13 +10,22 @@ actor WorkspaceToolExecutor: WorkspaceToolExecuting {
     private static let maximumSearchMatches = 100
     private static let maximumSearchFileBytes = 1_000_000
     private static let maximumGitBytes = 500_000
+    private static let maximumTerminalLines = 400
+    private static let defaultTerminalLines = 200
+    private static let maximumTerminalCharacters = 100_000
 
     private let workspaceRoot: URL
     private let gitService: GitService
+    private let terminalSnapshot: (@MainActor @Sendable (Int) -> String?)?
 
-    init(workspaceRoot: URL, gitService: GitService = GitService()) {
+    init(
+        workspaceRoot: URL,
+        gitService: GitService = GitService(),
+        terminalSnapshot: (@MainActor @Sendable (Int) -> String?)? = nil
+    ) {
         self.workspaceRoot = workspaceRoot.standardizedFileURL.resolvingSymlinksInPath()
         self.gitService = gitService
+        self.terminalSnapshot = terminalSnapshot
     }
 
     func execute(_ call: OllamaToolCall) async throws -> WorkspaceToolResult {
@@ -36,6 +45,9 @@ actor WorkspaceToolExecutor: WorkspaceToolExecuting {
             case .readGitDiff:
                 let input = try JSONDecoder().decode(WorkspaceGitDiffInput.self, from: data)
                 return try await gitDiff(input)
+            case .readTerminalOutput:
+                let input = try JSONDecoder().decode(WorkspaceReadTerminalInput.self, from: data)
+                return try await readTerminalOutput(input)
             }
         } catch is CancellationError {
             throw WorkspaceToolError.cancelled
@@ -44,6 +56,23 @@ actor WorkspaceToolExecutor: WorkspaceToolExecuting {
         } catch {
             throw WorkspaceToolError.invalidArguments(Self.safeError(error))
         }
+    }
+
+    private func readTerminalOutput(_ input: WorkspaceReadTerminalInput) async throws -> WorkspaceToolResult {
+        guard let terminalSnapshot else { throw WorkspaceToolError.noTerminalSelected }
+        let lines = min(max(1, input.lines ?? Self.defaultTerminalLines), Self.maximumTerminalLines)
+        guard let snapshot = await terminalSnapshot(lines) else {
+            throw WorkspaceToolError.noTerminalSelected
+        }
+        try Task.checkCancellation()
+        let truncated = snapshot.count > Self.maximumTerminalCharacters
+        let bounded = truncated
+            ? String(snapshot.prefix(Self.maximumTerminalCharacters))
+            : snapshot
+        return WorkspaceToolResult(
+            content: bounded.isEmpty ? "Terminal has no output yet." : bounded,
+            truncated: truncated
+        )
     }
 
     private func search(_ input: WorkspaceSearchInput) async throws -> WorkspaceToolResult {

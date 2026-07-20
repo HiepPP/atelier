@@ -126,6 +126,7 @@ final class TerminalTabsModel {
     private var recentFiles = RecentFileHistory()
     private var fileNavigationHistory = FileNavigationHistory()
     private var lastSelectedTerminalID: UUID?
+    private var terminalCommandFinished: ((Int32) -> Void)?
     var selectedID: UUID?
 
     fileprivate let workspacePath: String
@@ -134,6 +135,76 @@ final class TerminalTabsModel {
     init(workspacePath: String) {
         self.workspacePath = workspacePath
         add()
+    }
+
+    /// Installs a command-finished handler on every terminal controller,
+    /// current and future. Used by the Gemma sidecar's Terminal Guardian.
+    func setTerminalCommandFinishedHandler(_ handler: ((Int32) -> Void)?) {
+        terminalCommandFinished = handler
+        for tab in tabs {
+            if case .terminal(let session) = tab.content {
+                session.controller.onCommandFinished = handler
+            }
+        }
+    }
+
+    /// Returns the last `lines` rows of the selected terminal, or nil when the
+    /// selected tab is not a terminal. Content is never logged.
+    func selectedTerminalScrollback(lines: Int) -> String? {
+        guard let selectedTab,
+              case .terminal(let session) = selectedTab.content else { return nil }
+        return session.controller.scrollbackSnapshot(lines: lines)
+    }
+
+    /// Context for the Gemma sidecar derived from the selected center tab.
+    var selectedSidecarContext: GemmaSidecarTabContext? {
+        guard let selectedTab else { return nil }
+        switch selectedTab.content {
+        case .terminal:
+            return GemmaSidecarTabContext(
+                kind: .terminal,
+                title: selectedTab.title,
+                status: "Running",
+                systemImage: "terminal",
+                filePath: nil,
+                workingDirectory: workspacePath,
+                gitDiffPath: nil,
+                editorSelection: nil
+            )
+        case .file(let editor):
+            return GemmaSidecarTabContext(
+                kind: .file,
+                title: selectedTab.title,
+                status: fileStatus(editor.content),
+                systemImage: "doc.text",
+                filePath: editor.document.url.path,
+                workingDirectory: nil,
+                gitDiffPath: nil,
+                editorSelection: editor.selectedText
+            )
+        case .gitDiff(let diff):
+            return GemmaSidecarTabContext(
+                kind: .gitDiff,
+                title: selectedTab.title,
+                status: gitDiffStatus(diff.state),
+                systemImage: "doc.text.magnifyingglass",
+                filePath: nil,
+                workingDirectory: nil,
+                gitDiffPath: diff.selection.change.path,
+                editorSelection: nil
+            )
+        case .gemma(let model):
+            return GemmaSidecarTabContext(
+                kind: .gemma,
+                title: selectedTab.title,
+                status: gemmaStatus(model.status),
+                systemImage: "sparkles",
+                filePath: nil,
+                workingDirectory: nil,
+                gitDiffPath: nil,
+                editorSelection: nil
+            )
+        }
     }
 
     fileprivate var visibleTabs: [CenterTab] {
@@ -378,6 +449,7 @@ final class TerminalTabsModel {
 
     func add() {
         let session = TerminalSession(number: nextNumber, workspacePath: workspacePath)
+        session.controller.onCommandFinished = terminalCommandFinished
         let tab = CenterTab(content: .terminal(session))
         nextNumber += 1
         tabs.append(tab)

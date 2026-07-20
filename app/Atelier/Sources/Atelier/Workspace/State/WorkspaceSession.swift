@@ -10,6 +10,7 @@ final class WorkspaceSession {
     let paletteModel: AtelierPaletteModel
     let gitModel: GitWorkspaceModel
     let gemmaAgent: GemmaAgentModel
+    let gemmaSidecar: GemmaSidecarModel
     let agentResponses: AgentResponsesModel
     let chrome = WorkspaceChromeModel()
     private(set) var fileTreeRevision = 0
@@ -52,6 +53,11 @@ final class WorkspaceSession {
         self.agentResponses = agentResponses ?? AgentResponsesModel(
             source: AgentTranscriptMonitor(workspacePath: rootURL.path)
         )
+        gemmaSidecar = GemmaSidecarModel(
+            terminalTabs: tabs,
+            gitModel: gitModel,
+            workspaceRoot: rootURL
+        )
     }
 
     func start() {
@@ -59,6 +65,7 @@ final class WorkspaceSession {
         isStarted = true
         gitModel.refresh()
         agentResponses.start()
+        gemmaSidecar.start()
 
         let watcher = FileWatcher(path: rootURL.path) { [weak self] in
             guard let self else { return }
@@ -77,6 +84,7 @@ final class WorkspaceSession {
             fileWatcher = nil
             gitModel.stop()
             gemmaAgent.close()
+            gemmaSidecar.stop()
             agentResponses.stop()
             paletteModel.stop()
             terminalTabs.closeAll()

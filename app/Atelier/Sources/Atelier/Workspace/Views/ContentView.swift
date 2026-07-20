@@ -751,16 +751,16 @@ struct WorkspaceView: View {
     private var workspaceSurface: some View {
         WorkspaceNativeSplitView(
             sidebar: workspaceSidebar
+                .frame(idealWidth: AtelierMetrics.workspaceSidebarIdealWidth)
                 .environment(app)
                 .environment(zoom),
             detail: workspaceDetail
                 .environment(app)
                 .environment(zoom),
-            inspector: WorkspaceInspectorView(
-                context: terminalTabs.selectedInspectorContext
-            )
-            .environment(app)
-            .environment(zoom),
+            inspector: GemmaSidecarView(model: session.gemmaSidecar)
+                .frame(idealWidth: AtelierMetrics.inspectorIdealWidth)
+                .environment(app)
+                .environment(zoom),
             showsSidebar: chrome.panels.showsSidebar && !zoom.isFocusMode,
             showsInspector: chrome.panels.showsInspector && !zoom.isFocusMode,
             sidebarAnimationRequestID: chrome.sidebarAnimationRequestID,
@@ -1310,104 +1310,6 @@ private struct ProjectCommandRowButtonStyle: ButtonStyle {
         if configuration.isPressed { return .pressed }
         if isHovering { return .hovered }
         return .normal
-    }
-}
-
-private struct WorkspaceInspectorView: View {
-    let context: TerminalTabInspectorContext?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    var body: some View {
-        Group {
-            if let context {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: AtelierMetrics.spaceL) {
-                        inspectorHeader(context)
-
-                        Divider()
-
-                        VStack(spacing: 0) {
-                            ForEach(Array(context.details.enumerated()), id: \.offset) { index, detail in
-                                inspectorRow(detail)
-                                if index < context.details.count - 1 {
-                                    Divider()
-                                }
-                            }
-                        }
-                    }
-                    .padding(AtelierMetrics.spaceL)
-                }
-            } else {
-                AtelierEmptyState(
-                    systemImage: "sidebar.trailing",
-                    title: "Inspector",
-                    message: "Open a tab to inspect its context."
-                )
-            }
-        }
-        .background(AtelierTheme.panel)
-        .accessibilityLabel("Workspace inspector")
-    }
-
-    private func inspectorHeader(_ context: TerminalTabInspectorContext) -> some View {
-        HStack(alignment: .top, spacing: AtelierMetrics.spaceM) {
-            ZStack {
-                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
-                    .fill(AtelierTheme.accent.opacity(contrast == .increased ? 0.18 : 0.10))
-                Image(systemName: context.systemImage)
-                    .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
-                    .foregroundStyle(AtelierTheme.accent)
-            }
-            .frame(width: 30, height: 30)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(context.title)
-                    .atelierFont(size: AtelierTypography.uiSize, weight: .semibold)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-
-                HStack(spacing: AtelierMetrics.spaceXS) {
-                    if context.showsActivity {
-                        Image(systemName: "circle.fill")
-                            .atelierFont(size: 7)
-                            .foregroundStyle(AtelierTheme.accent)
-                            .symbolEffect(
-                                .pulse,
-                                options: .repeating,
-                                isActive: !reduceMotion
-                            )
-                            .accessibilityHidden(true)
-                    }
-                    Text("\(context.kind.rawValue) - \(context.status)")
-                        .atelierFont(size: AtelierTypography.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(context.kind.rawValue), \(context.title), \(context.status)")
-    }
-
-    private func inspectorRow(_ detail: TerminalTabInspectorDetail) -> some View {
-        VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
-            Text(detail.label)
-                .atelierFont(size: AtelierTypography.caption, weight: .medium)
-                .foregroundStyle(.secondary)
-            Text(detail.value)
-                .atelierFont(
-                    size: AtelierTypography.label,
-                    design: detail.label == "Path" || detail.label == "Working directory"
-                        ? .monospaced
-                        : .default
-                )
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.vertical, AtelierMetrics.spaceS)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(detail.label): \(detail.value)")
     }
 }
 

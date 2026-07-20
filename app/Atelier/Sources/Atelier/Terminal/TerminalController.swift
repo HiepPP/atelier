@@ -11,12 +11,27 @@ enum TerminalRenderingPolicy {
     }
 }
 
+/// Bounds for the read-only terminal scrollback snapshot exposed to the Gemma
+/// sidecar. The snapshot never logs its content.
+enum TerminalScrollbackPolicy {
+    static let defaultLines = 200
+    static let maximumLines = 400
+
+    static func clampedLines(_ requested: Int) -> Int {
+        min(max(1, requested), maximumLines)
+    }
+}
+
 @MainActor
 final class TerminalController {
     private let processService: TerminalProcessService
     private let terminal = AtelierTerminalNativeView(frame: .zero)
     private var isActive = false
     private var isClosed = false
+
+    /// Fires when an OSC 133 `D` command-finished mark arrives with an exit
+    /// code. Never fires when the shell emits no OSC 133 marks.
+    var onCommandFinished: ((Int32) -> Void)?
 
     init(workspacePath: String, processService: TerminalProcessService = TerminalProcessService()) {
         self.processService = processService
@@ -26,7 +41,45 @@ final class TerminalController {
         terminal.hideScrollIndicator()
         terminal.applyAtelierAppearance()
         processService.start(in: terminal, workspacePath: workspacePath)
+        registerCommandFinishedHandler()
         AppLogger.terminal.info("Started terminal session")
+    }
+
+    /// Returns the last `lines` rows of the terminal buffer as plain text.
+    /// Reads the SwiftTerm buffer on the main actor and trims trailing blank
+    /// rows. The content is never logged.
+    func scrollbackSnapshot(lines requested: Int) -> String {
+        guard !isClosed else { return "" }
+        let limit = TerminalScrollbackPolicy.clampedLines(requested)
+        let engine = terminal.getTerminal()
+        let cols = max(1, engine.cols)
+        let text = engine.getText(
+            start: Position(col: 0, row: 0),
+            end: Position(col: cols, row: Int.max)
+        )
+        var rows = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        while let last = rows.last,
+              last.trimmingCharacters(in: .whitespaces).isEmpty {
+            rows.removeLast()
+        }
+        return rows.suffix(limit).joined(separator: "\n")
+    }
+
+    private func registerCommandFinishedHandler() {
+        terminal.getTerminal().registerOscHandler(code: 133) { [weak self] payload in
+            guard let exitCode = TerminalController.commandExitCode(from: payload) else { return }
+            Task { @MainActor [weak self] in
+                self?.onCommandFinished?(exitCode)
+            }
+        }
+    }
+
+    private nonisolated static func commandExitCode(from payload: ArraySlice<UInt8>) -> Int32? {
+        guard let text = String(bytes: payload, encoding: .utf8) else { return nil }
+        let fields = text.split(separator: ";", omittingEmptySubsequences: false)
+        guard let marker = fields.first, marker == "D" else { return nil }
+        guard fields.count > 1, let code = Int32(fields[1]) else { return 0 }
+        return code
     }
 
     func attach(isActive: Bool) -> AtelierTerminalNativeView {

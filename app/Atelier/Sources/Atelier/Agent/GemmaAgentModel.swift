@@ -36,6 +36,11 @@ final class GemmaAgentModel {
     private(set) var recoverySuggestion: String?
     var prompt = ""
 
+    /// Optional block prepended to the prompt sent to the runtime. The visible
+    /// transcript keeps the user's raw text. Used by the Gemma sidecar to inject
+    /// tab context without changing the runtime system prompt.
+    var contextProvider: (() -> String?)?
+
     private let runtime: GemmaAgentRuntime
     private var runTask: Task<Void, Never>?
     private var assistantMessageID: UUID?
@@ -68,13 +73,21 @@ final class GemmaAgentModel {
         status = .running
         AppLogger.agent.info("Started Gemma agent run")
 
+        let runtimePrompt: String
+        if let block = contextProvider?()?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !block.isEmpty {
+            runtimePrompt = block + "\n\n" + cleanPrompt
+        } else {
+            runtimePrompt = cleanPrompt
+        }
+
         let resetRuntime = shouldResetRuntime
         shouldResetRuntime = false
         runTask = Task { [weak self, runtime] in
             do {
                 if resetRuntime { await runtime.reset() }
                 guard !Task.isCancelled else { return }
-                let events = await runtime.events(for: cleanPrompt)
+                let events = await runtime.events(for: runtimePrompt)
                 for try await event in events {
                     guard !Task.isCancelled else { return }
                     self?.apply(event)

@@ -239,6 +239,11 @@ actor GemmaAgentRuntime {
             if case .string(let path) = arguments["path"] { return "Read: \(path.prefix(120))" }
         case .readGitDiff:
             return "Inspect Git diff"
+        case .readTerminalOutput:
+            if case .number(let lines) = arguments["lines"] {
+                return "Read terminal output: \(Int(lines)) lines"
+            }
+            return "Read terminal output"
         case nil:
             break
         }

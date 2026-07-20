@@ -91,6 +91,49 @@ struct WorkspaceToolExecutorTests {
         await canceller.value
     }
 
+    @Test("Terminal output caps lines and characters and errors without a terminal")
+    func terminalOutput() async throws {
+        let root = try fixture()
+
+        // No provider: no terminal is selected.
+        let bare = WorkspaceToolExecutor(workspaceRoot: root)
+        await #expect(throws: WorkspaceToolError.noTerminalSelected) {
+            try await bare.execute(call(.readTerminalOutput, [:]))
+        }
+
+        // Provider returning nil: still no terminal selected.
+        let emptySpy = TerminalSnapshotSpy(output: nil)
+        let emptyExecutor = WorkspaceToolExecutor(
+            workspaceRoot: root,
+            terminalSnapshot: { lines in emptySpy.snapshot(lines) }
+        )
+        await #expect(throws: WorkspaceToolError.noTerminalSelected) {
+            try await emptyExecutor.execute(call(.readTerminalOutput, [:]))
+        }
+
+        // Default line count is 200; a large request is capped at 400.
+        let capSpy = TerminalSnapshotSpy(output: "line")
+        let capExecutor = WorkspaceToolExecutor(
+            workspaceRoot: root,
+            terminalSnapshot: { lines in capSpy.snapshot(lines) }
+        )
+        _ = try await capExecutor.execute(call(.readTerminalOutput, [:]))
+        #expect(capSpy.requestedLines == 200)
+        _ = try await capExecutor.execute(call(.readTerminalOutput, ["lines": .number(9_999)]))
+        #expect(capSpy.requestedLines == 400)
+
+        // Characters beyond the cap are truncated.
+        let big = String(repeating: "x", count: 150_000)
+        let bigSpy = TerminalSnapshotSpy(output: big)
+        let bigExecutor = WorkspaceToolExecutor(
+            workspaceRoot: root,
+            terminalSnapshot: { lines in bigSpy.snapshot(lines) }
+        )
+        let result = try await bigExecutor.execute(call(.readTerminalOutput, ["lines": .number(400)]))
+        #expect(result.truncated)
+        #expect(result.content.count <= 100_000)
+    }
+
     private func fixture() throws -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("atelier-tools-\(UUID().uuidString)", isDirectory: true)
@@ -110,5 +153,20 @@ struct WorkspaceToolExecutorTests {
         _ arguments: [String: OllamaJSONValue]
     ) -> OllamaToolCall {
         OllamaToolCall(function: OllamaFunctionCall(name: name.rawValue, arguments: arguments))
+    }
+}
+
+@MainActor
+final class TerminalSnapshotSpy {
+    private(set) var requestedLines: Int?
+    let output: String?
+
+    init(output: String?) {
+        self.output = output
+    }
+
+    func snapshot(_ lines: Int) -> String? {
+        requestedLines = lines
+        return output
     }
 }

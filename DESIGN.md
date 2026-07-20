@@ -43,7 +43,7 @@ AtelierApp
     |       |-- Native split controller
     |       |   |-- Sidebar: Explorer or Git
     |       |   |-- Center: terminal, file, diff, or Gemma tabs
-    |       |   `-- Inspector
+    |       |   `-- Inspector: Gemma sidecar assistant
     |       `-- Status bar
     `-- Quick Open or Command Palette overlay
 ```
@@ -75,6 +75,7 @@ Rules:
 - Use one native `NSSplitViewController` with thin dividers.
 - Keep split items mounted and use native item collapse for panel visibility.
 - Animate sidebar and inspector collapse by changing allocated split width, not opacity.
+- Let the user drag the sidebar and inspector dividers to resize each pane within its width range; both open at their Ideal width.
 - Animate only the panel explicitly toggled. Keep companion policy changes atomic.
 - Keep side-panel holding priority above center so center absorbs reclaimed width.
 - Keep panel transitions atomic through `WorkspacePanelPresentation`.
@@ -91,9 +92,9 @@ Rules:
 | Surface | Minimum | Ideal | Maximum |
 |---|---:|---:|---:|
 | Workspace rail | 176 | 176 | 176 |
-| Workspace sidebar | 300 | 340 | 420 |
+| Workspace sidebar | 240 | 340 | 560 |
 | Center | 420 | 660 | Flexible |
-| Inspector | 220 | 260 | 320 |
+| Inspector | 260 | 360 | 640 |
 | Agent response overlay | 360 | 360 | 360 |
 | Explorer legacy range | 220 | 280 | 400 |
 | Source Control legacy range | 320 | 380 | 540 |
@@ -205,11 +206,11 @@ Depth rules:
 | Token | Size | Typical use |
 |---|---:|---|
 | `micro` | 11 | Shortcuts, metadata, compact badges |
-| `caption` | 11 | Secondary labels and controls |
-| `label` | 11.5 | Tabs and compact actions |
-| `body` | 12.5 | Main UI copy |
-| `uiSize` | 13 | Fields and standard interface text |
-| `headline` | 15 | Panel headers |
+| `caption` | 12 | Secondary labels and controls |
+| `label` | 12.5 | Tabs and compact actions |
+| `body` | 13.5 | Main UI copy |
+| `uiSize` | 14 | Fields and standard interface text |
+| `headline` | 16 | Panel headers |
 | `title` | 17 | Section titles and strong empty states |
 | `display` | 24 | Large empty-state titles |
 | `editorSize` | 16 | Source editor |
@@ -508,7 +509,68 @@ Persistence boundaries:
 - Preserve first responder across palette, zoom, inspector, and sidecar transitions.
 - Keep the terminal's structural parent and proposed size stable while a sidecar opens or closes. Never reserve terminal width for agent responses.
 
-### Gemma and Agent Responses
+### Gemma Sidecar Assistant
+
+The inspector pane hosts a context-aware Gemma assistant instead of a static
+metadata panel. It reads the active center tab and helps with the current work.
+It is read-only: it never writes files, runs shell commands, or performs Git
+actions. Every run is cancellable and pauses when Ollama is unreachable.
+
+The sidecar uses a one-feed, one-input layout with three fixed zones:
+
+- Header: accent icon tile, title, `kind - status` caption line, an intent chip, and a
+  gear button. The gear opens a popover with the feature toggles (auto-diagnose,
+  session journal). No toggle lives in the panel body.
+- Feed: one scroll view that holds every output as a card sharing one visual
+  language: journal milestone rows, Guardian diagnosis card, Pre-commit Whisper
+  advisory card, Intent Guard drift card, user and assistant turns, tool activity
+  rows, and the Claude handoff card. A background feature renders nothing while it
+  has nothing to say; it never reserves fixed space.
+- Input: one horizontal chip row of context quick actions directly above one prompt
+  field with send, stop, and clear controls. There is exactly one text input in the
+  panel body; the intent is edited through the header chip's popover.
+- Show the standard empty state when no center tab is selected.
+- Keep the response area streaming and non-blocking. Show connection-error text when
+  a run fails; never block the UI.
+- Use the sidecar's own Gemma runtime, separate from the Gemma chat tab. The clear
+  control resets only the sidecar session, never the chat tab.
+- Inject the active tab context (kind, file path, working directory, git diff target,
+  editor selection) into each user prompt. Do not change the runtime system prompt.
+
+Quick actions per tab kind, sent as one-shot prompts into the response area:
+
+| Tab kind | Quick actions |
+|---|---|
+| File | Explain file, Summarize file, Find usages |
+| Git diff | Review diff, Suggest commit message |
+| Terminal | Explain last error, Explain command |
+| Editor selection | Explain selection |
+
+- Disable an action when its context is absent (for example, no editor selection).
+- Terminal quick actions read the selected terminal scrollback through the read-only
+  `read_terminal_output` tool. Bound the snapshot to at most 400 lines.
+
+Registry and feature slots:
+
+- Keep all sidecar code under `app/Atelier/Sources/Atelier/Agent/Sidecar`.
+- Build the container as a plugin-style registry. The container and its model must not
+  change when a feature is implemented. Each feature owns one file, its own state,
+  cadence, and toggle, and is constructed with a shared read-only service surface.
+- Run background features one bounded call at a time on a dedicated serialized
+  background runtime. Every feature is read-only and cancellable, and skips work when
+  Ollama is unreachable.
+
+The five background features, all read-only and cancellable:
+
+| Feature | Purpose |
+|---|---|
+| Terminal Guardian | Offer a read-only explanation after a failed terminal command |
+| Claude Code Briefing | Summarize recent agent activity as quick actions |
+| Session Journal | Keep a periodic read-only summary of the session |
+| Intent Guard | Track the stated intent for the current work |
+| Pre-commit Whisper | Surface read-only findings before a commit |
+
+### Agent Responses
 
 - Use a readable transcript width capped at 680 points.
 - Keep user and assistant hierarchy clear without chat-bubble decoration everywhere.

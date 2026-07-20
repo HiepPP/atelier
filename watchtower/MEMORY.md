@@ -25,6 +25,7 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - [app/Atelier/Sources/Atelier/Terminal/TerminalTabs.swift](app/Atelier/Sources/Atelier/Terminal/TerminalTabs.swift): owns center terminal and editor tabs.
 - [app/Atelier/Sources/Atelier/Git/GitService.swift](app/Atelier/Sources/Atelier/Git/GitService.swift): provides cancellable Git process work.
 - [app/Atelier/Sources/Atelier/Shared/Logging/AppLogger.swift](app/Atelier/Sources/Atelier/Shared/Logging/AppLogger.swift): defines unified logging categories.
+- [app/Atelier/Sources/Atelier/Agent/Sidecar/](app/Atelier/Sources/Atelier/Agent/Sidecar/): Gemma sidecar assistant. GemmaSidecarModel owns its own interactive + background runtimes (separate from the chat-tab gemmaAgent) plus the six feature models; SidecarServices is the read-only closure surface features consume; GemmaSidecarView is the container. Add a new sidecar feature as ONE self-contained file (model + view) wired via SidecarServices and a slot in GemmaSidecarView; do not spread it across shared files.
 
 ## Verification Bias
 
@@ -47,3 +48,4 @@ This file holds long-term intent. It keeps task planning aligned across sessions
 - 2026-07-19: Persist only the ordered workspace catalog and active identity. Keep tabs, terminals, navigation, Git, agents, and palettes inside live sessions.
 - 2026-07-19: Defer catalog writes until startup load merges with user changes. Serialize later writes and flush the final catalog before app termination.
 - 2026-07-19: Resign the old AppKit responder when switching workspaces. Restore a responder only when its workspace owner and revision remain active.
+- 2026-07-20: Sidecar features use a registry/slot pattern so each feature is one file with no shared-file edits; this let a fan-out team build six features in parallel. Background features run bounded, serialized, cancellable calls via SidecarServices.runBackground on a runtime separate from the interactive one. Terminal Guardian gets exit codes from a TerminalController OSC 133 handler (registerOscHandler code 133; no marks -> never fires). read_terminal_output bridges the actor tool executor to the MainActor SwiftTerm buffer via an injected @Sendable snapshot provider (getText/buffer.lines + BufferLine.translateToString).

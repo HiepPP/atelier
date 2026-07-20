@@ -4,6 +4,7 @@ nonisolated enum WorkspaceToolName: String, Codable, CaseIterable, Sendable {
     case searchWorkspace = "search_workspace"
     case readFile = "read_file"
     case readGitDiff = "read_git_diff"
+    case readTerminalOutput = "read_terminal_output"
 }
 
 nonisolated struct WorkspaceSearchInput: Codable, Equatable, Sendable {
@@ -24,6 +25,10 @@ nonisolated struct WorkspaceReadFileInput: Codable, Equatable, Sendable {
 
 nonisolated struct WorkspaceGitDiffInput: Codable, Equatable, Sendable {
     let staged: Bool?
+}
+
+nonisolated struct WorkspaceReadTerminalInput: Codable, Equatable, Sendable {
+    let lines: Int?
 }
 
 nonisolated struct WorkspaceToolResult: Equatable, Sendable {
@@ -48,6 +53,7 @@ nonisolated enum WorkspaceToolError: LocalizedError, Equatable, Sendable {
     case unreadable(String)
     case searchFailed(String)
     case gitFailed(String)
+    case noTerminalSelected
     case cancelled
 
     var errorDescription: String? {
@@ -61,6 +67,7 @@ nonisolated enum WorkspaceToolError: LocalizedError, Equatable, Sendable {
         case .unreadable: return "The requested file could not be read."
         case .searchFailed: return "Workspace search failed."
         case .gitFailed: return "Git diff could not be read."
+        case .noTerminalSelected: return "No terminal tab is selected to read output from."
         case .cancelled: return "Workspace tool cancelled."
         }
     }
@@ -115,6 +122,21 @@ nonisolated extension WorkspaceToolName {
                         "staged": OllamaToolProperty(
                             type: "boolean",
                             description: "Use true for the staged diff. Defaults to false."
+                        )
+                    ],
+                    required: []
+                )
+            )
+        ),
+        OllamaToolDefinition(
+            function: OllamaFunctionDefinition(
+                name: readTerminalOutput.rawValue,
+                description: "Read the last lines of the selected terminal's output.",
+                parameters: OllamaToolParameters(
+                    properties: [
+                        "lines": OllamaToolProperty(
+                            type: "integer",
+                            description: "Optional number of trailing lines, capped at 400 by Atelier."
                         )
                     ],
                     required: []
