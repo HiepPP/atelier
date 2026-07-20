@@ -99,25 +99,22 @@ struct DisplaySizingTests {
         #expect(AtelierZoomModel.baseMinimumSize == CGSize(width: 760, height: 512))
     }
 
-    @Test("Workspace rail uses readable names and distinct parent paths")
+    @Test("Workspace rail uses readable names and numbered shortcuts")
     func workspaceRailIdentity() {
         let firstPath = "/Users/hiep/Projects/client-a/atelier"
         let secondPath = "/Users/hiep/Projects/client-b/atelier"
 
         #expect(WorkspaceRailIdentityPolicy.workspaceName(path: firstPath) == "atelier")
         #expect(WorkspaceRailIdentityPolicy.workspaceName(path: secondPath) == "atelier")
-        #expect(
-            WorkspaceRailIdentityPolicy.abbreviatedParentPath(
-                path: firstPath,
-                homePath: "/Users/hiep"
-            ) == "~/Projects/client-a"
-        )
-        #expect(
-            WorkspaceRailIdentityPolicy.abbreviatedParentPath(
-                path: secondPath,
-                homePath: "/Users/hiep"
-            ) == "~/Projects/client-b"
-        )
+        #expect(WorkspaceRailShortcutPolicy.number(for: 0) == 1)
+        #expect(WorkspaceRailShortcutPolicy.number(for: 8) == 9)
+        #expect(WorkspaceRailShortcutPolicy.number(for: 9) == nil)
+        #expect(WorkspaceRailShortcutPolicy.index(for: 1) == 0)
+        #expect(WorkspaceRailShortcutPolicy.index(for: 9) == 8)
+        #expect(WorkspaceRailShortcutPolicy.index(for: 0) == nil)
+        #expect(WorkspaceRailShortcutPolicy.label(for: 0) == "⌘1")
+        #expect(WorkspaceRailShortcutPolicy.label(for: 8) == "⌘9")
+        #expect(WorkspaceRailShortcutPolicy.label(for: 9) == nil)
     }
 
     @Test("Workspace panel transitions stay atomic across layout modes")

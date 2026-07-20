@@ -28,6 +28,25 @@ struct AppCommands: Commands {
             .disabled(!isEnabled(.nextWorkspace))
         }
 
+        CommandMenu("Workspaces") {
+            Button("Open New Workspace...") {
+                perform(.openFolder)
+            }
+            .keyboardShortcut("0", modifiers: .command)
+
+            Divider()
+
+            workspaceShortcut(1, key: "1")
+            workspaceShortcut(2, key: "2")
+            workspaceShortcut(3, key: "3")
+            workspaceShortcut(4, key: "4")
+            workspaceShortcut(5, key: "5")
+            workspaceShortcut(6, key: "6")
+            workspaceShortcut(7, key: "7")
+            workspaceShortcut(8, key: "8")
+            workspaceShortcut(9, key: "9")
+        }
+
         CommandGroup(after: .toolbar) {
             Button(title(.navigateBack)) {
                 perform(.navigateBack)
@@ -64,7 +83,6 @@ struct AppCommands: Commands {
             Button(title(.actualSize)) {
                 perform(.actualSize)
             }
-            .keyboardShortcut("0", modifiers: .command)
 
             Button(title(.toggleFocusMode)) {
                 perform(.toggleFocusMode)
@@ -87,6 +105,31 @@ struct AppCommands: Commands {
 
     private func perform(_ id: AtelierActionID) {
         AtelierActionRegistry.perform(id, model: model)
+    }
+
+    private func workspaceShortcut(_ number: Int, key: KeyEquivalent) -> some View {
+        Button(workspaceShortcutTitle(number)) {
+            model.selectWorkspace(shortcutNumber: number)
+        }
+        .keyboardShortcut(key, modifiers: .command)
+        .disabled(!hasWorkspace(shortcutNumber: number))
+    }
+
+    private func workspaceShortcutTitle(_ number: Int) -> String {
+        guard let index = WorkspaceRailShortcutPolicy.index(for: number),
+              model.workspaceItems.indices.contains(index) else {
+            return "Workspace \(number)"
+        }
+        let item = model.workspaceItems[index]
+        let name = WorkspaceRailIdentityPolicy.workspaceName(path: item.state.path)
+        return "Workspace \(number): \(name)"
+    }
+
+    private func hasWorkspace(shortcutNumber: Int) -> Bool {
+        guard let index = WorkspaceRailShortcutPolicy.index(for: shortcutNumber) else {
+            return false
+        }
+        return model.workspaceItems.indices.contains(index)
     }
 }
 

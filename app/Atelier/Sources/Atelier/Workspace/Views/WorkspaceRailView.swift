@@ -47,22 +47,24 @@ nonisolated enum WorkspaceRailIdentityPolicy {
         let name = URL(fileURLWithPath: path, isDirectory: true).lastPathComponent
         return name.isEmpty ? path : name
     }
+}
 
-    static func abbreviatedParentPath(path: String, homePath: String) -> String {
-        let parentPath = URL(fileURLWithPath: path, isDirectory: true)
-            .deletingLastPathComponent()
-            .standardizedFileURL
-            .path
-        if parentPath == homePath { return "~" }
-        if parentPath.hasPrefix(homePath + "/") {
-            return "~" + parentPath.dropFirst(homePath.count)
-        }
+nonisolated enum WorkspaceRailShortcutPolicy {
+    static let maximumShortcutCount = 9
 
-        let components = URL(fileURLWithPath: parentPath, isDirectory: true)
-            .pathComponents
-            .filter { $0 != "/" }
-        guard components.count > 3 else { return parentPath }
-        return ".../" + components.suffix(3).joined(separator: "/")
+    static func number(for index: Int) -> Int? {
+        guard (0..<maximumShortcutCount).contains(index) else { return nil }
+        return index + 1
+    }
+
+    static func index(for number: Int) -> Int? {
+        guard (1...maximumShortcutCount).contains(number) else { return nil }
+        return number - 1
+    }
+
+    static func label(for index: Int) -> String? {
+        guard let number = number(for: index) else { return nil }
+        return "⌘\(number)"
     }
 }
 
@@ -85,8 +87,8 @@ struct WorkspaceRailView: View {
 
             ScrollView(.vertical) {
                 LazyVStack(spacing: AtelierMetrics.workspaceRailItemGap) {
-                    ForEach(app.workspaceItems) { item in
-                        WorkspaceRailItemButton(item: item)
+                    ForEach(Array(app.workspaceItems.enumerated()), id: \.element.id) { index, item in
+                        WorkspaceRailItemButton(item: item, index: index)
                     }
                 }
                 .padding(.horizontal, AtelierMetrics.spaceS)
@@ -163,6 +165,7 @@ private struct WorkspaceRailAddButton: View {
 
 private struct WorkspaceRailItemButton: View {
     let item: WorkspaceCatalogItem
+    let index: Int
     @Environment(AppModel.self) private var app
 
     @State private var isHovered = false
@@ -177,12 +180,7 @@ private struct WorkspaceRailItemButton: View {
             app.selectWorkspace(id: item.id)
         } label: {
             HStack(spacing: AtelierMetrics.spaceM) {
-                Image(systemName: "folder")
-                    .atelierFont(size: AtelierTypography.body, weight: .medium)
-                    .foregroundStyle(AtelierTheme.workspaceRailSecondary)
-                    .frame(width: AtelierMetrics.regularIconSize)
-
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(workspaceName)
                         .atelierFont(
                             size: AtelierTypography.body,
@@ -196,11 +194,17 @@ private struct WorkspaceRailItemButton: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
 
-                    Text(parentPath)
-                        .atelierFont(size: AtelierTypography.caption, design: .monospaced)
-                        .foregroundStyle(AtelierTheme.workspaceRailSecondary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
+                    if let shortcutLabel {
+                        Text(shortcutLabel)
+                            .atelierFont(size: AtelierTypography.micro, weight: .medium, design: .monospaced)
+                            .foregroundStyle(
+                                isSelected
+                                    ? AtelierTheme.workspaceRailForeground.opacity(0.76)
+                                    : AtelierTheme.workspaceRailSecondary.opacity(0.68)
+                            )
+                            .tracking(0.2)
+                            .lineLimit(1)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
@@ -271,18 +275,15 @@ private struct WorkspaceRailItemButton: View {
             }
         }
         .accessibilityLabel(workspaceName)
-        .accessibilityValue("\(accessibilityValue), \(parentPath)")
-        .help("\(workspaceName)\n\(item.state.path)\n\(accessibilityValue)")
+        .accessibilityValue(accessibilityDescription)
+        .help(helpText)
     }
 
     @ViewBuilder
     private var statusAccessory: some View {
         switch item.status {
         case .active:
-            Image(systemName: "checkmark")
-                .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                .foregroundStyle(AtelierTheme.accent)
-                .accessibilityHidden(true)
+            EmptyView()
         case .loading:
             ProgressView()
                 .controlSize(.mini)
@@ -305,11 +306,8 @@ private struct WorkspaceRailItemButton: View {
         WorkspaceRailIdentityPolicy.workspaceName(path: item.state.path)
     }
 
-    private var parentPath: String {
-        WorkspaceRailIdentityPolicy.abbreviatedParentPath(
-            path: item.state.path,
-            homePath: FileManager.default.homeDirectoryForCurrentUser.path
-        )
+    private var shortcutLabel: String? {
+        WorkspaceRailShortcutPolicy.label(for: index)
     }
 
     private var workspaceURL: URL {
@@ -340,6 +338,20 @@ private struct WorkspaceRailItemButton: View {
         case .error: "Error"
         }
     }
+
+    private var accessibilityDescription: String {
+        guard let shortcutLabel else {
+            return "\(accessibilityValue), \(item.state.path)"
+        }
+        return "\(accessibilityValue), shortcut \(shortcutLabel), \(item.state.path)"
+    }
+
+    private var helpText: String {
+        guard let shortcutLabel else {
+            return "\(workspaceName)\n\(item.state.path)\n\(accessibilityValue)"
+        }
+        return "\(workspaceName)\n\(shortcutLabel)\n\(item.state.path)\n\(accessibilityValue)"
+    }
 }
 
 private struct WorkspaceRailItemButtonStyle: ButtonStyle {
@@ -367,22 +379,16 @@ private struct WorkspaceRailItemButtonStyle: ButtonStyle {
         }
 
         configuration.label
-            .background(
-                isSelected
-                    ? Color.clear
-                    : AtelierTheme.workspaceRailControlFill(for: interactionState)
-            )
+            .background {
+                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? AtelierTheme.workspaceRailSelection.opacity(0.72)
+                            : AtelierTheme.workspaceRailControlFill(for: interactionState)
+                    )
+            }
             .clipShape(
                 RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
-            )
-            .atelierSelectionGlass(
-                isSelected: isSelected,
-                tint: Color.white.opacity(0.22),
-                fallbackFill: AtelierTheme.workspaceRailSelection,
-                in: RoundedRectangle(
-                    cornerRadius: AtelierTheme.rowRadius,
-                    style: .continuous
-                )
             )
             .overlay {
                 if isFocused || isDropTargeted {

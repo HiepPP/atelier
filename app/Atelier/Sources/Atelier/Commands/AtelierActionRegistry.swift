@@ -161,7 +161,7 @@ nonisolated enum AtelierActionRegistry {
             title: "Actual Size",
             category: "View",
             systemImage: "1.magnifyingglass",
-            shortcutLabel: "Command-0"
+            shortcutLabel: nil
         ),
         AtelierActionDescriptor(
             id: .toggleFocusMode,

@@ -165,6 +165,12 @@ final class AppModel {
         persistCatalog()
     }
 
+    func selectWorkspace(shortcutNumber: Int) {
+        guard let index = WorkspaceRailShortcutPolicy.index(for: shortcutNumber),
+              workspaceStates.indices.contains(index) else { return }
+        selectWorkspace(id: workspaceStates[index].id)
+    }
+
     func openWorkspace(_ state: WorkspaceState) throws {
         catalogMutationRevision &+= 1
         let standardizedState = WorkspaceState(

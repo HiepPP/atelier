@@ -356,17 +356,22 @@ Interaction geometry rules:
 
 - Keep the rail outside `WorkspaceView`, its toolbar, split view, and status bar.
 - Use a fixed 176-point rail with one hairline divider on its trailing edge.
-- Show full project names as primary identity. Never use initials or monograms as primary identity.
-- Show an abbreviated parent path below every project name in monospaced secondary text.
-- Use the parent path to disambiguate duplicate project names.
+- Show only the full project name as primary identity. Never use initials, monograms, folder icons,
+  or visible paths in workspace rows.
+- Show `Command-1` through `Command-9` below the matching project name in smaller monospaced
+  secondary text. Ordered catalog position defines the shortcut number.
+- Keep workspaces after position 9 available in the rail without assigning a number shortcut.
+- Reserve `Command-0` for opening a new workspace.
 - Place 44-point workspace rows in one vertical column with 4-point gaps and 8-point horizontal insets.
 - Put one labeled `Add Workspace` action below the scrollable workspace list.
 - Support drag-and-drop reordering within the rail and persist the new order.
 - Give every workspace row a native context menu for activation, Finder, path copy, ordering, and close.
 - A context-menu close targets that item. It must not switch or close the active workspace first.
-- Mark the active workspace with label weight, a restrained tinted glass surface, and a checkmark.
+- Mark the active workspace with label weight, a brighter neutral shortcut, and a quiet flat
+  selection band.
+  Do not add a checkmark, leading accent bar, border, shadow, or floating-card treatment.
 - Show loading, unavailable, and error accessories without replacing project identity.
-- Show the full path in help and accessibility text.
+- Keep the full path in help and accessibility text without rendering it in the row.
 - Use rail-specific hover, pressed, focused, selected, and disabled fills so contrast stays stable.
 - Keep optional motion limited to quick opacity and scale feedback. Disable it under Reduce Motion.
 - Keep the rail dark in light and dark appearance. Use the graphite-to-petrol gradient as its only signature depth effect.
@@ -377,11 +382,11 @@ Workspace item states:
 
 | State | Visual treatment | Interaction | Accessibility value |
 |---|---|---|---|
-| Active | Semibold name, secondary path, tinted glass surface, checkmark | Selecting again keeps current session | `Selected, available` |
-| Inactive | Primary name, secondary path, clear fill | Selects existing live session | `Available` |
-| Loading | Secondary name and path, native progress indicator | Disabled until restore finishes | `Loading` |
-| Unavailable | Primary name, secondary path, `questionmark.folder` accessory | Selects item and presents recovery context | `Unavailable` |
-| Error | Primary name, secondary path, semantic error accessory | Selects item and presents error context | `Error` |
+| Active | Semibold name, brighter neutral shortcut, flat selection band | Selecting again keeps current session | `Selected, available` |
+| Inactive | Primary name, secondary shortcut, clear fill | Selects existing live session | `Available` |
+| Loading | Secondary name and shortcut, native progress indicator | Disabled until restore finishes | `Loading` |
+| Unavailable | Primary name, secondary shortcut, `questionmark.folder` accessory | Selects item and presents recovery context | `Unavailable` |
+| Error | Primary name, secondary shortcut, semantic error accessory | Selects item and presents error context | `Error` |
 | Disabled | Clear fill at disabled opacity | No action | `Disabled` |
 
 Catalog states:

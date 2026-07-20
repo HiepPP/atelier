@@ -70,6 +70,28 @@ struct WorkspaceLifecycleTests {
         #expect(second.isStarted)
     }
 
+    @Test("Number shortcuts select the matching ordered workspace")
+    func numberedWorkspaceSelection() throws {
+        let firstRoot = temporaryDirectory("shortcut-first")
+        let secondRoot = temporaryDirectory("shortcut-second")
+        try FileManager.default.createDirectory(at: firstRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: secondRoot, withIntermediateDirectories: true)
+        let model = makeModel("shortcut-selection")
+        defer { model.stop() }
+
+        try model.openWorkspace(workspaceState(firstRoot))
+        try model.openWorkspace(workspaceState(secondRoot))
+
+        model.selectWorkspace(shortcutNumber: 1)
+        #expect(model.selectedWorkspaceID == firstRoot.standardizedFileURL.path)
+
+        model.selectWorkspace(shortcutNumber: 2)
+        #expect(model.selectedWorkspaceID == secondRoot.standardizedFileURL.path)
+
+        model.selectWorkspace(shortcutNumber: 9)
+        #expect(model.selectedWorkspaceID == secondRoot.standardizedFileURL.path)
+    }
+
     @Test("Closing one session leaves another running")
     func closeAndShutdown() throws {
         let firstRoot = temporaryDirectory("close-first")
