@@ -514,7 +514,7 @@ struct ChangesView: View {
             }
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: AtelierMetrics.spaceM) {
+                VStack(alignment: .leading, spacing: AtelierMetrics.spaceM) {
                     repositoryHeader
 
                     if let message = model.errorMessage {
@@ -711,7 +711,7 @@ struct ChangesView: View {
     }
 
     private var changeList: some View {
-        LazyVStack(alignment: .leading, spacing: AtelierMetrics.spaceM) {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceM) {
             ForEach(SourceControlGroup.allCases) { group in
                 changeGroup(group)
             }
@@ -790,7 +790,7 @@ struct ChangesView: View {
                     .foregroundStyle(.secondary)
                     .padding(.vertical, AtelierMetrics.spaceS)
             } else {
-                LazyVStack(spacing: AtelierMetrics.spaceXS) {
+                VStack(spacing: AtelierMetrics.spaceXS) {
                     ForEach(visibleRecentCommits) { commit in
                         RecentCommitRow(
                             commit: commit,

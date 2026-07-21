@@ -176,7 +176,7 @@ struct GemmaSidecarView: View {
     private var feed: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: AtelierMetrics.spaceM) {
+                VStack(alignment: .leading, spacing: AtelierMetrics.spaceM) {
                     SessionJournalView(model: model.journal)
                     TerminalGuardianCardView(model: model.guardian)
                     PrecommitWhisperView(model: model.whisper)
