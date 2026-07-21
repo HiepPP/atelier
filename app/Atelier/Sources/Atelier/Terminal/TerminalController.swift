@@ -22,6 +22,76 @@ enum TerminalScrollbackPolicy {
     }
 }
 
+enum TerminalLegacyKeyPolicy {
+    enum SpecialKey {
+        case upArrow
+        case downArrow
+        case leftArrow
+        case rightArrow
+    }
+
+    private static let returnKeyCode: UInt16 = 36
+    private static let leftArrowKeyCode: UInt16 = 123
+    private static let rightArrowKeyCode: UInt16 = 124
+    private static let downArrowKeyCode: UInt16 = 125
+    private static let upArrowKeyCode: UInt16 = 126
+
+    static func sequence(
+        keyCode: UInt16,
+        specialKey: SpecialKey?,
+        charactersIgnoringModifiers: String?,
+        shift: Bool,
+        control: Bool,
+        option: Bool,
+        command: Bool
+    ) -> [UInt8]? {
+        let scalarValue = charactersIgnoringModifiers?.unicodeScalars.first?.value
+        if keyCode == returnKeyCode || scalarValue == 0x0D {
+            return shift && !control && !option && !command ? [0x0A] : nil
+        }
+
+        guard !shift, !control, !option, !command else { return nil }
+        switch specialKey {
+        case .upArrow:
+            return [0x1B, 0x5B, 0x41]
+        case .downArrow:
+            return [0x1B, 0x5B, 0x42]
+        case .rightArrow:
+            return [0x1B, 0x5B, 0x43]
+        case .leftArrow:
+            return [0x1B, 0x5B, 0x44]
+        case nil:
+            break
+        }
+
+        switch keyCode {
+        case upArrowKeyCode:
+            return [0x1B, 0x5B, 0x41]
+        case downArrowKeyCode:
+            return [0x1B, 0x5B, 0x42]
+        case rightArrowKeyCode:
+            return [0x1B, 0x5B, 0x43]
+        case leftArrowKeyCode:
+            return [0x1B, 0x5B, 0x44]
+        default:
+            break
+        }
+
+        switch Int(scalarValue ?? 0) {
+        case NSUpArrowFunctionKey:
+            return [0x1B, 0x5B, 0x41]
+        case NSDownArrowFunctionKey:
+            return [0x1B, 0x5B, 0x42]
+        case NSRightArrowFunctionKey:
+            return [0x1B, 0x5B, 0x43]
+        case NSLeftArrowFunctionKey:
+            return [0x1B, 0x5B, 0x44]
+        default:
+            return nil
+        }
+    }
+}
+
 @MainActor
 final class TerminalController {
     private let processService: TerminalProcessService
@@ -167,6 +237,7 @@ final class TerminalController {
 final class AtelierTerminalNativeView: LocalProcessTerminalView {
     private var shouldFocusWhenAttached = false
     private var preciseScrollRemainder: CGFloat = 0
+    private var keyDownMonitor: Any?
     private var scrollWheelMonitor: Any?
 
     func hideScrollIndicator() {
@@ -203,6 +274,7 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        installKeyDownMonitor()
         installScrollWheelMonitor()
         updateRendererForDisplay()
         focusIfPossible()
@@ -224,11 +296,59 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow !== window, let keyDownMonitor {
+            NSEvent.removeMonitor(keyDownMonitor)
+            self.keyDownMonitor = nil
+        }
         if newWindow !== window, let scrollWheelMonitor {
             NSEvent.removeMonitor(scrollWheelMonitor)
             self.scrollWheelMonitor = nil
         }
         super.viewWillMove(toWindow: newWindow)
+    }
+
+    private func installKeyDownMonitor() {
+        if let keyDownMonitor {
+            NSEvent.removeMonitor(keyDownMonitor)
+            self.keyDownMonitor = nil
+        }
+        guard let window else { return }
+        keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+            [weak self, weak window] event in
+            guard let self,
+                  let window,
+                  event.window === window,
+                  window.firstResponder === self,
+                  self.getTerminal().keyboardEnhancementFlags.isEmpty,
+                  let sequence = TerminalLegacyKeyPolicy.sequence(
+                      keyCode: event.keyCode,
+                      specialKey: Self.legacySpecialKey(for: event),
+                      charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+                      shift: event.modifierFlags.contains(.shift),
+                      control: event.modifierFlags.contains(.control),
+                      option: event.modifierFlags.contains(.option),
+                      command: event.modifierFlags.contains(.command)
+                  ) else {
+                return event
+            }
+            self.send(data: sequence[...])
+            return nil
+        }
+    }
+
+    private static func legacySpecialKey(for event: NSEvent) -> TerminalLegacyKeyPolicy.SpecialKey? {
+        switch event.specialKey {
+        case .upArrow:
+            .upArrow
+        case .downArrow:
+            .downArrow
+        case .leftArrow:
+            .leftArrow
+        case .rightArrow:
+            .rightArrow
+        default:
+            nil
+        }
     }
 
     private func handlePreciseScroll(_ event: NSEvent) -> Bool {

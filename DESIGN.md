@@ -552,6 +552,9 @@ Persistence boundaries:
 - Promote a preview before the first edit is saved.
 - Preserve first responder across palette, zoom, inspector, and sidecar transitions.
 - Keep the terminal's structural parent and proposed size stable while a sidecar opens or closes. Never reserve terminal width for agent responses.
+- Preserve terminal keyboard protocols. In legacy mode, `Shift-Enter` must send a newline distinct
+  from `Enter`, and unmodified arrow keys must reach interactive TUI prompts. When enhanced keyboard
+  reporting is active, defer to its negotiated encoding.
 
 ### Gemma Sidecar Assistant
 

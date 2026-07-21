@@ -636,6 +636,32 @@ struct AtelierTests {
         #expect(environment["PATH"] == "/usr/bin")
     }
 
+    @Test("Legacy terminal routes multiline input and TUI arrows")
+    func terminalLegacyKeyFallback() throws {
+        let sequence: (UInt16, TerminalLegacyKeyPolicy.SpecialKey?, String?, Bool) -> [UInt8]? = {
+            keyCode, specialKey, characters, shift in
+            TerminalLegacyKeyPolicy.sequence(
+                keyCode: keyCode,
+                specialKey: specialKey,
+                charactersIgnoringModifiers: characters,
+                shift: shift,
+                control: false,
+                option: false,
+                command: false
+            )
+        }
+
+        #expect(sequence(36, nil, "\r", false) == nil)
+        #expect(sequence(36, nil, "\r", true) == [0x0A])
+        #expect(sequence(0, .upArrow, nil, false) == [0x1B, 0x5B, 0x41])
+        #expect(sequence(0, .downArrow, nil, false) == [0x1B, 0x5B, 0x42])
+        #expect(sequence(0, .leftArrow, nil, false) == [0x1B, 0x5B, 0x44])
+        #expect(sequence(0, .rightArrow, nil, false) == [0x1B, 0x5B, 0x43])
+        #expect(sequence(126, nil, nil, true) == nil)
+        #expect(sequence(126, nil, nil, false) == [0x1B, 0x5B, 0x41])
+        #expect(sequence(0, nil, String(try #require(UnicodeScalar(0xF700))), false) == [0x1B, 0x5B, 0x41])
+    }
+
     @Test("Terminal caps Mermaid width and keeps narrow layouts contained")
     func terminalMermaidRenderWidth() {
         #expect(MermaidRenderingPolicy.targetWidth(containerWidth: 300) == 300)
