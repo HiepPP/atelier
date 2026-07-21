@@ -271,6 +271,23 @@ struct AtelierTests {
         #expect(status.ignoredPaths == ["tmp/"])
     }
 
+    @Test("Git log parser preserves commit metadata")
+    func gitCommitLogParsing() {
+        let sample = [
+            "abcdef123456\u{001F}abcdef1\u{001F}Hiệp\u{001F}1721600000\u{001F}feat: add git history\u{001E}",
+            "123456789abc\u{001F}1234567\u{001F}Atelier Bot\u{001F}1721500000\u{001F}fix: refresh status\u{001E}"
+        ].joined()
+
+        let commits = GitCommitLogParser.parse(Data(sample.utf8))
+
+        #expect(commits.count == 2)
+        #expect(commits[0].hash == "abcdef123456")
+        #expect(commits[0].shortHash == "abcdef1")
+        #expect(commits[0].author == "Hiệp")
+        #expect(commits[0].subject == "feat: add git history")
+        #expect(commits[1].subject == "fix: refresh status")
+    }
+
     @Test("Git push enables for changes and stages all when needed")
     func gitPushPolicy() {
         let workingOnly = GitStatus(changes: [

@@ -530,6 +530,16 @@ Persistence boundaries:
 ### Git
 
 - Keep repository, branch, summary, commit input, and change groups in the sidebar.
+- Present repository identity as one compact card with the workspace name, shortened path,
+  current branch, and branch-switch menu.
+- Use a two-option summary for Staged and Changes. Selecting a summary filters the visible
+  change list without changing Git state. Count untracked files under Changes.
+- Keep the commit composer multiline and show its keyboard hint inside the field. Keep Gemma
+  generation and selected-change utilities inside the composer card.
+- Render Push as one split primary control. The main action runs the current generated publish
+  pipeline for the active branch; the menu exposes generation and refresh without duplicating it.
+- Show recent commits below changes with subject, author, relative time, short hash, and a HEAD
+  marker on the newest commit. Keep the default list bounded and expand it only on request.
 - Refresh Git state after external commits, pushes, checkouts, and branch switches by
   watching only repository metadata that can change the visible snapshot: `.git/index`,
   `.git/HEAD`, `.git/packed-refs`, and `.git/refs/**`.

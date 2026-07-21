@@ -170,6 +170,41 @@ nonisolated struct GitSnapshot: Equatable, Sendable {
     let branches: [String]
 }
 
+nonisolated struct GitCommit: Identifiable, Equatable, Sendable {
+    let hash: String
+    let shortHash: String
+    let author: String
+    let date: Date
+    let subject: String
+
+    var id: String { hash }
+}
+
+nonisolated enum GitCommitLogParser {
+    private static let recordSeparator: Character = "\u{001E}"
+    private static let fieldSeparator: Character = "\u{001F}"
+
+    static func parse(_ data: Data) -> [GitCommit] {
+        String(decoding: data, as: UTF8.self)
+            .split(separator: recordSeparator, omittingEmptySubsequences: true)
+            .compactMap { record in
+                let fields = record.split(
+                    separator: fieldSeparator,
+                    maxSplits: 4,
+                    omittingEmptySubsequences: false
+                )
+                guard fields.count == 5, let timestamp = Double(fields[3]) else { return nil }
+                return GitCommit(
+                    hash: String(fields[0]),
+                    shortHash: String(fields[1]),
+                    author: String(fields[2]),
+                    date: Date(timeIntervalSince1970: timestamp),
+                    subject: String(fields[4]).trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            }
+    }
+}
+
 private nonisolated struct GitOutputState: Sendable {
     var value = Data()
     var wasTruncated = false
@@ -371,6 +406,21 @@ nonisolated final class GitService: Sendable {
             workspacePath: workspacePath
         )
         return GitStatus.parse(data)
+    }
+
+    func recentCommits(workspacePath: String, limit: Int = 20) async throws -> [GitCommit] {
+        let boundedLimit = min(max(limit, 1), 100)
+        let data = try await run(
+            arguments: [
+                "log",
+                "--max-count=\(boundedLimit)",
+                "--pretty=format:%H%x1f%h%x1f%an%x1f%at%x1f%s%x1e"
+            ],
+            workspacePath: workspacePath,
+            maxOutputBytes: 256_000,
+            allowedExitCodes: [0, 128]
+        )
+        return GitCommitLogParser.parse(data)
     }
 
     func diff(

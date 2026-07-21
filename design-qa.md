@@ -52,3 +52,45 @@
 ## Result
 
 Final result: passed
+
+## Git Sidebar Image Match - 2026-07-21
+
+### Scope
+
+- Source visual truth: `/Users/hiep/Library/Application Support/CleanShot/media/media_oFbRuqXSlq/CleanShot 2026-07-21 at 22.23.40@2x.png`.
+- Implementation screenshot: `/tmp/atelier-git-sidebar-live-changes.png`.
+- Viewport: 1298x768 app window with the saved 240-point Git sidebar width.
+- State: Atelier workspace, Git selected, Changes selected, four working-tree changes.
+- Full-view comparison: `/tmp/atelier-git-sidebar-live-comparison.png`.
+- Focused comparison: `/tmp/atelier-git-sidebar-live-panel.png`; dense labels and controls remain readable.
+
+### Fidelity Surfaces
+
+- Typography: native macOS type preserves the reference hierarchy and readable project identity.
+- Spacing: repository, summary, composer, changes, and history keep the reference vertical order and rhythm.
+- Colors: semantic green, orange, and blue accents map to the reference states. Current system appearance is light.
+- Image quality: the screen uses native SF Symbols and text. The reference contains no supplied raster brand asset.
+- Copy: Git labels, branch action, change states, composer hints, and commit metadata match the intended meaning.
+
+### Interaction Checks
+
+- Staged and Changes switch the visible file group and selected state.
+- Filter reveals and hides a working change-filter field.
+- Stage, unstage, discard, diff, branch, refresh, commit, and push paths remain connected.
+- Recent commits show the current HEAD, author, relative time, and short hash.
+
+### Findings History
+
+| Severity | Finding | Resolution | Post-fix evidence |
+|---|---|---|---|
+| P1 | Wrapping the whole repository card in a menu compressed its readable identity to one initial. | Kept identity static and moved branch selection to a separate disclosure control. | `/tmp/atelier-git-sidebar-live-changes.png` |
+
+### Residual Differences
+
+- The reference uses dark appearance and a wider sidebar. The live session uses light appearance and a saved 240-point width.
+- Real workspace data shows four changes instead of the mock's single database change.
+- These are session and data differences. No actionable P0, P1, or P2 mismatch remains.
+
+### Result
+
+final result: passed
