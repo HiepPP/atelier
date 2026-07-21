@@ -176,6 +176,22 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         )
     }
 
+    // Fill the proposed size instead of the split view's Auto Layout fitting
+    // height. Without this, SwiftUI sizes the controller to the tallest column's
+    // fitting height; when every column is short (git sidebar showing the error
+    // block, diff detail in a GeometryReader) the whole surface collapses and
+    // centers. Matches FileViewer's representable sizing.
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsViewController: NSSplitViewController,
+        context: Context
+    ) -> CGSize? {
+        CGSize(
+            width: proposal.width ?? nsViewController.view.frame.width,
+            height: proposal.height ?? nsViewController.view.frame.height
+        )
+    }
+
     final class Coordinator {
         weak var controller: NSSplitViewController?
         var sidebarController: NSHostingController<WorkspacePanelMotionContainer<Sidebar>>?
