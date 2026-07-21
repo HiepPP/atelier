@@ -325,6 +325,84 @@ struct AtelierTests {
         #expect(!GitCommitPolicy.shouldStageAll(status: staged))
     }
 
+    @Test("Git changes form a compact directory tree")
+    func gitChangeTree() throws {
+        let changes = [
+            GitChange(
+                path: ".claude/skills/baconsua-content/cms_ops.sh",
+                originalPath: nil,
+                kind: .modified,
+                isStaged: false,
+                isUnstaged: true
+            ),
+            GitChange(
+                path: "docs/baconsua.sqlite",
+                originalPath: nil,
+                kind: .modified,
+                isStaged: false,
+                isUnstaged: true
+            ),
+            GitChange(
+                path: "docs/baconsua.sqlite.dump.tsv",
+                originalPath: nil,
+                kind: .modified,
+                isStaged: false,
+                isUnstaged: true
+            ),
+            GitChange(
+                path: "generated-assets/20260722-article/article.mdx",
+                originalPath: nil,
+                kind: .untracked,
+                isStaged: false,
+                isUnstaged: true
+            )
+        ]
+
+        let roots = GitChangeTreeBuilder.build(changes)
+
+        #expect(roots.map(\.name) == [
+            ".claude/skills/baconsua-content",
+            "docs",
+            "generated-assets/20260722-article"
+        ])
+        let scripts = try #require(roots.first { $0.name.hasPrefix(".claude/") })
+        let docs = try #require(roots.first { $0.name == "docs" })
+        let generated = try #require(roots.first { $0.name.hasPrefix("generated-assets/") })
+        #expect(scripts.children.map(\.name) == ["cms_ops.sh"])
+        #expect(docs.children.map(\.name) == [
+            "baconsua.sqlite",
+            "baconsua.sqlite.dump.tsv"
+        ])
+        let article = try #require(generated.children.first?.change)
+        #expect(article.path == "generated-assets/20260722-article/article.mdx")
+    }
+
+    @Test("Git change tree folders count descendant files")
+    func gitChangeTreeFolderCounts() throws {
+        let changes = [
+            GitChange(
+                path: "docs/one.md",
+                originalPath: nil,
+                kind: .modified,
+                isStaged: false,
+                isUnstaged: true
+            ),
+            GitChange(
+                path: "docs/nested/two.md",
+                originalPath: nil,
+                kind: .untracked,
+                isStaged: false,
+                isUnstaged: true
+            )
+        ]
+
+        let root = try #require(GitChangeTreeBuilder.build(changes).first)
+        let nested = try #require(root.children.first { $0.isFolder })
+
+        #expect(root.changeCount == 2)
+        #expect(nested.changeCount == 1)
+    }
+
     @Test("Git subprocess finds user-installed command-line tools")
     func gitProcessEnvironment() {
         let environment = GitProcessEnvironment.configured(from: [

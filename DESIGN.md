@@ -536,6 +536,13 @@ Persistence boundaries:
   current branch, and branch-switch menu.
 - Show Staged and Changes as separate, always-visible sections. Count untracked files under
   Changes. Do not add a summary selector above the composer.
+- Render each change section as an expandable directory tree. Collapse single-child directory
+  chains into one workspace-relative path while keeping changed files as actionable leaf rows.
+- Keep each change row at `rowHeight` 28. Show Git status in the trailing slot at rest, then
+  overlay row actions in that slot on hover or keyboard focus without reserving extra width.
+- Highlight the leaf matching the selected center diff tab. When a folder is collapsed, show its
+  descendant file count. Option-clicking a folder toggles its whole visible descendant branch.
+- Keep directory guide lines low contrast so file names and Git status remain the primary signals.
 - Use an overlay Git scroll indicator that fades away when scrolling stops. Never keep it
   persistently visible.
 - Keep the commit composer multiline and focused on direct text entry. Do not show a separate

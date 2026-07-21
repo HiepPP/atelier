@@ -886,6 +886,7 @@ struct WorkspaceView: View {
             case .sourceControl:
                 ChangesView(
                     model: gitModel,
+                    selectedDiff: terminalTabs.selectedGitDiffSelection,
                     onOpenDiff: terminalTabs.openGitDiff,
                     showsPanelHeader: false
                 )

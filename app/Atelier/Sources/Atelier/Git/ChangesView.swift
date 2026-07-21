@@ -14,6 +14,112 @@ nonisolated struct DiffSelection: Equatable, Sendable {
     }
 }
 
+nonisolated struct GitChangeTreeNode: Identifiable, Equatable, Sendable {
+    let name: String
+    let path: String
+    let change: GitChange?
+    let children: [GitChangeTreeNode]
+    let changeCount: Int
+
+    var id: String {
+        if let change {
+            return "file:\(change.id)"
+        }
+        return "folder:\(path)"
+    }
+
+    var isFolder: Bool {
+        change == nil
+    }
+}
+
+nonisolated enum GitChangeTreeBuilder {
+    static func build(_ changes: [GitChange]) -> [GitChangeTreeNode] {
+        var root = GitChangeTreeAccumulator()
+        for change in changes {
+            let components = change.path.split(separator: "/", omittingEmptySubsequences: true)
+            guard !components.isEmpty else { continue }
+            root.insert(change, components: components[...])
+        }
+        return root.nodes(parentPath: "")
+    }
+
+    static func compacted(_ node: GitChangeTreeNode) -> GitChangeTreeNode {
+        var name = node.name
+        var path = node.path
+        var children = node.children
+
+        while children.count == 1,
+              let child = children.first,
+              child.isFolder {
+            name += "/\(child.name)"
+            path = child.path
+            children = child.children
+        }
+
+        return GitChangeTreeNode(
+            name: name,
+            path: path,
+            change: nil,
+            children: children,
+            changeCount: node.changeCount
+        )
+    }
+}
+
+private nonisolated struct GitChangeTreeAccumulator {
+    private var folders: [String: GitChangeTreeAccumulator] = [:]
+    private var files: [String: GitChange] = [:]
+
+    mutating func insert(_ change: GitChange, components: ArraySlice<Substring>) {
+        guard let first = components.first else { return }
+        let name = String(first)
+        let remaining = components.dropFirst()
+        if remaining.isEmpty {
+            files[name] = change
+            return
+        }
+
+        var folder = folders[name, default: GitChangeTreeAccumulator()]
+        folder.insert(change, components: remaining)
+        folders[name] = folder
+    }
+
+    func nodes(parentPath: String) -> [GitChangeTreeNode] {
+        let folderNodes = folders.map { name, folder in
+            let path = parentPath.isEmpty ? name : "\(parentPath)/\(name)"
+            let children = folder.nodes(parentPath: path)
+            return GitChangeTreeBuilder.compacted(
+                GitChangeTreeNode(
+                    name: name,
+                    path: path,
+                    change: nil,
+                    children: children,
+                    changeCount: children.reduce(into: 0) { count, child in
+                        count += child.changeCount
+                    }
+                )
+            )
+        }
+        let fileNodes = files.values.map { change in
+            GitChangeTreeNode(
+                name: URL(fileURLWithPath: change.path).lastPathComponent,
+                path: change.path,
+                change: change,
+                children: [],
+                changeCount: 1
+            )
+        }
+
+        return (folderNodes + fileNodes).sorted { lhs, rhs in
+            if lhs.isFolder != rhs.isFolder {
+                return lhs.isFolder
+            }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+}
+
 nonisolated enum GitCommitPolicy {
     private static let maximumChangedFiles = 100
 
@@ -467,14 +573,27 @@ private enum SourceControlGroup: CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .staged: "Staged"
+        case .staged: "Staged Changes"
         case .changes: "Changes"
         }
     }
 }
 
+private struct SourceControlFolderID: Hashable {
+    let group: SourceControlGroup
+    let path: String
+}
+
+private struct GitChangeTreeVisibleRow: Identifiable {
+    let node: GitChangeTreeNode
+    let guideDepths: [Int]
+
+    var id: String { node.id }
+}
+
 struct ChangesView: View {
     let model: GitWorkspaceModel
+    let selectedDiff: DiffSelection?
     let onOpenDiff: (DiffSelection) -> Void
     var onClose: (() -> Void)? = nil
     var showsPanelHeader = true
@@ -483,6 +602,9 @@ struct ChangesView: View {
     @State private var commitMessage = ""
     @State private var discardCandidate: GitChange?
     @State private var showsAllRecentCommits = false
+    @State private var collapsedGroups = Set<SourceControlGroup>()
+    @State private var collapsedFolders = Set<SourceControlFolderID>()
+    @State private var modifierKeys: EventModifiers = []
     @FocusState private var isCommitFieldFocused: Bool
 
     var body: some View {
@@ -503,6 +625,10 @@ struct ChangesView: View {
                 Button("Cancel", role: .cancel) { discardCandidate = nil }
             } message: {
                 Text("This restores the file from Git. This action cannot be undone in Atelier.")
+            }
+            .onModifierKeysChanged(mask: .option) { _, newKeys in
+                guard modifierKeys != newKeys else { return }
+                modifierKeys = newKeys
             }
     }
 
@@ -720,18 +846,38 @@ struct ChangesView: View {
 
     private func changeGroup(_ group: SourceControlGroup) -> some View {
         let changes = changes(for: group)
+        let roots = GitChangeTreeBuilder.build(changes)
+        let isCollapsed = collapsedGroups.contains(group)
 
-        return VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
-            HStack(spacing: AtelierMetrics.spaceXS) {
-                Text(group.title)
-                    .atelierFont(size: AtelierTypography.headline, weight: .semibold)
+        return VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
+            Button {
+                if isCollapsed {
+                    collapsedGroups.remove(group)
+                } else {
+                    collapsedGroups.insert(group)
+                }
+            } label: {
+                HStack(spacing: AtelierMetrics.spaceXS) {
+                    Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                        .atelierFont(size: AtelierTypography.micro, weight: .semibold)
+                        .frame(width: AtelierMetrics.spaceL)
 
-                Text("\(changes.count)")
-                    .atelierFont(size: AtelierTypography.micro, design: .monospaced)
-                    .foregroundStyle(.secondary)
+                    Text(group.title)
+                        .atelierFont(size: AtelierTypography.headline, weight: .semibold)
+
+                    Spacer(minLength: AtelierMetrics.spaceS)
+
+                    GitChangeSectionCountBadge(value: changes.count)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .atelierPointerCursor()
+            .accessibilityLabel(group.title)
+            .accessibilityValue("\(changes.count) files, \(isCollapsed ? "collapsed" : "expanded")")
 
-            if changes.isEmpty {
+            if !isCollapsed, changes.isEmpty {
                 HStack(spacing: AtelierMetrics.spaceS) {
                     Image(systemName: group == .staged ? "tray" : "checkmark.circle")
                         .foregroundStyle(.secondary)
@@ -742,30 +888,106 @@ struct ChangesView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(AtelierMetrics.spaceM)
                 .atelierCard(fill: AtelierTheme.raised.opacity(0.30))
-            } else {
-                LazyVStack(spacing: AtelierMetrics.spaceXS) {
-                    ForEach(changes) { change in
-                        GitChangeRow(
-                            change: change,
-                            staged: group == .staged,
-                            onOpen: {
-                                onOpenDiff(
-                                    DiffSelection(
-                                        change: change,
-                                        staged: group == .staged
+            } else if !isCollapsed {
+                LazyVStack(spacing: 0) {
+                    ForEach(visibleRows(in: roots, group: group)) { row in
+                        if let change = row.node.change {
+                            let staged = group == .staged
+                            let selection = DiffSelection(change: change, staged: staged)
+                            GitChangeRow(
+                                change: change,
+                                staged: staged,
+                                guideDepths: row.guideDepths,
+                                isSelected: selectedDiff?.change.id == change.id
+                                    && selectedDiff?.staged == staged,
+                                onOpen: {
+                                    onOpenDiff(selection)
+                                },
+                                onStage: { model.stage(change) },
+                                onUnstage: { model.unstage(change) },
+                                onDiscard: { discardCandidate = change }
+                            )
+                        } else {
+                            let folderID = SourceControlFolderID(group: group, path: row.node.path)
+                            GitChangeFolderRow(
+                                node: row.node,
+                                guideDepths: row.guideDepths,
+                                isExpanded: !collapsedFolders.contains(folderID),
+                                onToggle: {
+                                    toggleFolder(
+                                        folderID,
+                                        node: row.node,
+                                        recursively: modifierKeys.contains(.option)
                                     )
-                                )
-                            },
-                            onStage: { model.stage(change) },
-                            onUnstage: { model.unstage(change) },
-                            onDiscard: { discardCandidate = change }
-                        )
-                        .padding(.horizontal, AtelierMetrics.spaceXS)
-                        .atelierCard(fill: AtelierTheme.raised.opacity(0.30))
+                                }
+                            )
+                        }
                     }
                 }
             }
         }
+    }
+
+    private func visibleRows(
+        in roots: [GitChangeTreeNode],
+        group: SourceControlGroup
+    ) -> [GitChangeTreeVisibleRow] {
+        var rows: [GitChangeTreeVisibleRow] = []
+        appendVisibleRows(roots, depth: 0, group: group, to: &rows)
+        return rows
+    }
+
+    private func appendVisibleRows(
+        _ nodes: [GitChangeTreeNode],
+        depth: Int,
+        group: SourceControlGroup,
+        to rows: inout [GitChangeTreeVisibleRow]
+    ) {
+        for node in nodes {
+            rows.append(
+                GitChangeTreeVisibleRow(
+                    node: node,
+                    guideDepths: Array(0...depth)
+                )
+            )
+            let folderID = SourceControlFolderID(group: group, path: node.path)
+            if node.isFolder, !collapsedFolders.contains(folderID) {
+                appendVisibleRows(node.children, depth: depth + 1, group: group, to: &rows)
+            }
+        }
+    }
+
+    private func toggleFolder(
+        _ folderID: SourceControlFolderID,
+        node: GitChangeTreeNode,
+        recursively: Bool
+    ) {
+        if recursively {
+            let branchIDs = folderIDs(in: node, group: folderID.group)
+            if collapsedFolders.contains(folderID) {
+                collapsedFolders.subtract(branchIDs)
+            } else {
+                collapsedFolders.formUnion(branchIDs)
+            }
+            return
+        }
+
+        if collapsedFolders.contains(folderID) {
+            collapsedFolders.remove(folderID)
+        } else {
+            collapsedFolders.insert(folderID)
+        }
+    }
+
+    private func folderIDs(
+        in node: GitChangeTreeNode,
+        group: SourceControlGroup
+    ) -> Set<SourceControlFolderID> {
+        var result = Set([SourceControlFolderID(group: group, path: node.path)])
+        for child in node.children where child.isFolder {
+            result.formUnion(folderIDs(in: child, group: group))
+        }
+        return result
     }
 
     private var recentCommitsSection: some View {
@@ -960,53 +1182,59 @@ private struct RecentCommitRow: View {
 private struct GitChangeRow: View {
     let change: GitChange
     let staged: Bool
+    let guideDepths: [Int]
+    let isSelected: Bool
     let onOpen: () -> Void
     let onStage: () -> Void
     let onUnstage: () -> Void
     let onDiscard: () -> Void
 
     @State private var isHovering = false
+    @FocusState private var isActionFocused: Bool
 
     var body: some View {
-        HStack(spacing: AtelierMetrics.spaceS) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(URL(fileURLWithPath: change.path).lastPathComponent)
-                    .atelierFont(size: AtelierTypography.label, weight: .medium)
-                    .lineLimit(1)
+        HStack(spacing: 0) {
+            GitTreeGuideColumns(depths: guideDepths)
 
-                let parent = (change.path as NSString).deletingLastPathComponent
-                if !parent.isEmpty {
-                    Text(parent)
-                        .atelierFont(size: AtelierTypography.micro, design: .monospaced)
-                        .foregroundStyle(.secondary)
+            Button(action: onOpen) {
+                HStack(spacing: AtelierMetrics.spaceS) {
+                    GitChangeFileIcon(path: change.path)
+
+                    Text(URL(fileURLWithPath: change.path).lastPathComponent)
+                        .atelierFont(size: AtelierTypography.label, weight: .medium)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text(statusLabel)
+                        .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
+                        .foregroundStyle(statusColor)
+                        .frame(width: AtelierMetrics.spaceL)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction { onOpen() }
-
-            HStack(spacing: AtelierMetrics.spaceXS) {
-                Text(statusLabel)
-                    .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
-                    .foregroundStyle(statusColor)
-                    .frame(width: AtelierMetrics.spaceL)
-
-                actionButtons
-                    .opacity(isHovering ? 1 : AtelierTheme.inactiveOpacity)
-            }
-            .frame(width: actionWidth + AtelierMetrics.spaceL, alignment: .trailing)
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .accessibilityLabel("Open diff for \(change.path)")
+            .accessibilityValue(
+                isSelected ? "\(statusDescription), selected" : statusDescription
+            )
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
-        .padding(.horizontal, AtelierMetrics.spaceXS)
-        .frame(minHeight: AtelierMetrics.rowHeight + AtelierMetrics.spaceS)
+        .padding(.trailing, AtelierMetrics.spaceXS)
+        .frame(height: AtelierMetrics.rowHeight)
         .background {
             RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
-                .fill(isHovering ? AtelierTheme.hoverFill : Color.clear)
+                .fill(rowFill)
+        }
+        .overlay(alignment: .trailing) {
+            actionButtons
+                .frame(width: actionWidth, alignment: .trailing)
+                .padding(.horizontal, AtelierMetrics.spaceXS)
+                .frame(height: AtelierMetrics.rowHeight)
+                .background(rowFill)
+                .opacity(showsActions ? 1 : 0)
+                .allowsHitTesting(showsActions)
         }
         .contentShape(Rectangle())
-        .onTapGesture { onOpen() }
         .atelierPointerCursor()
         .onHover { hovering in
             guard isHovering != hovering else { return }
@@ -1065,8 +1293,20 @@ private struct GitChangeRow: View {
             Image(systemName: systemImage)
         }
         .buttonStyle(AtelierRowIconButtonStyle())
+        .focused($isActionFocused)
         .accessibilityLabel(label)
         .help(help)
+    }
+
+    private var showsActions: Bool {
+        isHovering || isActionFocused
+    }
+
+    private var rowFill: Color {
+        if isSelected {
+            return AtelierTheme.selection
+        }
+        return showsActions ? AtelierTheme.hoverFill : Color.clear
     }
 
     private var actionWidth: CGFloat {
@@ -1095,5 +1335,140 @@ private struct GitChangeRow: View {
         case .conflicted: "!"
         case .other: "?"
         }
+    }
+
+    private var statusDescription: String {
+        switch change.kind {
+        case .modified: "Modified"
+        case .added: "Added"
+        case .deleted: "Deleted"
+        case .renamed: "Renamed"
+        case .copied: "Copied"
+        case .untracked: "Untracked"
+        case .conflicted: "Conflicted"
+        case .other: "Changed"
+        }
+    }
+}
+
+private struct GitChangeFolderRow: View {
+    let node: GitChangeTreeNode
+    let guideDepths: [Int]
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 0) {
+                GitTreeGuideColumns(depths: guideDepths)
+
+                HStack(spacing: AtelierMetrics.spaceS) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .atelierFont(size: AtelierTypography.micro, weight: .semibold)
+                        .frame(width: AtelierMetrics.spaceM)
+
+                    Image(systemName: "folder.fill")
+                        .atelierFont(size: AtelierTypography.uiSize)
+                        .foregroundStyle(AtelierTheme.accent)
+                        .accessibilityHidden(true)
+
+                    Text(node.name)
+                        .atelierFont(size: AtelierTypography.label, weight: .medium)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if !isExpanded {
+                        Text(node.changeCount.formatted())
+                            .atelierFont(
+                                size: AtelierTypography.micro,
+                                weight: .medium,
+                                design: .monospaced
+                            )
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.trailing, AtelierMetrics.spaceXS)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: AtelierMetrics.rowHeight)
+            .background {
+                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+                    .fill(isHovering ? AtelierTheme.hoverFill : Color.clear)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .atelierPointerCursor()
+        .onHover { hovering in
+            guard isHovering != hovering else { return }
+            isHovering = hovering
+        }
+        .accessibilityLabel("Folder \(node.path)")
+        .accessibilityValue(
+            "\(isExpanded ? "Expanded" : "Collapsed"), \(node.changeCount) files"
+        )
+        .accessibilityHint("Option-click toggles the entire branch")
+        .help(
+            "\(isExpanded ? "Collapse" : "Expand") \(node.path). "
+                + "Option-click toggles the entire branch."
+        )
+    }
+}
+
+private struct GitTreeGuideColumns: View {
+    let depths: [Int]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(depths, id: \.self) { _ in
+                Rectangle()
+                    .fill(AtelierTheme.border.opacity(0.34))
+                    .frame(width: AtelierTheme.strokeHairline)
+                    .frame(width: AtelierMetrics.spaceL)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct GitChangeFileIcon: View {
+    let path: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .atelierFont(size: AtelierTypography.uiSize)
+            .foregroundStyle(.secondary)
+            .frame(width: AtelierMetrics.spaceL)
+            .accessibilityHidden(true)
+    }
+
+    private var systemImage: String {
+        switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+        case "swift": "swift"
+        case "sh", "zsh", "bash": "terminal"
+        case "json", "plist", "yaml", "yml": "curlybraces.square"
+        case "md", "mdx", "markdown": "text.alignleft"
+        case "sqlite", "db": "cylinder"
+        case "tsv", "csv": "tablecells"
+        default: "doc"
+        }
+    }
+}
+
+private struct GitChangeSectionCountBadge: View {
+    let value: Int
+
+    var body: some View {
+        Text(value.formatted())
+            .atelierFont(size: AtelierTypography.micro, weight: .bold, design: .monospaced)
+            .foregroundStyle(AtelierTheme.accentInk)
+            .padding(.horizontal, 6)
+            .frame(minWidth: 22, minHeight: 22)
+            .background(AtelierTheme.accent)
+            .clipShape(Capsule())
+            .accessibilityHidden(true)
     }
 }
