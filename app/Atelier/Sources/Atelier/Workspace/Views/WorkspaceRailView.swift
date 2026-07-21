@@ -70,6 +70,14 @@ nonisolated enum WorkspaceRailShortcutPolicy {
 
 struct WorkspaceRailView: View {
     @Environment(AppModel.self) private var app
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @State private var expandedWorkspaceIDs: Set<String> = []
+
+    private var expandAnimation: Animation? {
+        reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -88,7 +96,7 @@ struct WorkspaceRailView: View {
             ScrollView(.vertical) {
                 LazyVStack(spacing: AtelierMetrics.workspaceRailItemGap) {
                     ForEach(Array(app.workspaceItems.enumerated()), id: \.element.id) { index, item in
-                        WorkspaceRailItemButton(item: item, index: index)
+                        workspaceGroup(index: index, item: item)
                     }
                 }
                 .padding(.horizontal, AtelierMetrics.spaceS)
@@ -121,7 +129,87 @@ struct WorkspaceRailView: View {
                 .frame(width: AtelierTheme.strokeHairline)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Workspaces")
+        .accessibilityLabel("Workspace panel")
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                let snapshots = app.threadsPanel.makeSnapshots(sessions: app.liveSessions)
+                app.threadsPanel.refresh(snapshots: snapshots, now: Date())
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    return
+                }
+            }
+        }
+        .onAppear { expandActiveWorkspace() }
+        .onChange(of: app.selectedWorkspaceID) { expandActiveWorkspace() }
+    }
+
+    @ViewBuilder
+    private func workspaceGroup(index: Int, item: WorkspaceCatalogItem) -> some View {
+        let threads = threadGroup(for: item.id)?.threads ?? []
+        let runningCount = threads.reduce(0) { $0 + ($1.status == .running ? 1 : 0) }
+        let isExpanded = expandedWorkspaceIDs.contains(item.id)
+        let showThreads = !threads.isEmpty && isExpanded
+        VStack(spacing: 0) {
+            WorkspaceRailItemButton(
+                item: item,
+                index: index,
+                hasThreads: !threads.isEmpty,
+                runningCount: runningCount,
+                isExpanded: isExpanded,
+                onToggleExpand: { toggleExpand(item.id) }
+            )
+            if showThreads {
+                ThreadsPanelView(workspaceID: item.id, threads: threads)
+                    .padding(.top, 1)
+            }
+        }
+        .padding(.horizontal, AtelierMetrics.spaceXS)
+        .padding(.vertical, showThreads ? AtelierMetrics.spaceXS : 0)
+        .background { recessedGroupBackground(active: showThreads) }
+    }
+
+    @ViewBuilder
+    private func recessedGroupBackground(active: Bool) -> some View {
+        if active {
+            let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+            shape
+                .fill(Color.black.opacity(0.16))
+                .overlay {
+                    shape
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.05), .clear],
+                                startPoint: .top,
+                                endPoint: .center
+                            )
+                        )
+                }
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func threadGroup(for workspaceID: String) -> WorkspaceThreadGroup? {
+        app.threadsPanel.groups.first { $0.workspaceID == workspaceID }
+    }
+
+    private func toggleExpand(_ id: String) {
+        withAnimation(expandAnimation) {
+            if expandedWorkspaceIDs.contains(id) {
+                expandedWorkspaceIDs.remove(id)
+            } else {
+                expandedWorkspaceIDs.insert(id)
+            }
+        }
+    }
+
+    private func expandActiveWorkspace() {
+        guard let id = app.selectedWorkspaceID, !expandedWorkspaceIDs.contains(id) else { return }
+        withAnimation(expandAnimation) {
+            _ = expandedWorkspaceIDs.insert(id)
+        }
     }
 }
 
@@ -166,7 +254,12 @@ private struct WorkspaceRailAddButton: View {
 private struct WorkspaceRailItemButton: View {
     let item: WorkspaceCatalogItem
     let index: Int
+    var hasThreads: Bool = false
+    var runningCount: Int = 0
+    var isExpanded: Bool = false
+    var onToggleExpand: () -> Void = {}
     @Environment(AppModel.self) private var app
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isHovered = false
     @State private var isDropTargeted = false
@@ -175,11 +268,13 @@ private struct WorkspaceRailItemButton: View {
     private var isSelected: Bool { item.status == .active }
     private var isLoading: Bool { item.status == .loading }
 
+    private static let chevronGutter: CGFloat = 14
+
     var body: some View {
         Button {
             app.selectWorkspace(id: item.id)
         } label: {
-            HStack(spacing: AtelierMetrics.spaceM) {
+            HStack(spacing: AtelierMetrics.spaceS) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(workspaceName)
                         .atelierFont(
@@ -209,8 +304,17 @@ private struct WorkspaceRailItemButton: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
 
+                if runningCount > 0, !isExpanded {
+                    runningBadge
+                }
+
                 statusAccessory
                     .frame(width: AtelierMetrics.regularIconSize)
+
+                if hasThreads {
+                    Color.clear
+                        .frame(width: Self.chevronGutter, height: 1)
+                }
             }
             .padding(.horizontal, AtelierMetrics.spaceM)
             .frame(maxWidth: .infinity)
@@ -225,6 +329,12 @@ private struct WorkspaceRailItemButton: View {
                 isDropTargeted: isDropTargeted
             )
         )
+        .overlay(alignment: .trailing) {
+            if hasThreads {
+                disclosureChevron
+                    .padding(.trailing, AtelierMetrics.spaceM)
+            }
+        }
         .disabled(isLoading)
         .focused($isFocused)
         .onHover { isHovered = $0 }
@@ -277,6 +387,26 @@ private struct WorkspaceRailItemButton: View {
         .accessibilityLabel(workspaceName)
         .accessibilityValue(accessibilityDescription)
         .help(helpText)
+    }
+
+    private var disclosureChevron: some View {
+        Button(action: onToggleExpand) {
+            Image(systemName: "chevron.right")
+                .atelierFont(size: AtelierTypography.micro, weight: .semibold)
+                .foregroundStyle(AtelierTheme.workspaceRailSecondary)
+                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                .frame(width: Self.chevronGutter, height: AtelierMetrics.workspaceRailItemHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .atelierPointerCursor()
+        .accessibilityLabel(isExpanded ? "Collapse threads" : "Expand threads")
+    }
+
+    private var runningBadge: some View {
+        AtelierCountBadge(value: runningCount, color: AtelierTheme.gitAdded)
+            .accessibilityLabel("\(runningCount) running")
+            .help("\(runningCount) running")
     }
 
     @ViewBuilder

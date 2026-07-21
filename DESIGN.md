@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Status | Current implementation baseline |
-| Updated | 2026-07-20 |
+| Updated | 2026-07-21 |
 | Baseline commit | `02ebe5b` |
 | Platform | macOS 26+ |
 | UI stack | SwiftUI, AppKit, Luminare |
@@ -34,8 +34,10 @@ SwiftUI owns composition and observable presentation state. AppKit owns native v
 AtelierApp
 `-- ContentView
     |-- Workspace rail
-    |   |-- Ordered live workspace rows
-    |   `-- Add workspace action
+    |   |-- Ordered live workspace groups
+    |   |   |-- Workspace header
+    |   |   `-- Nested live agent threads
+    |   `-- Add Workspace
     |-- Selected workspace content
     |   |-- Empty catalog
     |   `-- WorkspaceView
@@ -360,6 +362,9 @@ Interaction geometry rules:
 
 - Keep the rail outside `WorkspaceView`, its toolbar, split view, and status bar.
 - Use a fixed 176-point rail with one hairline divider on its trailing edge.
+- Keep the Workspaces header. Do not add a Threads tab or separate panel body.
+- Treat each workspace as one collapsible group with its 44-point workspace header and nested thread rows.
+- Keep the labeled Add Workspace action below the scrollable workspace groups.
 - Show only the full project name as primary identity. Never use initials, monograms, folder icons,
   or visible paths in workspace rows.
 - Show `Command-1` through `Command-9` below the matching project name in smaller monospaced
@@ -381,6 +386,30 @@ Interaction geometry rules:
 - Keep the rail dark in light and dark appearance. Use the graphite-to-petrol gradient as its only signature depth effect.
 - Use `workspaceRailSolid` when Reduce Transparency is enabled.
 - Use a faint top-edge sheen and one trailing hairline. Do not add glow, heavy shadows, pills, or dock magnification.
+
+#### Threads
+
+- List terminals that run or ran an agent below their workspace header across every live workspace.
+- Keep workspace groups in workspace rail order. Do not add a Threads tab.
+- Make each workspace group collapsible. Show a trailing disclosure chevron on the workspace header only when the group has at least one thread.
+- Reserve the trailing chevron gutter so the running badge and status accessory keep their position when the chevron appears.
+- Expand the active workspace by default. Keep other groups collapsed until the user expands them. Auto-expand a workspace when it becomes active.
+- Do not render a "No threads yet" row. A workspace with no agent threads shows only its header, with no chevron and no thread rows.
+- Render an expanded workspace group as one recessed container that holds the header and its thread rows. Use a quiet sunken fill with rounded corners and a top-lit hairline. The recessed group is a sunken surface, not a floating card; it adds no border and no drop shadow.
+- Keep threadless workspaces and collapsed groups as plain rows with no container.
+- Separate workspace groups with vertical spacing so each project reads as one block.
+- Show a quiet running-count badge on the workspace header only while the group is collapsed. When the group is expanded, the running rows already show their state, so the header omits the badge. Do not shift the project name when the badge appears or its count changes.
+- Each thread row shows a status dot, the agent name, and a trailing relative time for done rows. Use a filled accent dot for running and a hollow muted dot for done. A soft running pulse is allowed and must stop under Reduce Motion.
+- Keep each nested row at `rowHeight` 28 with an inset shared selection pill and pointer cursor. Align the thread content under the workspace name.
+- Keep row geometry stable across running, done, hovered, pressed, and selected states.
+- Detect agents from each terminal pty foreground process. Match its argv against the shared agent name list.
+- Do not depend on OSC 133. Atelier does not inject shell integration.
+- Keep a thread while its terminal stays open. Move it from running to done when the agent exits.
+- Remove the thread when its terminal closes. Do not create a separate thread history store.
+- Refresh only while the Workspace panel is mounted and the app is active.
+- Keep the disclosure chevron, workspace-header, and nested-thread hit targets separate.
+- Animate expand and collapse with a short spring. Disable the motion under Reduce Motion.
+- Clicking a thread activates its workspace when needed, selects the matching terminal tab, and focuses its terminal.
 
 Workspace item states:
 

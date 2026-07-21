@@ -5,6 +5,7 @@ import Observation
 final class AppModel {
     let zoom: AtelierZoomModel
     let windowController: WindowController
+    let threadsPanel = ThreadsPanelModel()
 
     private(set) var workspaceStates: [WorkspaceState] = []
     private(set) var selectedWorkspaceID: String? {

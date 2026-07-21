@@ -57,6 +57,12 @@ final class TerminalSession: Identifiable {
 
 }
 
+struct OpenTerminalTab {
+    let id: UUID
+    let title: String
+    let controller: TerminalController
+}
+
 private enum CenterTabContent {
     case terminal(TerminalSession)
     case file(EditorSession)
@@ -323,6 +329,31 @@ final class TerminalTabsModel {
                 count += 1
             }
         }
+    }
+
+    var openTerminalTabs: [OpenTerminalTab] {
+        tabs.compactMap { tab in
+            guard case .terminal(let session) = tab.content else { return nil }
+            return OpenTerminalTab(
+                id: tab.id,
+                title: tab.title,
+                controller: session.controller
+            )
+        }
+    }
+
+    @discardableResult
+    func selectTerminal(id: UUID) -> Bool {
+        guard let tab = tabs.first(where: { tab in
+            guard tab.id == id, case .terminal = tab.content else { return false }
+            return true
+        }), case .terminal(let session) = tab.content else { return false }
+        select(tab)
+        Task { @MainActor [controller = session.controller] in
+            await Task.yield()
+            controller.requestFocus()
+        }
+        return true
     }
 
     var gemmaTabCount: Int {

@@ -37,6 +37,19 @@ final class TerminalController {
         !isClosed && terminal.process.running
     }
 
+    func currentForegroundAgentName() -> String? {
+        guard !isClosed else { return nil }
+        return ForegroundProcessAgentReader.agentName(
+            ptyFileDescriptor: terminal.process.childfd,
+            shellPID: terminal.process.shellPid
+        )
+    }
+
+    func requestFocus() {
+        guard !isClosed else { return }
+        terminal.requestFocusWhenAttached()
+    }
+
     init(workspacePath: String, processService: TerminalProcessService = TerminalProcessService()) {
         self.processService = processService
         terminal.nativeBackgroundColor = AppKitThemeAdapter.terminalBackground
@@ -95,7 +108,7 @@ final class TerminalController {
         guard self.isActive != isActive else { return }
         self.isActive = isActive
         if isActive {
-            terminal.requestFocusWhenAttached()
+            requestFocus()
         } else {
             terminal.releaseFocusIfNeeded()
         }
