@@ -931,7 +931,7 @@ private struct RecentCommitRow: View {
                         .frame(width: 5, height: 5)
                     Text(commit.author)
                     Text("-")
-                    Text(commit.date, style: .relative)
+                    Text(Self.relativeTime(from: commit.date))
                 }
                 .atelierFont(size: AtelierTypography.micro)
                 .foregroundStyle(.secondary)
@@ -946,6 +946,14 @@ private struct RecentCommitRow: View {
         }
         .padding(.vertical, AtelierMetrics.spaceS)
         .accessibilityElement(children: .combine)
+    }
+
+    private static func relativeTime(from date: Date, now: Date = .now) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        if seconds < 60 { return "now" }
+        if seconds < 3_600 { return "\(seconds / 60)m" }
+        if seconds < 86_400 { return "\(seconds / 3_600)h" }
+        return "\(seconds / 86_400)d"
     }
 }
 
