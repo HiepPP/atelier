@@ -1,12 +1,43 @@
+import AppKit
 import Foundation
 
 @MainActor
 extension AppModel {
     func runtimeDiagnosticsSnapshot() -> RuntimeMainSnapshot {
         guard let workspace else { return RuntimeMainSnapshot() }
-        return workspace.terminalTabs.runtimeDiagnosticsSnapshot(
+        var snapshot = workspace.terminalTabs.runtimeDiagnosticsSnapshot(
             workspaceRoot: workspace.rootURL
         )
+        snapshot.fileTree = RuntimeFileTreeMetricsStore.shared.snapshot(
+            rootPath: workspace.rootURL.standardizedFileURL.path
+        )
+
+        var terminal = RuntimeTerminalSnapshot()
+        for session in liveSessions {
+            for tab in session.terminalTabs.openTerminalTabs {
+                let metric = tab.controller.runtimeDiagnosticsMetric()
+                terminal.controllerCount += 1
+                if metric.active { terminal.activeControllerCount += 1 }
+                if metric.attached { terminal.attachedControllerCount += 1 }
+                if terminal.controllers.count < RuntimeTerminalSnapshot.controllerCapacity {
+                    terminal.controllers.append(metric)
+                }
+                if session === workspace, tab.id == workspace.terminalTabs.selectedID {
+                    terminal.selectedControllerID = metric.id
+                }
+                if metric.firstResponder {
+                    terminal.firstResponderControllerID = metric.id
+                    terminal.firstResponderWorkspaceRootName = metric.workspaceRootName
+                }
+            }
+        }
+        if terminal.firstResponderControllerID != nil {
+            terminal.firstResponderKind = "terminal"
+        } else if NSApp.keyWindow?.firstResponder != nil {
+            terminal.firstResponderKind = "nonTerminal"
+        }
+        snapshot.terminal = terminal
+        return snapshot
     }
 
     func handleRuntimeProbe(_ request: RuntimeProbeRequest) async -> RuntimeProbeResponse {

@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 nonisolated protocol RuntimeMonotonicClock: Sendable {
     func now() -> Double
@@ -159,6 +160,36 @@ nonisolated struct RuntimeEditorSnapshot: Codable, Sendable, Equatable {
     var attached = false
 }
 
+nonisolated struct RuntimeFileTreeSnapshot: Codable, Sendable, Equatable {
+    var relativeRootName: String?
+    var rootLoadState = "unavailable"
+    var rootEntryCount = 0
+    var rootLoadAgeMs = 0.0
+    var lastErrorCode: String?
+}
+
+nonisolated struct RuntimeTerminalControllerMetric: Codable, Sendable, Equatable {
+    let id: String
+    let workspaceRootName: String
+    let active: Bool
+    let attached: Bool
+    let processRunning: Bool
+    let firstResponder: Bool
+}
+
+nonisolated struct RuntimeTerminalSnapshot: Codable, Sendable, Equatable {
+    static let controllerCapacity = 128
+
+    var controllerCount = 0
+    var activeControllerCount = 0
+    var attachedControllerCount = 0
+    var selectedControllerID: String?
+    var firstResponderControllerID: String?
+    var firstResponderWorkspaceRootName: String?
+    var firstResponderKind = "none"
+    var controllers: [RuntimeTerminalControllerMetric] = []
+}
+
 nonisolated struct RuntimeDiagnosticsSnapshot: Codable, Sendable, Equatable {
     var eventCount = 0
     var droppedEventCount = 0
@@ -201,8 +232,70 @@ nonisolated struct RuntimeSnapshot: Codable, Sendable, Equatable {
     let mainThread: RuntimeMainThreadSnapshot
     let workspace: RuntimeWorkspaceSnapshot
     let editor: RuntimeEditorSnapshot
+    let git: GitCommandQueueSnapshot?
+    let fileTree: RuntimeFileTreeSnapshot?
+    let terminal: RuntimeTerminalSnapshot?
     let diagnostics: RuntimeDiagnosticsSnapshot
     let verdicts: [RuntimeVerdict]
+
+    init(
+        schemaVersion: Int,
+        generatedAt: String,
+        monotonicTimeSeconds: Double,
+        process: RuntimeProcessSnapshot,
+        mainThread: RuntimeMainThreadSnapshot,
+        workspace: RuntimeWorkspaceSnapshot,
+        editor: RuntimeEditorSnapshot,
+        git: GitCommandQueueSnapshot? = nil,
+        fileTree: RuntimeFileTreeSnapshot? = nil,
+        terminal: RuntimeTerminalSnapshot? = nil,
+        diagnostics: RuntimeDiagnosticsSnapshot,
+        verdicts: [RuntimeVerdict]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.generatedAt = generatedAt
+        self.monotonicTimeSeconds = monotonicTimeSeconds
+        self.process = process
+        self.mainThread = mainThread
+        self.workspace = workspace
+        self.editor = editor
+        self.git = git
+        self.fileTree = fileTree
+        self.terminal = terminal
+        self.diagnostics = diagnostics
+        self.verdicts = verdicts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case generatedAt
+        case monotonicTimeSeconds
+        case process
+        case mainThread
+        case workspace
+        case editor
+        case git
+        case fileTree
+        case terminal
+        case diagnostics
+        case verdicts
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        generatedAt = try container.decode(String.self, forKey: .generatedAt)
+        monotonicTimeSeconds = try container.decode(Double.self, forKey: .monotonicTimeSeconds)
+        process = try container.decode(RuntimeProcessSnapshot.self, forKey: .process)
+        mainThread = try container.decode(RuntimeMainThreadSnapshot.self, forKey: .mainThread)
+        workspace = try container.decode(RuntimeWorkspaceSnapshot.self, forKey: .workspace)
+        editor = try container.decode(RuntimeEditorSnapshot.self, forKey: .editor)
+        git = try container.decodeIfPresent(GitCommandQueueSnapshot.self, forKey: .git)
+        fileTree = try container.decodeIfPresent(RuntimeFileTreeSnapshot.self, forKey: .fileTree)
+        terminal = try container.decodeIfPresent(RuntimeTerminalSnapshot.self, forKey: .terminal)
+        diagnostics = try container.decode(RuntimeDiagnosticsSnapshot.self, forKey: .diagnostics)
+        verdicts = try container.decode([RuntimeVerdict].self, forKey: .verdicts)
+    }
 }
 
 nonisolated struct RuntimeFlightRecorderSnapshot: Codable, Sendable, Equatable {
@@ -215,6 +308,88 @@ nonisolated struct RuntimeFlightRecorderSnapshot: Codable, Sendable, Equatable {
 nonisolated struct RuntimeMainSnapshot: Sendable, Equatable {
     var workspace = RuntimeWorkspaceSnapshot()
     var editor = RuntimeEditorSnapshot()
+    var fileTree = RuntimeFileTreeSnapshot()
+    var terminal = RuntimeTerminalSnapshot()
+}
+
+private nonisolated struct RuntimeFileTreeRecord: Sendable {
+    let relativeRootName: String
+    var state: String
+    var entryCount: Int
+    var loadStartedAt: Double?
+    var lastErrorCode: String?
+}
+
+nonisolated final class RuntimeFileTreeMetricsStore: @unchecked Sendable {
+    static let shared = RuntimeFileTreeMetricsStore()
+    static let capacity = 64
+
+    private let state = Mutex<[String: RuntimeFileTreeRecord]>([:])
+    private let clock: RuntimeMonotonicClock
+
+    init(clock: RuntimeMonotonicClock = SystemRuntimeMonotonicClock()) {
+        self.clock = clock
+    }
+
+    func register(rootPath: String, relativeRootName: String) {
+        state.withLock { records in
+            guard records[rootPath] != nil || records.count < Self.capacity else { return }
+            records[rootPath] = RuntimeFileTreeRecord(
+                relativeRootName: relativeRootName,
+                state: "idle",
+                entryCount: 0,
+                loadStartedAt: nil,
+                lastErrorCode: nil
+            )
+        }
+    }
+
+    func unregister(rootPath: String) {
+        state.withLock { $0[rootPath] = nil }
+    }
+
+    func loading(rootPath: String) {
+        let now = clock.now()
+        state.withLock { records in
+            guard records[rootPath] != nil else { return }
+            records[rootPath]?.state = "loading"
+            records[rootPath]?.loadStartedAt = now
+            records[rootPath]?.lastErrorCode = nil
+        }
+    }
+
+    func loaded(rootPath: String, entryCount: Int) {
+        state.withLock { records in
+            guard records[rootPath] != nil else { return }
+            records[rootPath]?.state = "loaded"
+            records[rootPath]?.entryCount = max(0, entryCount)
+            records[rootPath]?.loadStartedAt = nil
+            records[rootPath]?.lastErrorCode = nil
+        }
+    }
+
+    func failed(rootPath: String) {
+        state.withLock { records in
+            guard records[rootPath] != nil else { return }
+            records[rootPath]?.state = "failed"
+            records[rootPath]?.loadStartedAt = nil
+            records[rootPath]?.lastErrorCode = "readFailed"
+        }
+    }
+
+    func snapshot(rootPath: String) -> RuntimeFileTreeSnapshot {
+        let now = clock.now()
+        return state.withLock { records in
+            guard let record = records[rootPath] else { return RuntimeFileTreeSnapshot() }
+            return RuntimeFileTreeSnapshot(
+                relativeRootName: record.relativeRootName,
+                rootLoadState: record.state,
+                rootEntryCount: record.entryCount,
+                rootLoadAgeMs: record.loadStartedAt.map { max(0, now - $0) * 1_000 } ?? 0,
+                lastErrorCode: record.lastErrorCode
+            )
+        }
+    }
 }
 
 nonisolated struct RuntimeCPUDelta: Sendable {

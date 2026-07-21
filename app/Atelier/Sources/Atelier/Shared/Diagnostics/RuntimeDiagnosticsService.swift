@@ -285,6 +285,9 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
             mainThread: mainThread,
             workspace: mainSnapshot.workspace,
             editor: editor,
+            git: GitCommandExecutor.shared.snapshot(),
+            fileTree: mainSnapshot.fileTree,
+            terminal: mainSnapshot.terminal,
             diagnostics: diagnostics,
             verdicts: verdicts
         )

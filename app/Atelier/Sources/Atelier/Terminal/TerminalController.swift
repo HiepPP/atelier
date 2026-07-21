@@ -28,6 +28,8 @@ final class TerminalController {
     private let terminal = AtelierTerminalNativeView(frame: .zero)
     private var isActive = false
     private var isClosed = false
+    let diagnosticID = UUID().uuidString
+    let diagnosticWorkspaceRootName: String
 
     /// Fires when an OSC 133 `D` command-finished mark arrives with an exit
     /// code. Never fires when the shell emits no OSC 133 marks.
@@ -46,12 +48,13 @@ final class TerminalController {
     }
 
     func requestFocus() {
-        guard !isClosed else { return }
+        guard !isClosed, isActive else { return }
         terminal.requestFocusWhenAttached()
     }
 
     init(workspacePath: String, processService: TerminalProcessService = TerminalProcessService()) {
         self.processService = processService
+        diagnosticWorkspaceRootName = URL(fileURLWithPath: workspacePath).lastPathComponent
         terminal.nativeBackgroundColor = AppKitThemeAdapter.terminalBackground
         terminal.nativeForegroundColor = AppKitThemeAdapter.terminalForeground
         terminal.font = AtelierTypography.codeFont(size: AtelierTypography.terminalSize)
@@ -112,6 +115,17 @@ final class TerminalController {
         } else {
             terminal.releaseFocusIfNeeded()
         }
+    }
+
+    func runtimeDiagnosticsMetric() -> RuntimeTerminalControllerMetric {
+        RuntimeTerminalControllerMetric(
+            id: diagnosticID,
+            workspaceRootName: diagnosticWorkspaceRootName,
+            active: isActive,
+            attached: terminal.window != nil,
+            processRunning: isProcessRunning,
+            firstResponder: terminal.window?.firstResponder === terminal
+        )
     }
 
     func updateScale(_ scale: CGFloat, displayScale: CGFloat) {
@@ -182,6 +196,7 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
     }
 
     func releaseFocusIfNeeded() {
+        shouldFocusWhenAttached = false
         guard let window, window.firstResponder === self else { return }
         window.makeFirstResponder(nil)
     }

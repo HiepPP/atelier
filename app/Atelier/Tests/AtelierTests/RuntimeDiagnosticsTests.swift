@@ -28,6 +28,24 @@ struct RuntimeDiagnosticsTests {
                 selectedFileRelativePath: "Sources/File.swift"
             ),
             editor: RuntimeEditorSnapshot(contentBytes: 42, lineCount: 2),
+            git: GitCommandQueueSnapshot(
+                activeCount: 2,
+                queuedCount: 3,
+                concurrencyLimit: 4,
+                queueCapacity: 64,
+                oldestActiveAgeMs: 250
+            ),
+            fileTree: RuntimeFileTreeSnapshot(
+                relativeRootName: "atelier",
+                rootLoadState: "loaded",
+                rootEntryCount: 12
+            ),
+            terminal: RuntimeTerminalSnapshot(
+                controllerCount: 1,
+                activeControllerCount: 1,
+                attachedControllerCount: 1,
+                firstResponderKind: "terminal"
+            ),
             diagnostics: RuntimeDiagnosticsSnapshot(),
             verdicts: []
         )
@@ -37,6 +55,62 @@ struct RuntimeDiagnosticsTests {
         #expect(!encoded.contains("/Users/"))
         #expect(encoded.contains("\"lastWriteError\" : null"))
         #expect(try JSONDecoder().decode(RuntimeSnapshot.self, from: data) == snapshot)
+    }
+
+    @Test("Git command metrics enforce capacity and active age")
+    func gitCommandMetricsAreBounded() {
+        var state = GitCommandExecutionState(capacity: 2, concurrencyLimit: 1)
+        let first = UUID()
+        let second = UUID()
+        let firstEnqueued = state.enqueue(first)
+        let secondEnqueued = state.enqueue(second)
+        let overflowEnqueued = state.enqueue(UUID())
+        let firstBegan = state.begin(first, at: 10)
+        #expect(firstEnqueued)
+        #expect(secondEnqueued)
+        #expect(!overflowEnqueued)
+        #expect(firstBegan)
+        let snapshot = state.snapshot(at: 10.25)
+        #expect(snapshot.activeCount == 1)
+        #expect(snapshot.queuedCount == 1)
+        #expect(snapshot.oldestActiveAgeMs == 250)
+        state.remove(first)
+        #expect(state.snapshot(at: 11).activeCount == 0)
+    }
+
+    @Test("File tree root metrics are bounded and path-private")
+    func fileTreeRootMetricsAreBounded() {
+        let clock = FakeRuntimeClock(now: 10)
+        let store = RuntimeFileTreeMetricsStore(clock: clock)
+        for index in 0...RuntimeFileTreeMetricsStore.capacity {
+            store.register(rootPath: "/private/workspace/\(index)", relativeRootName: "root-\(index)")
+        }
+        store.loading(rootPath: "/private/workspace/0")
+        clock.value = 10.5
+        var snapshot = store.snapshot(rootPath: "/private/workspace/0")
+        #expect(snapshot.rootLoadState == "loading")
+        #expect(snapshot.rootLoadAgeMs == 500)
+        #expect(snapshot.relativeRootName == "root-0")
+        store.loaded(rootPath: "/private/workspace/0", entryCount: 42)
+        snapshot = store.snapshot(rootPath: "/private/workspace/0")
+        #expect(snapshot.rootLoadState == "loaded")
+        #expect(snapshot.rootEntryCount == 42)
+        #expect(store.snapshot(rootPath: "/private/workspace/64").rootLoadState == "unavailable")
+    }
+
+    @Test("Hidden workspace terminals never become active")
+    func hiddenWorkspaceTerminalActivation() {
+        let tabID = UUID()
+        #expect(TerminalWorkspaceActivationPolicy.isActive(
+            workspaceIsActive: true,
+            selectedID: tabID,
+            tabID: tabID
+        ))
+        #expect(!TerminalWorkspaceActivationPolicy.isActive(
+            workspaceIsActive: false,
+            selectedID: tabID,
+            tabID: tabID
+        ))
     }
 
     @Test("Atomic writer replaces generated JSON")

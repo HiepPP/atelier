@@ -774,6 +774,7 @@ struct WorkspaceView: View {
         TerminalTabs(
             model: terminalTabs,
             agentResponses: session.agentResponses,
+            isWorkspaceActive: isActive,
             isAgentSidecarPresented: session.isAgentSidecarPresented,
             onOpenAgentSidecar: openAgentSidecar,
             onCloseAgentSidecar: closeAgentSidecar

@@ -4,6 +4,7 @@ import Synchronization
 enum GitServiceError: LocalizedError {
     case failed(arguments: [String], code: Int32, message: String)
     case outputRead(String)
+    case busy(limit: Int)
 
     var errorDescription: String? {
         switch self {
@@ -11,7 +12,155 @@ enum GitServiceError: LocalizedError {
             return "git \(arguments.joined(separator: " ")) failed (\(code)): \(message)"
         case .outputRead(let message):
             return "Could not read Git output: \(message)"
+        case .busy(let limit):
+            return "Git command queue is full (limit: \(limit))."
         }
+    }
+}
+
+nonisolated struct GitCommandQueueSnapshot: Codable, Sendable, Equatable {
+    var activeCount = 0
+    var queuedCount = 0
+    var concurrencyLimit = 0
+    var queueCapacity = 0
+    var oldestActiveAgeMs = 0.0
+}
+
+nonisolated struct GitCommandExecutionState: Sendable {
+    private struct Record: Sendable {
+        var startedAt: Double?
+    }
+
+    private var records: [UUID: Record] = [:]
+    let capacity: Int
+    let concurrencyLimit: Int
+
+    init(capacity: Int, concurrencyLimit: Int) {
+        self.capacity = capacity
+        self.concurrencyLimit = concurrencyLimit
+    }
+
+    mutating func enqueue(_ id: UUID) -> Bool {
+        guard records.count < capacity else { return false }
+        records[id] = Record()
+        return true
+    }
+
+    mutating func begin(_ id: UUID, at time: Double) -> Bool {
+        guard records[id] != nil else { return false }
+        records[id]?.startedAt = time
+        return true
+    }
+
+    mutating func remove(_ id: UUID) {
+        records[id] = nil
+    }
+
+    func snapshot(at time: Double) -> GitCommandQueueSnapshot {
+        let starts = records.values.compactMap(\.startedAt)
+        return GitCommandQueueSnapshot(
+            activeCount: starts.count,
+            queuedCount: records.count - starts.count,
+            concurrencyLimit: concurrencyLimit,
+            queueCapacity: capacity,
+            oldestActiveAgeMs: starts.min().map { max(0, time - $0) * 1_000 } ?? 0
+        )
+    }
+}
+
+private nonisolated struct GitCommandCompletionState {
+    var continuation: CheckedContinuation<Data, Error>?
+    var result: Result<Data, Error>?
+}
+
+private nonisolated final class GitCommandCompletion: @unchecked Sendable {
+    private let state = Mutex(GitCommandCompletionState())
+
+    var isFinished: Bool {
+        state.withLock { $0.result != nil }
+    }
+
+    func install(_ continuation: CheckedContinuation<Data, Error>) {
+        let result = state.withLock { state -> Result<Data, Error>? in
+            if let result = state.result { return result }
+            state.continuation = continuation
+            return nil
+        }
+        if let result { continuation.resume(with: result) }
+    }
+
+    func finish(_ result: Result<Data, Error>) {
+        let continuation = state.withLock { state -> CheckedContinuation<Data, Error>? in
+            guard state.result == nil else { return nil }
+            state.result = result
+            defer { state.continuation = nil }
+            return state.continuation
+        }
+        continuation?.resume(with: result)
+    }
+}
+
+nonisolated final class GitCommandExecutor: @unchecked Sendable {
+    static let shared = GitCommandExecutor()
+    static let concurrencyLimit = 4
+    static let queueCapacity = 64
+
+    private let operations: OperationQueue
+    private let clock: RuntimeMonotonicClock
+    private let state = Mutex(GitCommandExecutionState(
+        capacity: queueCapacity,
+        concurrencyLimit: concurrencyLimit
+    ))
+
+    init(clock: RuntimeMonotonicClock = SystemRuntimeMonotonicClock()) {
+        self.clock = clock
+        operations = OperationQueue()
+        operations.name = "app.atelier.git-commands"
+        operations.qualityOfService = .userInitiated
+        operations.maxConcurrentOperationCount = Self.concurrencyLimit
+    }
+
+    func execute(
+        arguments: [String],
+        workspacePath: String,
+        maxOutputBytes: Int?,
+        allowedExitCodes: Set<Int32>
+    ) async throws -> Data {
+        let id = UUID()
+        let command = GitCommand()
+        let completion = GitCommandCompletion()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                completion.install(continuation)
+                guard !completion.isFinished else { return }
+                guard state.withLock({ $0.enqueue(id) }) else {
+                    completion.finish(.failure(GitServiceError.busy(limit: Self.queueCapacity)))
+                    return
+                }
+                operations.addOperation { [self] in
+                    guard state.withLock({ $0.begin(id, at: clock.now()) }) else { return }
+                    defer { state.withLock { $0.remove(id) } }
+                    do {
+                        completion.finish(.success(try command.run(
+                            arguments: arguments,
+                            workspacePath: workspacePath,
+                            maxOutputBytes: maxOutputBytes,
+                            allowedExitCodes: allowedExitCodes
+                        )))
+                    } catch {
+                        completion.finish(.failure(error))
+                    }
+                }
+            }
+        } onCancel: {
+            command.cancel()
+            state.withLock { $0.remove(id) }
+            completion.finish(.failure(CancellationError()))
+        }
+    }
+
+    func snapshot() -> GitCommandQueueSnapshot {
+        state.withLock { $0.snapshot(at: clock.now()) }
     }
 }
 
@@ -113,6 +262,11 @@ nonisolated final class GitCommand: Sendable {
             return $0.isCancelled
         }
 
+        if shouldCancel {
+            clear(process)
+            throw CancellationError()
+        }
+
         do {
             try process.run()
         } catch {
@@ -120,7 +274,7 @@ nonisolated final class GitCommand: Sendable {
             throw error
         }
         let cancelledAfterLaunch = state.withLock { $0.isCancelled }
-        if shouldCancel || cancelledAfterLaunch { process.terminate() }
+        if cancelledAfterLaunch { process.terminate() }
 
         let outputBox = GitOutputBox()
         let errorBox = GitOutputBox()
@@ -258,19 +412,12 @@ nonisolated final class GitService: Sendable {
         maxOutputBytes: Int? = nil,
         allowedExitCodes: Set<Int32> = [0]
     ) async throws -> Data {
-        let command = GitCommand()
-        return try await withTaskCancellationHandler {
-            try await Task.detached(priority: .userInitiated) {
-                try command.run(
-                    arguments: arguments,
-                    workspacePath: workspacePath,
-                    maxOutputBytes: maxOutputBytes,
-                    allowedExitCodes: allowedExitCodes
-                )
-            }.value
-        } onCancel: {
-            command.cancel()
-        }
+        try await GitCommandExecutor.shared.execute(
+            arguments: arguments,
+            workspacePath: workspacePath,
+            maxOutputBytes: maxOutputBytes,
+            allowedExitCodes: allowedExitCodes
+        )
     }
 
     func stage(path: String, workspacePath: String) async throws {

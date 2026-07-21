@@ -702,6 +702,10 @@ Atelier exposes a terminal-first Runtime Probe for causal runtime evidence. Diag
 - Write schema-versioned snapshots atomically to the bundle cache at `Runtime/current/snapshot.json` no more than once per second.
 - Keep process sampling, heartbeat evaluation, snapshot encoding, mailbox polling, and file writes off the main thread.
 - Read workspace, tab, editor, and AppKit geometry only on `MainActor`. Transfer immutable `Sendable` snapshots to the diagnostics worker.
+- Run blocking Git subprocess waits on a bounded dedicated executor, never on Swift's cooperative executor. Report active count, queued count, concurrency limit, and oldest active age.
+- Report the selected file-tree root load state, direct entry count, load age, and a sanitized error code. Never expose absolute paths or raw error text.
+- Keep terminal controller metrics bounded. Report diagnostic ownership, active and attached state, process state, selected controller, and first-responder identity without terminal output.
+- A terminal may become first responder only when its tab is selected in the active workspace. Hidden workspaces must keep native terminals mounted but inactive and release terminal focus.
 - Allow one outstanding main-thread heartbeat. Never queue heartbeat work while an earlier ping remains pending.
 - Reuse `ProcessMetrics` and the watchdog sample cadence. Never run two process samplers concurrently.
 - Keep the flight recorder at 512 events. Aggregate scroll counters into one-second windows instead of recording each frame.

@@ -1076,9 +1076,16 @@ struct AtelierTabCommands: Commands {
     }
 }
 
+nonisolated enum TerminalWorkspaceActivationPolicy {
+    static func isActive(workspaceIsActive: Bool, selectedID: UUID?, tabID: UUID) -> Bool {
+        workspaceIsActive && selectedID == tabID
+    }
+}
+
 struct TerminalTabs: View {
     @Bindable var model: TerminalTabsModel
     @Bindable var agentResponses: AgentResponsesModel
+    let isWorkspaceActive: Bool
     let isAgentSidecarPresented: Bool
     let onOpenAgentSidecar: () -> Void
     let onCloseAgentSidecar: () -> Void
@@ -1298,7 +1305,11 @@ struct TerminalTabs: View {
             ZStack {
                 ForEach(model.visibleTabs) { tab in
                     if case .terminal(let session) = tab.content {
-                        let isActive = model.selectedID == tab.id
+                        let isActive = TerminalWorkspaceActivationPolicy.isActive(
+                            workspaceIsActive: isWorkspaceActive,
+                            selectedID: model.selectedID,
+                            tabID: tab.id
+                        )
                         TerminalAgentSidecar(
                             session: session,
                             tabID: tab.id,

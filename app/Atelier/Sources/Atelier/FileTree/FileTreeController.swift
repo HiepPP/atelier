@@ -20,6 +20,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     private var loadTasks: [URL: Task<Void, Never>] = [:]
     private var contextMenuTarget: URL?
     private var contextMenuItem: FileTreeNode?
+    private var diagnosticRootPath: String
 
     init(
         rootURL: URL,
@@ -34,6 +35,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         onOpen: @escaping (URL) -> Void
     ) {
         root = FileTreeNode(url: rootURL, isDirectory: true)
+        diagnosticRootPath = rootURL.standardizedFileURL.path
         self.ignoredPaths = FileTreeGitIgnorePresentation.normalized(ignoredPaths)
         self.onTargetDirectoryChange = onTargetDirectoryChange
         self.onCreateItem = onCreateItem
@@ -43,6 +45,11 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         self.onPasteRelativePath = onPasteRelativePath
         self.onPreview = onPreview
         self.onOpen = onOpen
+        super.init()
+        RuntimeFileTreeMetricsStore.shared.register(
+            rootPath: diagnosticRootPath,
+            relativeRootName: rootURL.lastPathComponent
+        )
     }
 
     func makeView(scale: CGFloat, displayScale: CGFloat) -> NSScrollView {
@@ -119,7 +126,13 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         self.onOpen = onOpen
         if root.url != rootURL {
             cancelLoads()
+            RuntimeFileTreeMetricsStore.shared.unregister(rootPath: diagnosticRootPath)
             root = FileTreeNode(url: rootURL, isDirectory: true)
+            diagnosticRootPath = rootURL.standardizedFileURL.path
+            RuntimeFileTreeMetricsStore.shared.register(
+                rootPath: diagnosticRootPath,
+                relativeRootName: rootURL.lastPathComponent
+            )
             self.revision = revision
             outlineView?.reloadData()
             outlineView?.expandItem(root)
@@ -145,6 +158,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
 
     func stop() {
         cancelLoads()
+        RuntimeFileTreeMetricsStore.shared.unregister(rootPath: diagnosticRootPath)
         (outlineView as? FileTreeOutlineView)?.menuProvider = nil
         outlineView?.dataSource = nil
         outlineView?.delegate = nil
@@ -389,6 +403,11 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         let isInitialLoad = node.children == nil
         guard node.beginLoading() else { return }
         let url = node.url
+        let isRootLoad = node === root
+        let diagnosticRootPath = self.diagnosticRootPath
+        if isRootLoad {
+            RuntimeFileTreeMetricsStore.shared.loading(rootPath: diagnosticRootPath)
+        }
         AppLogger.fileTree.debug("Loading directory: \(url.lastPathComponent, privacy: .public)")
         loadTasks[url]?.cancel()
         loadTasks[url] = Task { [weak self, weak node] in
@@ -397,6 +416,12 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
                 let entries = try await service.children(of: url)
                 guard !Task.isCancelled, node.url == url else { return }
                 let changed = node.apply(entries)
+                if isRootLoad {
+                    RuntimeFileTreeMetricsStore.shared.loaded(
+                        rootPath: diagnosticRootPath,
+                        entryCount: entries.count
+                    )
+                }
                 AppLogger.fileTree.debug(
                     "Loaded \(entries.count) entries from \(url.lastPathComponent, privacy: .public)"
                 )
@@ -407,6 +432,9 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
                 return
             } catch {
                 node.failLoading()
+                if isRootLoad {
+                    RuntimeFileTreeMetricsStore.shared.failed(rootPath: diagnosticRootPath)
+                }
                 AppLogger.fileTree.error("File tree load failed: \(error.localizedDescription, privacy: .public)")
                 reload(node, isInitialLoad: isInitialLoad)
             }
