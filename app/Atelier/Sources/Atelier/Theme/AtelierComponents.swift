@@ -213,22 +213,27 @@ struct AtelierWorkspaceRailBackground: View {
 }
 
 /// Standard panel header: icon, title, optional mono subtitle, trailing controls.
-/// One height, one background, one hairline for every panel in the app.
+/// One height, one background for every panel in the app. The bottom hairline is
+/// shown by default; callers with a scroll surface can drive `bottomDividerVisible`
+/// so it reveals only once content scrolls under the header.
 struct AtelierPanelHeader<Trailing: View>: View {
     let title: String
     var subtitle: String?
     var systemImage: String?
+    var bottomDividerVisible: Bool
     @ViewBuilder var trailing: () -> Trailing
 
     init(
         title: String,
         subtitle: String? = nil,
         systemImage: String? = nil,
+        bottomDividerVisible: Bool = true,
         @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }
     ) {
         self.title = title
         self.subtitle = subtitle
         self.systemImage = systemImage
+        self.bottomDividerVisible = bottomDividerVisible
         self.trailing = trailing
     }
 
@@ -278,6 +283,8 @@ struct AtelierPanelHeader<Trailing: View>: View {
             Rectangle()
                 .fill(AtelierTheme.border)
                 .frame(height: AtelierTheme.strokeHairline)
+                .opacity(bottomDividerVisible ? 1 : 0)
+                .animation(.easeInOut(duration: 0.15), value: bottomDividerVisible)
         }
         .accessibilityElement(children: .contain)
     }

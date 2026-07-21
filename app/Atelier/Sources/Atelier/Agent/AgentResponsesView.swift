@@ -26,6 +26,7 @@ struct AgentResponsesView: View {
     let profileScrollCycles: Int
 
     @State private var selectedResponseID: AgentResponseReadIdentity?
+    @State private var transcriptScrolled = false
 
     init(
         model: AgentResponsesModel,
@@ -131,6 +132,8 @@ struct AgentResponsesView: View {
             Rectangle()
                 .fill(AtelierTheme.border)
                 .frame(height: AtelierTheme.strokeHairline)
+                .opacity(transcriptScrolled ? 1 : 0)
+                .animation(.easeInOut(duration: 0.15), value: transcriptScrolled)
         }
     }
 
@@ -217,6 +220,11 @@ struct AgentResponsesView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.editor)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y > 0.5
+            } action: { _, scrolled in
+                transcriptScrolled = scrolled
+            }
             .task(id: selectedResponse?.readIdentity) {
                 guard profileScrollCycles > 0, selectedResponse != nil else { return }
                 for _ in 0..<profileScrollCycles {

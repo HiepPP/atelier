@@ -3,6 +3,7 @@ import SwiftUI
 struct AtelierSettingsView: View {
     @AppStorage(ResourceWatchdog.settingsKey) private var watchdogEnabled = true
     @Environment(AtelierZoomModel.self) private var zoom
+    @State private var contentScrolled = false
 
     var body: some View {
         @Bindable var zoom = zoom
@@ -10,7 +11,8 @@ struct AtelierSettingsView: View {
             AtelierPanelHeader(
                 title: "Settings",
                 subtitle: "Interface and system behavior",
-                systemImage: "gearshape"
+                systemImage: "gearshape",
+                bottomDividerVisible: contentScrolled
             )
 
             ScrollView {
@@ -56,6 +58,11 @@ struct AtelierSettingsView: View {
                     }
                 }
                 .padding(AtelierMetrics.spaceL)
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y > 0.5
+            } action: { _, scrolled in
+                contentScrolled = scrolled
             }
         }
         .background(AtelierTheme.canvas)

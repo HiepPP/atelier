@@ -446,7 +446,11 @@ struct DiffView: View {
                         DiffLineView(line: line, colorScheme: colorScheme)
                     }
                 }
-                .frame(minWidth: geometry.size.width, alignment: .leading)
+                .frame(
+                    minWidth: geometry.size.width,
+                    minHeight: geometry.size.height,
+                    alignment: .topLeading
+                )
             }
             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.code)
         }

@@ -61,7 +61,7 @@ struct GemmaAgentView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: AtelierMetrics.spaceL) {
+                LazyVStack(alignment: .leading, spacing: AtelierMetrics.spaceL) {
                     if model.messages.isEmpty {
                         emptyState
                     }
