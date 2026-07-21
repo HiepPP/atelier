@@ -299,6 +299,21 @@ struct AtelierTests {
         #expect(!GitCommitPolicy.shouldStageAll(status: staged))
     }
 
+    @Test("Git subprocess finds user-installed command-line tools")
+    func gitProcessEnvironment() {
+        let environment = GitProcessEnvironment.configured(from: [
+            "HOME": "/Users/tester",
+            "PATH": "/usr/bin:/custom/bin:/usr/local/bin",
+            "SSH_AUTH_SOCK": "/tmp/agent.sock"
+        ])
+
+        #expect(
+            environment["PATH"]
+                == "/usr/bin:/custom/bin:/usr/local/bin:/opt/homebrew/bin:/Users/tester/.local/bin"
+        )
+        #expect(environment["SSH_AUTH_SOCK"] == "/tmp/agent.sock")
+    }
+
     @Test("Gemma commit message uses changed file paths without tools")
     func gitCommitMessageGeneration() async throws {
         let client = ScriptedOllamaClient(
@@ -332,6 +347,20 @@ struct AtelierTests {
             - app/Atelier/Sources/Atelier/Git/ChangesView.swift
             """
         )
+    }
+
+    @Test("Git commit message generation times out and cancels transport")
+    func gitCommitMessageTimeout() async {
+        let client = ScriptedOllamaClient(responses: [.waiting])
+        let generator = GitCommitMessageGenerator(
+            client: client,
+            timeout: .milliseconds(20)
+        )
+
+        await #expect(throws: GitCommitMessageError.timedOut) {
+            _ = try await generator.generate(paths: ["README.md"])
+        }
+        #expect(await client.cancelCount == 1)
     }
 
     @Test("Git push generates a message, commits all changes, and pushes")

@@ -493,6 +493,8 @@ Persistence boundaries:
   selected changes, then push the current branch.
 - Show progress across generation, staging, commit, and push. Disable duplicate generation and
   push while the pipeline runs.
+- Stop commit-message generation after 30 seconds. Restore the idle Push state and show a
+  retryable error without staging, committing, or pushing.
 - Open file diffs as center tabs, not inside the Git sidebar.
 - Use semantic green, orange, red, and teal only for Git meaning.
 - Keep diff line numbers in a fixed 48-point gutter.

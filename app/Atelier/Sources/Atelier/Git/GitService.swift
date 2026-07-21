@@ -64,6 +64,29 @@ private nonisolated struct GitCommandState {
     var isCancelled = false
 }
 
+nonisolated enum GitProcessEnvironment {
+    private static let standardToolDirectories = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin"
+    ]
+
+    static func configured(from base: [String: String]) -> [String: String] {
+        var environment = base
+        var paths = (base["PATH"] ?? "")
+            .split(separator: ":", omittingEmptySubsequences: true)
+            .map(String.init)
+        var toolDirectories = standardToolDirectories
+        if let home = base["HOME"], !home.isEmpty {
+            toolDirectories.append("\(home)/.local/bin")
+        }
+        for directory in toolDirectories where !paths.contains(directory) {
+            paths.append(directory)
+        }
+        environment["PATH"] = paths.joined(separator: ":")
+        return environment
+    }
+}
+
 nonisolated final class GitCommand: Sendable {
     private let state = Mutex(GitCommandState())
 
@@ -79,6 +102,9 @@ nonisolated final class GitCommand: Sendable {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = arguments
         process.currentDirectoryURL = URL(fileURLWithPath: workspacePath, isDirectory: true)
+        process.environment = GitProcessEnvironment.configured(
+            from: ProcessInfo.processInfo.environment
+        )
         process.standardOutput = output
         process.standardError = errorOutput
 

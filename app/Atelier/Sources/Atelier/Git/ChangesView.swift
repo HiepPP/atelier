@@ -84,26 +84,58 @@ nonisolated enum GitPushPhase: Equatable {
     }
 }
 
+nonisolated enum GitCommitMessageError: LocalizedError, Equatable, Sendable {
+    case timedOut
+
+    var errorDescription: String? {
+        "Ollama took too long to generate a commit message. Try again."
+    }
+}
+
 actor GitCommitMessageGenerator {
     private let client: any OllamaChatStreaming
+    private let timeout: Duration
 
-    init(client: any OllamaChatStreaming = OllamaCloudClient()) {
+    init(
+        client: any OllamaChatStreaming = OllamaCloudClient(),
+        timeout: Duration = .seconds(30)
+    ) {
         self.client = client
+        self.timeout = timeout
     }
 
     func generate(paths: [String]) async throws -> String {
         let request = GitCommitPolicy.generationRequest(paths: paths)
-        let stream = await client.stream(request: request)
-        var response = ""
-        for try await chunk in stream {
-            if let content = chunk.message?.content {
-                response.append(content)
+        let client = client
+        do {
+            return try await withThrowingTaskGroup(of: String.self) { group in
+                group.addTask {
+                    let stream = await client.stream(request: request)
+                    var response = ""
+                    for try await chunk in stream {
+                        if let content = chunk.message?.content {
+                            response.append(content)
+                        }
+                    }
+                    guard let message = GitCommitPolicy.normalizedGeneratedMessage(response) else {
+                        throw GemmaAgentRuntimeError.emptyResponse
+                    }
+                    return message
+                }
+                group.addTask { [timeout] in
+                    try await Task.sleep(for: timeout)
+                    throw GitCommitMessageError.timedOut
+                }
+                guard let message = try await group.next() else {
+                    throw GemmaAgentRuntimeError.emptyResponse
+                }
+                group.cancelAll()
+                return message
             }
+        } catch GitCommitMessageError.timedOut {
+            await client.cancel()
+            throw GitCommitMessageError.timedOut
         }
-        guard let message = GitCommitPolicy.normalizedGeneratedMessage(response) else {
-            throw GemmaAgentRuntimeError.emptyResponse
-        }
-        return message
     }
 
     func cancel() async {
