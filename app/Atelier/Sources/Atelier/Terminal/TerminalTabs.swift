@@ -1413,6 +1413,7 @@ struct TerminalTabs: View {
             Button("Close Terminal", role: .destructive) {
                 model.confirmTerminalClose(id: confirmation.id)
             }
+            .keyboardShortcut(.defaultAction)
         } message: { confirmation in
             Text("\(confirmation.title) is still running. Closing it will stop its process.")
         }
