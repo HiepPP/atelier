@@ -1008,13 +1008,10 @@ struct TerminalTabs: View {
                         ForEach(model.visibleTabs) { tab in
                             ZStack(alignment: .leading) {
                                 Button {
-                                    withAnimation(
-                                        reduceMotion
-                                            ? nil
-                                            : .spring(response: 0.28, dampingFraction: 0.84)
-                                    ) {
-                                        model.select(tab)
-                                    }
+                                    // Instant switch: no animation on selection so the
+                                    // content ZStack swaps the editor immediately instead
+                                    // of cross-fading over the spring duration.
+                                    model.select(tab)
                                 } label: {
                                     HStack(spacing: AtelierMetrics.spaceS) {
                                         Image(systemName: tab.systemImage)
