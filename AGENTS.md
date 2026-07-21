@@ -115,18 +115,31 @@ These rules come from a shipped crash: zooming the window crossed a width breakp
 
 ## Testing Guidelines
 
-Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swift` for packaged binary checks. Every change must pass build, tests, and self-test. UI changes also require native checks at narrow and wide window sizes. Record exact failures and screenshots when relevant.
+Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swift` for packaged binary checks. Every change must pass build, tests, and self-test. Run native UI checks with Atelier's window zoomed to full size by default. Do not test every window size. Record exact failures and screenshots when relevant.
 
 ### Test Scope and UI Automation
 
-- Keep verification proportional to the change and its runtime risk. Start with targeted deterministic checks, then run the required full gates once.
-- Define the exact UI states and evidence needed before starting automation. Stop when those acceptance points are covered.
-- For native terminal, editor, web, or Metal surfaces, define a visible content sentinel before testing. The sentinel must remain visible after every transition; a selected tab, live process, or blank surface is not proof of success.
-- Confirm the target app, process, and window before every automated UI input. If another app becomes active, stop immediately and return to the target without interacting with the other app.
-- Use one controlled capture path for visual proof. After one capture method fails, switch methods once or report the limitation instead of retrying indefinitely.
-- Timebox UI automation. Run each acceptance path once by default, stop when evidence is sufficient, and repeat only for intermittent behavior or a failed pass.
-- Do not repeat builds, tests, self-tests, or launch scripts unless code changed or the prior result was incomplete.
-- Separate product failures from automation, environment, window-focus, and capture failures in the final report.
+- Keep verification proportional to changed behavior and runtime risk. Prove non-visual behavior with CLI checks first.
+- Define at most three acceptance points before launching the app. Each point needs a start state, one action, a visible sentinel, and the expected result.
+- Run one shortest path at full window size. Add another size only when the request or bug explicitly depends on resize or a breakpoint.
+- Launch the app once after deterministic checks pass. Do not repeat builds, tests, self-tests, or launch scripts without new code.
+- Stop when acceptance evidence is complete. Repeat only after a failed pass or for a known intermittent bug.
+- Separate product failures from automation, environment, focus, and capture failures in the final report.
+
+### Computer Use Fast Path
+
+- Use `$computer-use:computer-use` only for behavior that requires native UI interaction. Use shell commands for process, logs, CPU, crash reports, builds, and tests.
+- Keep one persistent `node_repl` session. Initialize Computer Use once, then target Atelier directly with bundle identifier `app.atelier.Atelier`.
+- Call `get_app_state` once before each acceptance path. Use the default accessibility-tree diff; request a full tree only when prior context is missing.
+- Prefer accessibility text and `element_index` actions. Capture a screenshot only for visual evidence or when accessibility data is insufficient.
+- Batch deterministic actions until the next decision point, then inspect state once. Do not inspect after every click, key, or text entry.
+- Re-read state after UI changes and derive fresh element indexes. Never reuse an index from an older tree.
+- Confirm app and window identity at path start and after any app switch. Do not re-confirm before every input while the same verified window stays active.
+- Do not add manual sleeps. The runtime already waits after actions. If state looks stale, refresh once.
+- On failure, retry once with fresh state. If direct targeting fails, call `list_apps` once and retry with its identifier. Then allow one screenshot-based coordinate action.
+- For blank titlebar or custom chrome, refresh accessibility state and target an accessible title or control first. Coordinates are last resort.
+- Default budget per acceptance path: five minutes, six state reads, one screenshot, and one retry per failed action. Report why before exceeding it.
+- Keep final proof compact: tested path, visible sentinel, result, and console or crash status. Do not include raw accessibility trees or action transcripts.
 - Prefer read-only system checks. Change accessibility or system settings only when required, then restore the original value.
 
 ## Commit & Pull Request Guidelines
