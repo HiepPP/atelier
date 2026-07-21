@@ -1109,15 +1109,34 @@ struct TerminalTabs: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
+                    ZStack(alignment: .topLeading) {
                         ForEach(model.visibleTabs) { tab in
-                            ZStack(alignment: .leading) {
-                                Button {
-                                    // Instant switch: no animation on selection so the
-                                    // content ZStack swaps the editor immediately instead
-                                    // of cross-fading over the spring duration.
-                                    model.select(tab)
-                                } label: {
+                            if let frame = tabFrames[tab.id] {
+                                RoundedRectangle(
+                                    cornerRadius: AtelierTheme.rowRadius,
+                                    style: .continuous
+                                )
+                                .fill(tabBackground(tab))
+                                .frame(
+                                    width: max(0, frame.width - 6),
+                                    height: max(0, frame.height - 10)
+                                )
+                                .offset(x: frame.minX + 3, y: frame.minY + 5)
+                            }
+                        }
+
+                        if let selectedID = model.selectedID,
+                           let frame = tabFrames[selectedID]?.insetBy(dx: 3, dy: 5) {
+                            AtelierMovingGlassIndicator(
+                                frame: frame,
+                                tint: AtelierTheme.chromeSelection.opacity(0.5),
+                                fallbackFill: AtelierTheme.chromeSelection
+                            )
+                        }
+
+                        HStack(spacing: 0) {
+                            ForEach(model.visibleTabs) { tab in
+                                ZStack(alignment: .leading) {
                                     HStack(spacing: AtelierMetrics.spaceS) {
                                         Image(systemName: tab.systemImage)
                                             .atelierFont(size: AtelierTypography.caption)
@@ -1142,88 +1161,89 @@ struct TerminalTabs: View {
                                         maxWidth: AtelierMetrics.tabMaxWidth
                                     )
                                     .frame(height: AtelierMetrics.tabBarHeight - 10)
-                                    .contentShape(Rectangle())
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityValue(
-                                    tabAccessibilityValue(tab)
+                                .foregroundStyle(
+                                    model.selectedID == tab.id
+                                        ? AtelierTheme.chromeSelectionInk
+                                        : Color.secondary
                                 )
-
-                                if model.canClose(tab) {
-                                    TabCloseButton(help: tab.closeHelp) {
-                                        model.requestClose(tab)
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 5)
+                                .overlay {
+                                    Button {
+                                        model.select(tab)
+                                    } label: {
+                                        Color.clear
+                                            .contentShape(Rectangle())
                                     }
-                                    .opacity(
-                                        model.selectedID == tab.id || hoveredTabID == tab.id
-                                            ? 1
-                                            : 0
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(tab.title)
+                                    .accessibilityValue(tabAccessibilityValue(tab))
+                                }
+                                .overlay(alignment: .leading) {
+                                    if model.canClose(tab) {
+                                        TabCloseButton(help: tab.closeHelp) {
+                                            model.requestClose(tab)
+                                        }
+                                        .padding(.leading, 3)
+                                        .opacity(
+                                            model.selectedID == tab.id || hoveredTabID == tab.id
+                                                ? 1
+                                                : 0
+                                        )
+                                    }
+                                }
+                                .contentShape(Rectangle())
+                                .atelierPointerCursor()
+                                .onHover { isHovering in
+                                    hoveredTabID = isHovering ? tab.id : nil
+                                }
+                                .background {
+                                    GeometryReader { proxy in
+                                        Color.clear.preference(
+                                            key: TabFramePreferenceKey.self,
+                                            value: [tab.id: proxy.frame(in: .named("tabStrip"))]
+                                        )
+                                    }
+                                }
+                                .highPriorityGesture(
+                                    DragGesture(
+                                        minimumDistance: 6,
+                                        coordinateSpace: .named("tabStrip")
                                     )
-                                }
-                            }
-                            .foregroundStyle(
-                                model.selectedID == tab.id
-                                    ? AtelierTheme.chromeSelectionInk
-                                    : Color.secondary
-                            )
-                            .background(
-                                tabBackground(tab),
-                                in: RoundedRectangle(
-                                    cornerRadius: AtelierTheme.rowRadius,
-                                    style: .continuous
+                                    .onChanged { value in
+                                        reorderTab(tab.id, at: value.location)
+                                    }
+                                    .onEnded { _ in
+                                        draggedTabID = nil
+                                        lastReorderTargetID = nil
+                                    }
                                 )
-                            )
-                            .atelierSelectionGlass(
-                                isSelected: model.selectedID == tab.id,
-                                tint: AtelierTheme.chromeSelection.opacity(0.5),
-                                fallbackFill: AtelierTheme.chromeSelection,
-                                in: RoundedRectangle(
-                                    cornerRadius: AtelierTheme.rowRadius,
-                                    style: .continuous
-                                )
-                            )
-                            .padding(.horizontal, 3)
-                            .padding(.vertical, 5)
-                            .contentShape(Rectangle())
-                            .atelierPointerCursor()
-                            .onHover { isHovering in
-                                hoveredTabID = isHovering ? tab.id : nil
-                            }
-                            .background {
-                                GeometryReader { proxy in
-                                    Color.clear.preference(
-                                        key: TabFramePreferenceKey.self,
-                                        value: [tab.id: proxy.frame(in: .named("tabStrip"))]
-                                    )
-                                }
-                            }
-                            .highPriorityGesture(
-                                DragGesture(
-                                    minimumDistance: 6,
-                                    coordinateSpace: .named("tabStrip")
-                                )
-                                .onChanged { value in
-                                    reorderTab(tab.id, at: value.location)
-                                }
-                                .onEnded { _ in
-                                    draggedTabID = nil
-                                    lastReorderTargetID = nil
-                                }
-                            )
-                            .contextMenu {
-                                Button("Rename Tab...") {
-                                    beginRename(tab.id)
-                                }
-                                if model.canClose(tab) {
-                                    Divider()
-                                    Button("Close Tab") {
-                                        model.requestClose(tab)
+                                .contextMenu {
+                                    Button("Rename Tab...") {
+                                        beginRename(tab.id)
+                                    }
+                                    if model.canClose(tab) {
+                                        Divider()
+                                        Button("Close Tab") {
+                                            model.requestClose(tab)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                    .coordinateSpace(name: "tabStrip")
-                    .onPreferenceChange(TabFramePreferenceKey.self) { tabFrames = $0 }
+                    .coordinateSpace(.named("tabStrip"))
+                    .onPreferenceChange(TabFramePreferenceKey.self) { frames in
+                        guard tabFrames != frames else { return }
+                        Task { @MainActor in
+                            guard tabFrames != frames else { return }
+                            tabFrames = frames
+                        }
+                    }
+                    .clipped()
                 }
                 .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.chrome)
 

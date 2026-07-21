@@ -40,12 +40,6 @@ private struct WorkspaceSidebarTabButtonStyle: ButtonStyle {
                 tabFill(isPressed: configuration.isPressed),
                 in: RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
             )
-            .atelierSelectionGlass(
-                isSelected: isSelected,
-                tint: AtelierTheme.chromeSelection.opacity(0.5),
-                fallbackFill: AtelierTheme.chromeSelection,
-                in: RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
-            )
             .padding(.horizontal, AtelierMetrics.spaceXS)
             .padding(.vertical, 4)
             .frame(height: AtelierMetrics.panelHeaderHeight)
@@ -652,6 +646,7 @@ struct WorkspaceView: View {
     @State private var fileTreeTargetDirectory: URL?
     @State private var responderBeforeAgentPreview: NSResponder?
     @State private var selectedSidebarTab = WorkspaceSidebarTab.explorer
+    @State private var sidebarTabFrames: [WorkspaceSidebarTab: CGRect] = [:]
 
     var body: some View {
         GeometryReader { outerGeometry in
@@ -784,6 +779,28 @@ struct WorkspaceView: View {
             idealWidth: AtelierMetrics.centerIdealWidth
         )
         .layoutPriority(2)
+        .overlay(alignment: .leading) {
+            if chrome.panels.showsSidebar && !zoom.isFocusMode {
+                LinearGradient(
+                    colors: [AtelierTheme.panelEdgeShadow, .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                    .frame(width: AtelierMetrics.spaceM / 2)
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .trailing) {
+            if chrome.panels.showsInspector && !zoom.isFocusMode {
+                LinearGradient(
+                    colors: [.clear, AtelierTheme.panelEdgeShadow],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                    .frame(width: AtelierMetrics.spaceM / 2)
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     private func openAgentSidecar() {
@@ -805,17 +822,51 @@ struct WorkspaceView: View {
 
     private var workspaceSidebar: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(WorkspaceSidebarTab.allCases) { tab in
-                    WorkspaceSidebarTabButton(
-                        tab: tab,
-                        isSelected: selectedSidebarTab == tab,
-                        gitModel: gitModel
-                    ) {
-                        selectedSidebarTab = tab
+            ZStack(alignment: .topLeading) {
+                if let frame = sidebarTabFrames[selectedSidebarTab]?.insetBy(
+                    dx: AtelierMetrics.spaceXS,
+                    dy: 4
+                ) {
+                    AtelierMovingGlassIndicator(
+                        frame: frame,
+                        tint: AtelierTheme.chromeSelection.opacity(0.5),
+                        fallbackFill: AtelierTheme.chromeSelection
+                    )
+                }
+
+                HStack(spacing: 0) {
+                    ForEach(WorkspaceSidebarTab.allCases) { tab in
+                        WorkspaceSidebarTabButton(
+                            tab: tab,
+                            isSelected: selectedSidebarTab == tab,
+                            gitModel: gitModel
+                        ) {
+                            selectedSidebarTab = tab
+                        }
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: WorkspaceSidebarTabFramePreferenceKey.self,
+                                    value: [
+                                        tab: proxy.frame(
+                                            in: .named("workspaceSidebarTabs")
+                                        )
+                                    ]
+                                )
+                            }
+                        }
                     }
                 }
             }
+            .coordinateSpace(.named("workspaceSidebarTabs"))
+            .onPreferenceChange(WorkspaceSidebarTabFramePreferenceKey.self) { frames in
+                guard sidebarTabFrames != frames else { return }
+                Task { @MainActor in
+                    guard sidebarTabFrames != frames else { return }
+                    sidebarTabFrames = frames
+                }
+            }
+            .clipped()
             .frame(height: AtelierMetrics.panelHeaderHeight)
             .background {
                 AtelierChromeBackground()
@@ -1035,6 +1086,17 @@ private struct WorkspaceSidebarTabButton: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .help(tab.rawValue)
         .frame(maxWidth: .infinity)
+    }
+}
+
+private struct WorkspaceSidebarTabFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [WorkspaceSidebarTab: CGRect] = [:]
+
+    static func reduce(
+        value: inout [WorkspaceSidebarTab: CGRect],
+        nextValue: () -> [WorkspaceSidebarTab: CGRect]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
 

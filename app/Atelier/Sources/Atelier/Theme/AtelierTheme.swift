@@ -55,6 +55,7 @@ enum AtelierTheme {
     static let strokeControl: CGFloat = 0.75
     static let strokeFocus: CGFloat = 1.5
     static let shadowSoft = Color(red: 0.18, green: 0.12, blue: 0.08).opacity(0.08)
+    static let panelEdgeShadow = Color(red: 0.18, green: 0.12, blue: 0.08).opacity(0.14)
     static let shadowFloating = Color(red: 0.14, green: 0.09, blue: 0.06).opacity(0.22)
     static let scrim = Color.black.opacity(0.12)
 

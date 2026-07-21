@@ -191,6 +191,7 @@ Atelier uses an 8-point grid with a 4-point half step.
 | `strokeFocus` | 1.5 | Focus ring |
 | `disabledOpacity` | 0.45 | Disabled actions |
 | `inactiveOpacity` | 0.72 | Secondary inactive content |
+| `panelEdgeShadow` | 14% warm black | Directional depth between side panels and center |
 
 Depth rules:
 
@@ -357,6 +358,9 @@ Interaction geometry rules:
   animate every split item whose visibility changes with the same duration.
 - Keep branch, focus state, and zoom in the 26-point status bar.
 - Use thin dividers between sidebar, center, inspector, and status bar.
+- Give the sidebar a very light shadow that extends rightward into the center from its trailing
+  edge. Mirror it leftward from the inspector's leading edge. Use `panelEdgeShadow`; fade each
+  effect across 6 points inside the center pane so split boundaries cannot clip it.
 
 ### Workspace Rail
 
@@ -376,9 +380,10 @@ Interaction geometry rules:
 - Support drag-and-drop reordering within the rail and persist the new order.
 - Give every workspace row a native context menu for activation, Finder, path copy, ordering, and close.
 - A context-menu close targets that item. It must not switch or close the active workspace first.
-- Mark the active workspace with label weight, a brighter neutral shortcut, and a quiet flat
-  selection band.
-  Do not add a checkmark, leading accent bar, border, shadow, or floating-card treatment.
+- Mark the active workspace with label weight, a brighter neutral shortcut, and exactly one glass
+  selection indicator behind the project rows. Move and resize that indicator between measured row
+  frames with the center-tab spring. Keep all row content stationary and clip it to the rail list.
+  Do not add a checkmark, leading accent bar, duplicate glass, or floating-card treatment.
 - Show loading, unavailable, and error accessories without replacing project identity.
 - Keep the full path in help and accessibility text without rendering it in the row.
 - Use rail-specific hover, pressed, focused, selected, and disabled fills so contrast stays stable.
@@ -457,6 +462,9 @@ Persistence boundaries:
 - Render the selected sidebar tab as an inset `rowRadius` rounded pill of translucent `chromeSelection` glass with a
   top-lit hairline highlight. Keep the full header envelope as the hit target. Use
   `chromeSelectionInk` for its label and icon.
+- Render exactly one glass indicator behind the Explorer and Git labels. Move and resize it between
+  measured tab frames with the center-tab spring. Keep tab content stationary, clip the indicator to
+  the header, and never cross-fade or duplicate it.
 - Use one native label line box so each tab icon and title share a baseline.
 - Show the Git change count as a trailing semantic badge that never shifts the centered label.
 - Keep sidebar tab geometry stable across normal, hovered, pressed, selected, and count-change states.
@@ -490,6 +498,10 @@ Persistence boundaries:
 - Render the selected center tab as an inset `rowRadius` rounded pill of translucent `chromeSelection` glass with a
   top-lit hairline highlight. Keep the full strip-cell envelope as the hit target. Use
   `chromeSelectionInk` for its label and icon. Do not add an accent top rule or selection border.
+- Render exactly one glass selection indicator behind the center-tab content. Move and resize it
+  between measured tab frames with a `0.28` response, `0.82` damping spring. Keep labels, icons,
+  close controls, tab geometry, and editor content stationary. Clip the indicator to the tab strip,
+  never cross-fade or duplicate it, and switch it instantly under Reduce Motion.
 - Mark preview with regular label weight and `0.72` opacity. Do not add another icon.
 - Place the close control at the left edge of every closable tab.
 - Show close only on the selected or hovered tab.

@@ -74,6 +74,7 @@ struct WorkspaceRailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var expandedWorkspaceIDs: Set<String> = []
+    @State private var workspaceFrames: [String: CGRect] = [:]
 
     private var expandAnimation: Animation? {
         reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85)
@@ -94,13 +95,36 @@ struct WorkspaceRailView: View {
             .frame(height: AtelierMetrics.sectionHeaderHeight)
 
             ScrollView(.vertical) {
-                LazyVStack(spacing: AtelierMetrics.workspaceRailItemGap) {
-                    ForEach(Array(app.workspaceItems.enumerated()), id: \.element.id) { index, item in
-                        workspaceGroup(index: index, item: item)
+                ZStack(alignment: .topLeading) {
+                    if let selectedID = app.selectedWorkspaceID,
+                       let frame = workspaceFrames[selectedID] {
+                        AtelierMovingGlassIndicator(
+                            frame: frame,
+                            tint: AtelierTheme.workspaceRailSelection.opacity(0.5),
+                            fallbackFill: AtelierTheme.workspaceRailSelection.opacity(0.72)
+                        )
+                    }
+
+                    LazyVStack(spacing: AtelierMetrics.workspaceRailItemGap) {
+                        ForEach(
+                            Array(app.workspaceItems.enumerated()),
+                            id: \.element.id
+                        ) { index, item in
+                            workspaceGroup(index: index, item: item)
+                        }
+                    }
+                    .padding(.horizontal, AtelierMetrics.spaceS)
+                    .padding(.vertical, AtelierMetrics.spaceS)
+                }
+                .coordinateSpace(.named("workspaceRailItems"))
+                .onPreferenceChange(WorkspaceRailFramePreferenceKey.self) { frames in
+                    guard workspaceFrames != frames else { return }
+                    Task { @MainActor in
+                        guard workspaceFrames != frames else { return }
+                        workspaceFrames = frames
                     }
                 }
-                .padding(.horizontal, AtelierMetrics.spaceS)
-                .padding(.vertical, AtelierMetrics.spaceS)
+                .clipped()
             }
             .scrollIndicators(.hidden)
 
@@ -161,6 +185,16 @@ struct WorkspaceRailView: View {
                 isExpanded: isExpanded,
                 onToggleExpand: { toggleExpand(item.id) }
             )
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: WorkspaceRailFramePreferenceKey.self,
+                        value: [
+                            item.id: proxy.frame(in: .named("workspaceRailItems"))
+                        ]
+                    )
+                }
+            }
             if showThreads {
                 ThreadsPanelView(workspaceID: item.id, threads: threads)
                     .padding(.top, 1)
@@ -513,7 +547,7 @@ private struct WorkspaceRailItemButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
                     .fill(
                         isSelected
-                            ? AtelierTheme.workspaceRailSelection.opacity(0.72)
+                            ? Color.clear
                             : AtelierTheme.workspaceRailControlFill(for: interactionState)
                     )
             }
@@ -533,6 +567,14 @@ private struct WorkspaceRailItemButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.99 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
             .atelierPointerCursor()
+    }
+}
+
+private struct WorkspaceRailFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
 

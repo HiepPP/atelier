@@ -113,6 +113,65 @@ extension View {
 
 }
 
+struct AtelierMovingGlassIndicator: View {
+    let frame: CGRect
+    let tint: Color
+    let fallbackFill: Color
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        Group {
+            if reduceTransparency {
+                RoundedRectangle(
+                    cornerRadius: AtelierTheme.rowRadius,
+                    style: .continuous
+                )
+                .fill(fallbackFill)
+                .frame(width: frame.width, height: frame.height)
+            } else {
+                Color.clear
+                    .frame(width: frame.width, height: frame.height)
+                    .glassEffect(
+                        .regular.tint(tint),
+                        in: RoundedRectangle(
+                            cornerRadius: AtelierTheme.rowRadius,
+                            style: .continuous
+                        )
+                    )
+            }
+        }
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: AtelierTheme.rowRadius,
+                style: .continuous
+            )
+            .strokeBorder(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.55),
+                        Color.white.opacity(0.06),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                lineWidth: 1
+            )
+        }
+        .shadow(color: Color.black.opacity(0.12), radius: 3, y: 1)
+        .offset(x: frame.minX, y: frame.minY)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .animation(
+            reduceMotion
+                ? nil
+                : .spring(response: 0.28, dampingFraction: 0.82),
+            value: frame
+        )
+    }
+}
+
 struct AtelierChromeBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
