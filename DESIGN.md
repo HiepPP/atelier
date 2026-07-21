@@ -356,7 +356,9 @@ Interaction geometry rules:
 - Put Gemma, focus mode, and inspector in primary actions.
 - Synchronize the focus control with effective side-panel visibility. Its master transition must
   animate every split item whose visibility changes with the same duration.
-- Keep branch, focus state, and zoom in the 26-point status bar.
+- Keep branch, focus state, estimated LLM tokens for the selected text file, and zoom in the
+  26-point status bar. Place the token estimate immediately before zoom and prefix it with `~`
+  because exact tokenization depends on the selected model.
 - Use thin dividers between sidebar, center, inspector, and status bar.
 - Give the sidebar a very light shadow that extends rightward into the center from its trailing
   edge. Mirror it leftward from the inspector's leading edge. Use `panelEdgeShadow`; fade each

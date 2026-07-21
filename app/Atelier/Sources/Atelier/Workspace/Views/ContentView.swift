@@ -1014,6 +1014,7 @@ struct WorkspaceView: View {
             if zoom.isFocusMode {
                 Text("Focus")
             }
+            FileTokenCountLabel(editor: terminalTabs.selectedEditor)
             Text("\(Int((zoom.scale * 100).rounded()))%")
         }
         .atelierFont(size: AtelierTypography.caption, weight: .medium)
@@ -1027,6 +1028,22 @@ struct WorkspaceView: View {
             Rectangle()
                 .fill(AtelierTheme.border)
                 .frame(height: AtelierTheme.strokeHairline)
+        }
+    }
+}
+
+private struct FileTokenCountLabel: View {
+    let editor: EditorSession?
+
+    var body: some View {
+        if let editor, case .text = editor.content {
+            let tokenCount = LLMTokenEstimator.estimate(
+                byteCount: editor.diagnosticLoadedBytes
+            )
+            Text("~\(tokenCount.formatted()) tokens")
+                .accessibilityLabel("Estimated LLM tokens")
+                .accessibilityValue(tokenCount.formatted())
+                .help("Estimated LLM tokens. Exact count depends on the model.")
         }
     }
 }
