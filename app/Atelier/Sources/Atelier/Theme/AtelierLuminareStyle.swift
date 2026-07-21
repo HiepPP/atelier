@@ -7,17 +7,7 @@ private struct AtelierPointerCursorModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case .active:
-                    (isEnabled ? NSCursor.pointingHand : NSCursor.arrow).set()
-                case .ended:
-                    NSCursor.arrow.set()
-                }
-            }
-            .onDisappear {
-                NSCursor.arrow.set()
-            }
+            .pointerStyle(isEnabled ? .link : .default)
     }
 }
 

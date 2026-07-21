@@ -1081,11 +1081,8 @@ struct TerminalTabs: View {
                             )
                             .padding(.horizontal, 3)
                             .padding(.vertical, 5)
-                            .overlay {
-                                PointingHandCursorRegion()
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            }
                             .contentShape(Rectangle())
+                            .atelierPointerCursor()
                             .onHover { isHovering in
                                 hoveredTabID = isHovering ? tab.id : nil
                             }
@@ -1530,65 +1527,5 @@ private struct TabFramePreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
-private struct PointingHandCursorRegion: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        PointingHandCursorView()
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        nsView.window?.invalidateCursorRects(for: nsView)
-    }
-}
-
-private final class PointingHandCursorView: NSView {
-    private var trackingArea: NSTrackingArea?
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
-    }
-
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
-
-    override func updateTrackingAreas() {
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
-        let trackingArea = NSTrackingArea(
-            rect: .zero,
-            options: [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited, .cursorUpdate],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(trackingArea)
-        self.trackingArea = trackingArea
-        super.updateTrackingAreas()
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        NSCursor.pointingHand.set()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        NSCursor.arrow.set()
-    }
-
-    override func cursorUpdate(with event: NSEvent) {
-        NSCursor.pointingHand.set()
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        window?.invalidateCursorRects(for: self)
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        window?.invalidateCursorRects(for: self)
     }
 }
