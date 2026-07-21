@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Synchronization
 
@@ -174,10 +175,29 @@ nonisolated struct GitCommit: Identifiable, Equatable, Sendable {
     let hash: String
     let shortHash: String
     let author: String
+    let authorEmail: String
     let date: Date
     let subject: String
 
     var id: String { hash }
+
+    var authorAvatarURL: URL? {
+        let email = authorEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !email.isEmpty else { return nil }
+
+        if email.hasSuffix("@users.noreply.github.com"),
+           let localPart = email.split(separator: "@", maxSplits: 1).first {
+            let username = localPart.split(separator: "+").last.map(String.init) ?? ""
+            if !username.isEmpty {
+                return URL(string: "https://github.com/\(username).png?size=96")
+            }
+        }
+
+        let digest = Insecure.MD5.hash(data: Data(email.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return URL(string: "https://www.gravatar.com/avatar/\(digest)?d=404&s=96")
+    }
 }
 
 nonisolated enum GitCommitLogParser {
@@ -190,16 +210,17 @@ nonisolated enum GitCommitLogParser {
             .compactMap { record in
                 let fields = record.split(
                     separator: fieldSeparator,
-                    maxSplits: 4,
+                    maxSplits: 5,
                     omittingEmptySubsequences: false
                 )
-                guard fields.count == 5, let timestamp = Double(fields[3]) else { return nil }
+                guard fields.count == 6, let timestamp = Double(fields[4]) else { return nil }
                 return GitCommit(
                     hash: String(fields[0]),
                     shortHash: String(fields[1]),
                     author: String(fields[2]),
+                    authorEmail: String(fields[3]),
                     date: Date(timeIntervalSince1970: timestamp),
-                    subject: String(fields[4]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    subject: String(fields[5]).trimmingCharacters(in: .whitespacesAndNewlines)
                 )
             }
     }
@@ -414,7 +435,7 @@ nonisolated final class GitService: Sendable {
             arguments: [
                 "log",
                 "--max-count=\(boundedLimit)",
-                "--pretty=format:%H%x1f%h%x1f%an%x1f%at%x1f%s%x1e"
+                "--pretty=format:%H%x1f%h%x1f%an%x1f%ae%x1f%at%x1f%s%x1e"
             ],
             workspacePath: workspacePath,
             maxOutputBytes: 256_000,

@@ -482,9 +482,6 @@ struct ChangesView: View {
     @Environment(AtelierZoomModel.self) private var zoom
     @State private var commitMessage = ""
     @State private var discardCandidate: GitChange?
-    @State private var selectedGroup = SourceControlGroup.changes
-    @State private var changeFilter = ""
-    @State private var isFilteringChanges = false
     @State private var showsAllRecentCommits = false
     @FocusState private var isCommitFieldFocused: Bool
 
@@ -527,7 +524,6 @@ struct ChangesView: View {
                     if model.isLoading, model.snapshot.branch.isEmpty {
                         loadingCard
                     } else {
-                        changeSummary
                         commitInput
                         pushButton
                         changeList
@@ -539,6 +535,7 @@ struct ChangesView: View {
                 .environment(\.atelierZoomScale, zoom.sidebarScale)
             }
             .scrollContentBackground(.hidden)
+            .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.sidebar)
             .background(AtelierTheme.sidebar)
         }
         .background(AtelierTheme.sidebar)
@@ -644,81 +641,15 @@ struct ChangesView: View {
         .accessibilityLabel("Repository \(repositoryName), branch \(currentBranch)")
     }
 
-    private var changeSummary: some View {
-        HStack(spacing: 0) {
-            ForEach(SourceControlGroup.allCases) { group in
-                if group == .changes {
-                    Divider()
-                        .frame(height: 54)
-                }
-
-                Button {
-                    selectedGroup = group
-                } label: {
-                    VStack(spacing: AtelierMetrics.spaceXS) {
-                        Text(group.title)
-                            .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                            .foregroundStyle(summaryColor(for: group))
-                        Text("\(count(for: group))")
-                            .atelierFont(
-                                size: AtelierTypography.title,
-                                weight: .medium,
-                                design: .monospaced
-                            )
-                            .foregroundStyle(summaryColor(for: group))
-                        Capsule()
-                            .fill(
-                                selectedGroup == group
-                                    ? summaryColor(for: group)
-                                    : Color.clear
-                            )
-                            .frame(height: 3)
-                            .padding(.horizontal, AtelierMetrics.spaceM)
-                    }
-                    .padding(.top, AtelierMetrics.spaceM)
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.plain)
-                .atelierPointerCursor()
-                .accessibilityValue(selectedGroup == group ? "Selected" : "Not selected")
-            }
-        }
-        .atelierCard(fill: AtelierTheme.raised.opacity(0.38))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Git change summary")
-    }
-
     private var commitInput: some View {
-        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
-            HStack(spacing: AtelierMetrics.spaceS) {
-                Text("Commit message")
-                    .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                    .foregroundStyle(.secondary)
-
-                Spacer(minLength: 0)
-
-                Button {
-                    generateCommitMessage()
-                } label: {
-                    HStack(spacing: AtelierMetrics.spaceXS) {
-                        if model.isGeneratingCommitMessage {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "sparkles")
-                        }
-                        Text("Gemma")
-                    }
-                }
-                .buttonStyle(AtelierGhostButtonStyle(tint: AtelierTheme.gitOrange))
-                .disabled(!model.canGenerateCommitMessage)
-                .accessibilityLabel("Generate commit message with Gemma")
-                .accessibilityValue(model.isGeneratingCommitMessage ? "Generating" : "Ready")
-                .help("Generate commit message from changed file names")
-            }
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
+            Text("Commit message")
+                .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+                .foregroundStyle(.secondary)
 
             ZStack(alignment: .topLeading) {
                 if commitMessage.isEmpty {
-                    Text("Write a message or generate with Gemma...")
+                    Text("Write a commit message...")
                         .atelierFont(size: AtelierTypography.uiSize)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, AtelierMetrics.spaceS + 2)
@@ -728,42 +659,13 @@ struct ChangesView: View {
 
                 TextEditor(text: $commitMessage)
                     .scrollContentBackground(.hidden)
+                    .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.editor)
                     .atelierFont(size: AtelierTypography.uiSize)
                     .focused($isCommitFieldFocused)
                     .padding(AtelierMetrics.spaceXS)
                     .frame(minHeight: 76, maxHeight: 92)
             }
             .atelierField(isFocused: isCommitFieldFocused)
-
-            HStack(spacing: AtelierMetrics.spaceXS) {
-                Button {
-                    model.stageAll()
-                    selectedGroup = .staged
-                } label: {
-                    Image(systemName: "checklist")
-                }
-                .buttonStyle(AtelierRowIconButtonStyle())
-                .disabled(unstagedCount == 0)
-                .accessibilityLabel("Stage all changes")
-                .help("Stage all changes")
-
-                Button {
-                    commitMessage = ""
-                    isCommitFieldFocused = true
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                }
-                .buttonStyle(AtelierRowIconButtonStyle())
-                .disabled(commitMessage.isEmpty)
-                .accessibilityLabel("Clear commit message")
-                .help("Clear commit message")
-
-                Spacer(minLength: 0)
-
-                Text("⌘ Enter to push")
-                    .atelierFont(size: AtelierTypography.micro, design: .monospaced)
-                    .foregroundStyle(.tertiary)
-            }
 
             if let message = model.commitMessageGenerationError {
                 Text(message)
@@ -772,135 +674,68 @@ struct ChangesView: View {
                     .accessibilityLabel("Gemma error: \(message)")
             }
         }
-        .padding(AtelierMetrics.spaceM)
+        .padding(.horizontal, AtelierMetrics.spaceS)
+        .padding(.vertical, AtelierMetrics.spaceS)
         .atelierCard(fill: AtelierTheme.panel.opacity(0.72))
     }
 
     private var pushButton: some View {
-        HStack(spacing: 1) {
-            Button(action: push) {
-                HStack(spacing: AtelierMetrics.spaceS) {
-                    if model.pushPhase == .idle {
-                        Image(systemName: "arrow.up")
-                    } else {
-                        ProgressView().controlSize(.small)
-                    }
-                    Text(pushLabel)
+        Button(action: push) {
+            HStack(spacing: AtelierMetrics.spaceS) {
+                if model.pushPhase == .idle {
+                    Image(systemName: "arrow.up")
+                } else {
+                    ProgressView().controlSize(.small)
                 }
-                .atelierFont(size: AtelierTypography.uiSize, weight: .semibold)
-                .foregroundStyle(model.canPush ? AtelierTheme.accentInk : Color.secondary)
-                .frame(maxWidth: .infinity)
-                .frame(height: 38)
-                .background(model.canPush ? AtelierTheme.accent : AtelierTheme.raised)
-                .contentShape(Rectangle())
+                Text(pushLabel)
             }
-            .buttonStyle(.plain)
-            .disabled(!model.canPush)
-            .keyboardShortcut(.return, modifiers: .command)
-            .atelierPointerCursor()
-            .accessibilityLabel("Generate commit message, commit changes, and push \(currentBranch)")
-            .accessibilityValue(model.pushPhase.label)
-            .help("Generate a Gemma message, commit changes, and push \(currentBranch)")
-
-            Menu {
-                Button("Generate Message", systemImage: "sparkles") {
-                    generateCommitMessage()
-                }
-                .disabled(!model.canGenerateCommitMessage)
-
-                Button("Stage All Changes", systemImage: "checklist") {
-                    model.stageAll()
-                    selectedGroup = .staged
-                }
-                .disabled(unstagedCount == 0)
-
-                Divider()
-                Button("Refresh", systemImage: "arrow.clockwise") {
-                    model.refresh()
-                }
-            } label: {
-                Image(systemName: "chevron.down")
-                    .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                    .foregroundStyle(AtelierTheme.accentInk)
-                    .frame(width: 42, height: 38)
-                    .background(AtelierTheme.accent)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .atelierPointerCursor()
-            .accessibilityLabel("Push options")
-            .help("Push options")
+            .atelierFont(size: AtelierTypography.uiSize, weight: .semibold)
+            .foregroundStyle(model.canPush ? AtelierTheme.accentInk : Color.secondary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 36)
+            .background(model.canPush ? AtelierTheme.accent : AtelierTheme.raised)
+            .contentShape(Rectangle())
         }
-        .background(AtelierTheme.border)
+        .buttonStyle(.plain)
+        .disabled(!model.canPush)
+        .keyboardShortcut(.return, modifiers: .command)
+        .atelierPointerCursor()
         .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
                 .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
         }
+        .accessibilityLabel("Generate commit message, commit changes, and push \(currentBranch)")
+        .accessibilityValue(model.pushPhase.label)
+        .help("Generate a Gemma message, commit changes, and push \(currentBranch)")
     }
 
     private var changeList: some View {
-        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+        LazyVStack(alignment: .leading, spacing: AtelierMetrics.spaceM) {
+            ForEach(SourceControlGroup.allCases) { group in
+                changeGroup(group)
+            }
+        }
+    }
+
+    private func changeGroup(_ group: SourceControlGroup) -> some View {
+        let changes = changes(for: group)
+
+        return VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
             HStack(spacing: AtelierMetrics.spaceXS) {
-                Text(selectedGroup.title)
+                Text(group.title)
                     .atelierFont(size: AtelierTypography.headline, weight: .semibold)
 
-                Text("\(selectedChanges.count)")
+                Text("\(changes.count)")
                     .atelierFont(size: AtelierTypography.micro, design: .monospaced)
                     .foregroundStyle(.secondary)
-
-                Spacer(minLength: 0)
-
-                Button {
-                    isFilteringChanges.toggle()
-                    if !isFilteringChanges { changeFilter = "" }
-                } label: {
-                    Image(systemName: "line.3.horizontal.decrease")
-                }
-                .buttonStyle(AtelierRowIconButtonStyle())
-                .accessibilityLabel(isFilteringChanges ? "Hide change filter" : "Filter changes")
-                .help(isFilteringChanges ? "Hide filter" : "Filter changes")
-
-                Menu {
-                    if selectedGroup == .changes {
-                        Button("Stage All Changes", systemImage: "checklist") {
-                            model.stageAll()
-                            selectedGroup = .staged
-                        }
-                        .disabled(unstagedCount == 0)
-                    }
-                    Button("Refresh", systemImage: "arrow.clockwise") {
-                        model.refresh()
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .frame(
-                            width: AtelierMetrics.compactControlHeight,
-                            height: AtelierMetrics.compactControlHeight
-                        )
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .atelierPointerCursor()
-                .accessibilityLabel("Change list options")
-                .help("Change list options")
             }
 
-            if isFilteringChanges {
-                TextField("Filter changed files", text: $changeFilter)
-                    .textFieldStyle(.plain)
-                    .atelierFont(size: AtelierTypography.caption)
-                    .padding(.horizontal, AtelierMetrics.spaceS)
-                    .frame(height: AtelierMetrics.fieldHeight)
-                    .atelierField(isFocused: false)
-            }
-
-            if filteredChanges.isEmpty {
+            if changes.isEmpty {
                 HStack(spacing: AtelierMetrics.spaceS) {
-                    Image(systemName: selectedGroup == .staged ? "tray" : "checkmark.circle")
+                    Image(systemName: group == .staged ? "tray" : "checkmark.circle")
                         .foregroundStyle(.secondary)
-                    Text(emptyChangesLabel)
+                    Text(group == .staged ? "No staged changes." : "Working tree clean.")
                         .atelierFont(size: AtelierTypography.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -909,15 +744,15 @@ struct ChangesView: View {
                 .atelierCard(fill: AtelierTheme.raised.opacity(0.30))
             } else {
                 LazyVStack(spacing: AtelierMetrics.spaceXS) {
-                    ForEach(filteredChanges) { change in
+                    ForEach(changes) { change in
                         GitChangeRow(
                             change: change,
-                            staged: selectedGroup == .staged,
+                            staged: group == .staged,
                             onOpen: {
                                 onOpenDiff(
                                     DiffSelection(
                                         change: change,
-                                        staged: selectedGroup == .staged
+                                        staged: group == .staged
                                     )
                                 )
                             },
@@ -997,19 +832,13 @@ struct ChangesView: View {
         .atelierCard(fill: AtelierTheme.raised.opacity(0.35))
     }
 
-    private var selectedChanges: [GitChange] {
-        switch selectedGroup {
+    private func changes(for group: SourceControlGroup) -> [GitChange] {
+        switch group {
         case .staged:
             model.snapshot.status.staged
         case .changes:
             model.snapshot.status.unstaged + model.snapshot.status.untracked
         }
-    }
-
-    private var filteredChanges: [GitChange] {
-        let query = changeFilter.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return selectedChanges }
-        return selectedChanges.filter { $0.path.localizedCaseInsensitiveContains(query) }
     }
 
     private var visibleRecentCommits: [GitCommit] {
@@ -1040,35 +869,8 @@ struct ChangesView: View {
         model.snapshot.branch.isEmpty ? "Detached HEAD" : model.snapshot.branch
     }
 
-    private var unstagedCount: Int {
-        model.snapshot.status.unstaged.count + model.snapshot.status.untracked.count
-    }
-
     private var pushLabel: String {
         model.pushPhase == .idle ? "Push \(currentBranch)" : model.pushPhase.label
-    }
-
-    private var emptyChangesLabel: String {
-        if !changeFilter.isEmpty { return "No files match this filter." }
-        return selectedGroup == .staged ? "No staged changes." : "Working tree clean."
-    }
-
-    private func count(for group: SourceControlGroup) -> Int {
-        switch group {
-        case .staged: model.snapshot.status.staged.count
-        case .changes: unstagedCount
-        }
-    }
-
-    private func summaryColor(for group: SourceControlGroup) -> Color {
-        group == .staged ? AtelierTheme.gitAdded : AtelierTheme.gitOrange
-    }
-
-    private func generateCommitMessage() {
-        model.generateCommitMessage { message in
-            commitMessage = message
-            isCommitFieldFocused = true
-        }
     }
 
     private func push() {
@@ -1086,13 +888,25 @@ private struct RecentCommitRow: View {
     let isHead: Bool
 
     var body: some View {
-        HStack(spacing: AtelierMetrics.spaceS) {
-            Text(authorInitial)
-                .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                .foregroundStyle(AtelierTheme.accentInk)
+        HStack(alignment: .top, spacing: AtelierMetrics.spaceS) {
+            AsyncImage(url: commit.authorAvatarURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .empty, .failure:
+                    Image(systemName: "person.crop.circle.fill")
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(.tertiary)
+                @unknown default:
+                    EmptyView()
+                }
+            }
                 .frame(width: 30, height: 30)
-                .background(AtelierTheme.accent)
                 .clipShape(Circle())
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: AtelierMetrics.spaceXS) {
@@ -1128,13 +942,10 @@ private struct RecentCommitRow: View {
                 .atelierFont(size: AtelierTypography.micro, design: .monospaced)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+                .padding(.top, 1)
         }
         .padding(.vertical, AtelierMetrics.spaceS)
         .accessibilityElement(children: .combine)
-    }
-
-    private var authorInitial: String {
-        commit.author.first.map { String($0).uppercased() } ?? "?"
     }
 }
 

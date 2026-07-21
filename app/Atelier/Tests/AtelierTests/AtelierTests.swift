@@ -274,8 +274,8 @@ struct AtelierTests {
     @Test("Git log parser preserves commit metadata")
     func gitCommitLogParsing() {
         let sample = [
-            "abcdef123456\u{001F}abcdef1\u{001F}Hiệp\u{001F}1721600000\u{001F}feat: add git history\u{001E}",
-            "123456789abc\u{001F}1234567\u{001F}Atelier Bot\u{001F}1721500000\u{001F}fix: refresh status\u{001E}"
+            "abcdef123456\u{001F}abcdef1\u{001F}Hiệp\u{001F}zendragon93@gmail.com\u{001F}1721600000\u{001F}feat: add git history\u{001E}",
+            "123456789abc\u{001F}1234567\u{001F}Atelier Bot\u{001F}41898282+atelier-bot@users.noreply.github.com\u{001F}1721500000\u{001F}fix: refresh status\u{001E}"
         ].joined()
 
         let commits = GitCommitLogParser.parse(Data(sample.utf8))
@@ -284,7 +284,16 @@ struct AtelierTests {
         #expect(commits[0].hash == "abcdef123456")
         #expect(commits[0].shortHash == "abcdef1")
         #expect(commits[0].author == "Hiệp")
+        #expect(commits[0].authorEmail == "zendragon93@gmail.com")
+        #expect(
+            commits[0].authorAvatarURL?.absoluteString
+                == "https://www.gravatar.com/avatar/390834babe332991b4c17ce93aa24f20?d=404&s=96"
+        )
         #expect(commits[0].subject == "feat: add git history")
+        #expect(
+            commits[1].authorAvatarURL?.absoluteString
+                == "https://github.com/atelier-bot.png?size=96"
+        )
         #expect(commits[1].subject == "fix: refresh status")
     }
 

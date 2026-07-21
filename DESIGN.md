@@ -529,17 +529,22 @@ Persistence boundaries:
 
 ### Git
 
-- Keep repository, branch, summary, commit input, and change groups in the sidebar.
+- Keep repository, branch, commit input, and change groups in the sidebar.
 - Present repository identity as one compact card with the workspace name, shortened path,
   current branch, and branch-switch menu.
-- Use a two-option summary for Staged and Changes. Selecting a summary filters the visible
-  change list without changing Git state. Count untracked files under Changes.
-- Keep the commit composer multiline and show its keyboard hint inside the field. Keep Gemma
-  generation and selected-change utilities inside the composer card.
-- Render Push as one split primary control. The main action runs the current generated publish
-  pipeline for the active branch; the menu exposes generation and refresh without duplicating it.
+- Show Staged and Changes as separate, always-visible sections. Count untracked files under
+  Changes. Do not add a summary selector above the composer.
+- Use an overlay Git scroll indicator that fades away when scrolling stops. Never keep it
+  persistently visible.
+- Keep the commit composer multiline and focused on direct text entry. Do not show a separate
+  Gemma trigger, utility footer, or keyboard-hint row inside the composer card.
+- Render Push as one primary control without a trailing options segment. It runs the current
+  generated publish pipeline for the active branch.
+- Keep change-section headers text-only. Do not add filter or overflow controls beside them.
 - Show recent commits below changes with subject, author, relative time, short hash, and a HEAD
-  marker on the newest commit. Keep the default list bounded and expand it only on request.
+  marker on the newest commit. Anchor each short hash at the row's top-trailing corner. Keep the
+  default list bounded and expand it only on request. Resolve each author avatar from the commit
+  email through GitHub or Gravatar, with a neutral system fallback when no image exists.
 - Refresh Git state after external commits, pushes, checkouts, and branch switches by
   watching only repository metadata that can change the visible snapshot: `.git/index`,
   `.git/HEAD`, `.git/packed-refs`, and `.git/refs/**`.
@@ -547,7 +552,6 @@ Persistence boundaries:
   Coalesce watcher bursts through the existing debounce before refreshing.
 - Run Atelier-owned Git subprocesses with optional locks disabled so background reads
   never rewrite watched metadata and trigger another refresh.
-- Place a compact Gemma action beside the commit-message label.
 - Generate one editable Conventional Commit subject from changed file paths only. Never send diff or file contents.
 - Replace the commit action with Push. Push must generate a fresh Gemma subject, commit the
   selected changes, then push the current branch.

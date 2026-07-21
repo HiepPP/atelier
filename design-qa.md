@@ -94,3 +94,138 @@ Final result: passed
 ### Result
 
 final result: passed
+
+## Git Sidebar Control Removal - 2026-07-22
+
+### Scope
+
+- Source visual truth: `/Users/hiep/Library/Application Support/CleanShot/media/media_luAUxpASEr/CleanShot 2026-07-22 at 01.26.48@2x.png`.
+- Implementation screenshot: unavailable.
+- Intended viewport: 1298x768 app window with the Git sidebar visible.
+- Intended state: Atelier workspace, Git selected, light appearance.
+- Full-view comparison: blocked because the native capture service rejected its sender.
+- Focused comparison: blocked for the same reason.
+
+### Implemented Scope
+
+- Removed the Staged and Changes summary selector.
+- Removed the Gemma action from the commit composer.
+- Removed the composer utility and keyboard-hint footer.
+- Removed the trailing Push options segment.
+- Removed the change filter and overflow controls.
+- Kept both Staged and Changes as always-visible file sections.
+- Kept each commit hash at the row's top-trailing corner.
+
+### Deterministic Checks
+
+- Swift build passed.
+- All 205 tests passed.
+- Packaged self-test passed.
+- The signed app bundle launched from `/Applications/Atelier.app`.
+
+### Findings
+
+- [P2] Native visual evidence is unavailable.
+  Evidence: Computer Use repeatedly returned `Sky Computer Use native pipe startup failed`.
+  Cause: the service log reports `Sender process is not authenticated` and a missing Guardian rendezvous port.
+  Fix: restore the Computer Use authentication channel, then capture and compare the Git sidebar.
+
+### Comparison History
+
+- No visual comparison iteration completed. Source inspection and deterministic verification cannot replace a rendered comparison.
+
+### Result
+
+final result: blocked
+
+## Git Author Avatar - 2026-07-22
+
+### Scope
+
+- Source visual truth: `/Users/hiep/Library/Application Support/CleanShot/media/media_GrLixOR98B/CleanShot 2026-07-22 at 01.47.35@2x.png`.
+- Implementation screenshot: unavailable.
+- Intended viewport: Git sidebar with Recent commits visible.
+- Intended state: real repository commits loaded for the current Atelier workspace.
+- Full-view comparison: blocked because the native capture service rejected its sender.
+- Focused comparison: blocked for the same reason.
+
+### Implemented Scope
+
+- Added commit author email to Git log metadata.
+- Resolve GitHub noreply authors through their GitHub avatar URL.
+- Resolve other authors through the Gravatar linked to their Git email.
+- Show a neutral native fallback only when no remote avatar is available.
+
+### Deterministic Checks
+
+- Swift build passed.
+- All 205 tests passed.
+- Packaged self-test passed.
+- The configured Git email resolves to a valid 192-pixel Gravatar image.
+- The built app launched and remained idle at 0.1 percent CPU.
+
+### Findings
+
+- [P2] Native visual evidence is unavailable.
+  Evidence: Computer Use returned `Sky Computer Use native pipe startup failed` for both app state and app discovery.
+  Impact: avatar crop and final row alignment cannot be compared against the supplied source crop.
+  Fix: restore the Computer Use authentication channel, then capture the Recent commits region.
+
+### Comparison History
+
+- No visual comparison iteration completed. Source inspection and deterministic verification cannot replace a rendered comparison.
+
+### Result
+
+final result: blocked
+
+## Git Sidebar Control Weight - 2026-07-22
+
+### Scope
+
+- Source visual truth: `/Users/hiep/Library/Application Support/CleanShot/media/media_luAUxpASEr/CleanShot 2026-07-22 at 01.26.48@2x.png`.
+- Implementation screenshot: `/tmp/atelier-git-compact-320-top.png`.
+- Viewport: 1298x768 app window with a 320-point Git sidebar.
+- State: Atelier workspace, Git selected, Changes selected, light appearance.
+- Full and focused comparison: `/tmp/atelier-git-comparison.png`.
+
+### Fidelity Surfaces
+
+- Typography: native macOS type remains readable. Utility labels use quieter optical weight.
+- Spacing: summary, composer footer, push menu, and list toolbar now consume less vertical and horizontal space.
+- Colors: semantic Git colors remain intact. Utility controls use secondary foregrounds and flat backgrounds.
+- Image quality: all controls use native SF Symbols. No raster or custom image asset is required.
+- Copy: labels, shortcuts, branch, file state, and commit metadata preserve their existing meaning.
+
+### Interaction Checks
+
+- Summary selection remains accessible and filters the same Git state.
+- Gemma, composer utilities, push menu, filter, and list options retain named hit targets.
+- The push menu stays joined to the primary action with a narrower trailing segment.
+- Each short commit hash is anchored at the row's top-trailing corner.
+- The Git scrollbar is absent in the settled capture and does not remain persistently visible.
+
+### Findings History
+
+| Severity | Finding | Resolution | Post-fix evidence |
+|---|---|---|---|
+| P2 | Red-boxed controls competed with the primary Push action through large chrome and generous padding. | Reduced fixed heights, fills, padding, indicator width, and menu width while preserving 30-point icon hit targets. | `/tmp/atelier-git-comparison.png` |
+| P2 | Commit hashes sat near the metadata baseline instead of the requested top-right position. | Top-aligned each commit row and added a one-point top inset to the trailing hash. | `/tmp/atelier-git-comparison.png` |
+
+### Residual Differences
+
+- Source and implementation contain different live file counts and commit ages.
+- The source has Staged selected. The implementation has Changes selected.
+- These are live state differences. No actionable P0, P1, or P2 finding remains.
+
+### Result
+
+final result: passed
+
+## Latest QA Status - 2026-07-22
+
+- Applies to `Git Sidebar Control Removal - 2026-07-22` and `Git Author Avatar - 2026-07-22` above.
+- Supersedes the earlier control-weight pass because the interface changed afterward.
+- Native comparison remains blocked by the Computer Use authentication failure.
+
+final result: blocked
