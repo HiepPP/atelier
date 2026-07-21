@@ -33,6 +33,12 @@ nonisolated struct TerminalCloseConfirmation: Identifiable, Equatable, Sendable 
     let title: String
 }
 
+nonisolated enum TerminalClosePolicy {
+    static func requiresConfirmation(foregroundAgentName: String?) -> Bool {
+        foregroundAgentName == "claude" || foregroundAgentName == "codex"
+    }
+}
+
 nonisolated enum AgentSidecarLayoutPolicy {
     static let width: CGFloat = 360
 }
@@ -850,7 +856,9 @@ final class TerminalTabsModel {
         guard canClose(tab),
               tabs.contains(where: { $0.id == tab.id }) else { return }
         if case .terminal(let session) = tab.content,
-           session.controller.isProcessRunning {
+           TerminalClosePolicy.requiresConfirmation(
+               foregroundAgentName: session.controller.currentForegroundAgentName()
+           ) {
             pendingTerminalCloseConfirmation = TerminalCloseConfirmation(
                 id: tab.id,
                 title: tab.title
@@ -1263,16 +1271,6 @@ struct TerminalTabs: View {
                         )
                     }
 
-                    Button {
-                        model.add()
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .buttonStyle(AtelierLuminareIconButtonStyle())
-                    .atelierNewTerminalEffect(sessionCount: model.terminalCount)
-                    .accessibilityLabel("New terminal")
-                    .help("New terminal")
-
                     if let editor = model.selectedEditor {
                         Button {
                             editor.toggleWordWrap()
@@ -1289,6 +1287,16 @@ struct TerminalTabs: View {
                             editor.isWordWrapEnabled ? "Disable Word Wrap" : "Enable Word Wrap"
                         )
                     }
+
+                    Button {
+                        model.add()
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(AtelierLuminareIconButtonStyle())
+                    .atelierNewTerminalEffect(sessionCount: model.terminalCount)
+                    .accessibilityLabel("New terminal")
+                    .help("New terminal")
                 }
                 .padding(.horizontal, AtelierMetrics.spaceXS)
             }

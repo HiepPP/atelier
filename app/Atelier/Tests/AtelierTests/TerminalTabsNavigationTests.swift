@@ -232,7 +232,7 @@ struct TerminalTabsNavigationTests {
         #expect(tabs.recentFileURLs.isEmpty)
     }
 
-    @Test("Final terminal stays open while another running terminal requires confirmation")
+    @Test("Final terminal stays open while another shell terminal closes immediately")
     func finalTerminalCloseInvariant() throws {
         let fixture = try Fixture(names: [])
         defer { fixture.remove() }
@@ -249,14 +249,19 @@ struct TerminalTabsNavigationTests {
         #expect(tabs.canCloseSelectedTab)
         tabs.closeSelectedTab()
 
-        let confirmation = try #require(tabs.pendingTerminalCloseConfirmation)
-        #expect(tabs.terminalCount == 2)
-
-        tabs.confirmTerminalClose(id: confirmation.id)
-
+        #expect(tabs.pendingTerminalCloseConfirmation == nil)
         #expect(tabs.terminalCount == 1)
         #expect(tabs.selectedID != nil)
         #expect(!tabs.canCloseSelectedTab)
+    }
+
+    @Test("Only Claude Code and Codex require close confirmation")
+    func agentCloseConfirmationPolicy() {
+        #expect(TerminalClosePolicy.requiresConfirmation(foregroundAgentName: "claude"))
+        #expect(TerminalClosePolicy.requiresConfirmation(foregroundAgentName: "codex"))
+        #expect(!TerminalClosePolicy.requiresConfirmation(foregroundAgentName: "aider"))
+        #expect(!TerminalClosePolicy.requiresConfirmation(foregroundAgentName: "zsh"))
+        #expect(!TerminalClosePolicy.requiresConfirmation(foregroundAgentName: nil))
     }
 
     @Test("Path paste targets only the selected terminal")

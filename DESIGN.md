@@ -484,7 +484,8 @@ Persistence boundaries:
 - Use titanium chrome for the strip and porcelain for the selected editor surface.
 - Keep Back and Forward available through menus and shortcuts, not inside the tab strip.
 - Keep the final remaining terminal tab open and non-closable.
-- Confirm before closing any other terminal while its process is still running.
+- Confirm before closing any other terminal while Claude Code or Codex is the detected foreground agent.
+- Close other terminals without confirmation when only the shell or a regular command is running.
 - Keep tab widths between 112 and 220 points, with 152 ideal.
 - Render the selected center tab as an inset `rowRadius` rounded pill of translucent `chromeSelection` glass with a
   top-lit hairline highlight. Keep the full strip-cell envelope as the hit target. Use
@@ -493,7 +494,8 @@ Persistence boundaries:
 - Place the close control at the left edge of every closable tab.
 - Show close only on the selected or hovered tab.
 - Preserve drag reorder, rename, context menu, and word-wrap behavior.
-- Keep terminal response, new-terminal, and editor actions in one trailing group after the scroller.
+- Keep terminal response and editor actions in one trailing group after the scroller.
+- Keep New Terminal as the final far-right action. Its position never changes with tab selection.
 - Give the trailing action group `spaceXS` horizontal insets and `spaceXS` spacing between controls.
 - Reopen Closed Tab restores permanent file tabs only.
 - Restore the previous session per workspace on relaunch: reopen file tabs (path, order,
@@ -663,6 +665,7 @@ Rules:
 
 - Menu items, palette actions, and toolbar controls must call the same typed action.
 - `Cmd-W` never closes the workspace window. With no active tab or only the final terminal active, it does nothing.
+- `Cmd-W` asks for confirmation only when Claude Code or Codex is the detected foreground agent.
 - Show live enabled state in every action surface.
 - Do not reuse an existing shortcut for a new action.
 - Keep shortcut labels monospaced in the command palette.
