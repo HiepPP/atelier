@@ -1,0 +1,366 @@
+#!/usr/bin/env python3
+"""Terminal diagnostics client for Atelier Runtime Probe."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+
+SCHEMA_VERSION = 1
+EXIT_APP_STOPPED = 3
+EXIT_SNAPSHOT_MISSING = 4
+EXIT_SNAPSHOT_INVALID = 5
+EXIT_PROBE_FAILED = 6
+
+
+def runtime_directory(cache_root: Path | None = None) -> Path:
+    root = cache_root or Path.home() / "Library" / "Caches" / "app.atelier.Atelier"
+    return root / "Runtime" / "current"
+
+
+def find_atelier_pid(runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run) -> int | None:
+    result = runner(
+        ["pgrep", "-x", "Atelier"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        try:
+            return int(line.strip())
+        except ValueError:
+            continue
+    return None
+
+
+def parse_timestamp(value: str) -> datetime:
+    normalized = value.replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def load_status(
+    cache_root: Path | None = None,
+    pid_finder: Callable[[], int | None] = find_atelier_pid,
+    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+) -> tuple[dict[str, Any], int]:
+    pid = pid_finder()
+    if pid is None:
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "status": "stopped",
+            "error": "Atelier is not running.",
+        }, EXIT_APP_STOPPED
+    snapshot_path = runtime_directory(cache_root) / "snapshot.json"
+    if not snapshot_path.exists():
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "status": "degraded",
+            "pid": pid,
+            "snapshotPath": str(snapshot_path),
+            "error": "Atelier is running, but runtime snapshot is missing.",
+        }, EXIT_SNAPSHOT_MISSING
+    try:
+        snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        if snapshot.get("schemaVersion") != SCHEMA_VERSION:
+            raise ValueError("unsupported snapshot schema")
+        generated_at = parse_timestamp(snapshot["generatedAt"])
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "status": "degraded",
+            "pid": pid,
+            "snapshotPath": str(snapshot_path),
+            "error": f"Runtime snapshot is malformed: {error}",
+        }, EXIT_SNAPSHOT_INVALID
+    age = max(0.0, (now() - generated_at).total_seconds())
+    status = "healthy" if age <= 2.5 else "stale"
+    verdicts = list(snapshot.get("verdicts", []))
+    if status == "stale":
+        verdicts.append({
+            "code": "diagnosticsStale",
+            "severity": "warning",
+            "confidence": "high",
+            "summary": "Runtime snapshot is no longer updating.",
+            "evidence": {"snapshotAgeSeconds": age},
+        })
+    snapshot["verdicts"] = verdicts
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "status": status,
+        "pid": pid,
+        "snapshotPath": str(snapshot_path),
+        "snapshotAgeSeconds": round(age, 3),
+        "snapshot": snapshot,
+    }, 0
+
+
+def print_json(value: Any) -> None:
+    print(json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False))
+
+
+def command_status(args: argparse.Namespace) -> int:
+    status, exit_code = load_status()
+    if args.json:
+        print_json(status)
+    else:
+        print(status.get("status", "unknown"))
+    return exit_code
+
+
+def human_snapshot(status: dict[str, Any]) -> str:
+    snapshot = status.get("snapshot", {})
+    process = snapshot.get("process", {})
+    heartbeat = snapshot.get("mainThread", {})
+    workspace = snapshot.get("workspace", {})
+    editor = snapshot.get("editor", {})
+    verdict_codes = [item.get("code", "unknown") for item in snapshot.get("verdicts", [])]
+    return (
+        f"{snapshot.get('generatedAt', '-')} "
+        f"heartbeat={heartbeat.get('heartbeatAgeMs', 0):.0f}ms "
+        f"cpu={process.get('cpuPercent', 0):.1f}% "
+        f"memory={process.get('physicalFootprintBytes', 0) / 1_048_576:.1f}MiB "
+        f"tab={workspace.get('selectedTabKind') or '-'} "
+        f"scroll={editor.get('scrollInputsWindow', 0)}/{editor.get('boundsChangesWindow', 0)} "
+        f"verdicts={','.join(verdict_codes) if verdict_codes else '-'}"
+    )
+
+
+def command_watch(args: argparse.Namespace) -> int:
+    stopped = False
+
+    def stop_watch(_signum: int, _frame: Any) -> None:
+        nonlocal stopped
+        stopped = True
+
+    previous_handler = signal.signal(signal.SIGINT, stop_watch)
+    last_generated_at: str | None = None
+    try:
+        while not stopped:
+            status, exit_code = load_status()
+            if exit_code != 0:
+                print_json(status)
+                return exit_code
+            generated_at = status["snapshot"].get("generatedAt")
+            if generated_at != last_generated_at:
+                print(human_snapshot(status), flush=True)
+                last_generated_at = generated_at
+            time.sleep(max(0.1, args.interval))
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
+    return 0
+
+
+def atomic_json_write(path: Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            json.dump(value, output, indent=2, sort_keys=True)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def command_probe(args: argparse.Namespace) -> int:
+    status, exit_code = load_status()
+    if exit_code != 0:
+        print_json(status)
+        return exit_code
+    directory = runtime_directory()
+    request_id = str(uuid.uuid4())
+    arguments: dict[str, Any] = {}
+    if args.probe_command == "editor-scroll":
+        arguments = {"delta": args.delta, "restore": args.restore}
+    request = {
+        "schemaVersion": SCHEMA_VERSION,
+        "id": request_id,
+        "command": args.probe_command,
+        "arguments": arguments,
+        "requestedAt": datetime.now(timezone.utc).isoformat(),
+    }
+    atomic_json_write(directory / "request.json", request)
+    deadline = time.monotonic() + 3.0
+    response_path = directory / "response.json"
+    while time.monotonic() < deadline:
+        try:
+            response = json.loads(response_path.read_text(encoding="utf-8"))
+            if str(response.get("id", "")).lower() == request_id.lower():
+                print_json(response)
+                return 0 if response.get("status") in {"ok", "notApplicable"} else EXIT_PROBE_FAILED
+        except (OSError, json.JSONDecodeError):
+            pass
+        time.sleep(0.1)
+    print_json({
+        "schemaVersion": SCHEMA_VERSION,
+        "status": "timeout",
+        "id": request_id,
+        "error": "Atelier did not return a probe response within 3 seconds.",
+    })
+    return EXIT_PROBE_FAILED
+
+
+def run_collector(command: list[str], output: Path) -> dict[str, Any]:
+    try:
+        with output.open("w", encoding="utf-8") as stream:
+            result = subprocess.run(
+                command,
+                stdout=stream,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+        return {
+            "command": command,
+            "status": "ok" if result.returncode == 0 else "degraded",
+            "exitCode": result.returncode,
+            "output": str(output),
+            "stderr": result.stderr[-2_000:],
+        }
+    except OSError as error:
+        return {
+            "command": command,
+            "status": "degraded",
+            "exitCode": None,
+            "output": str(output),
+            "stderr": str(error),
+        }
+
+
+def recent_reports() -> list[dict[str, Any]]:
+    directory = Path.home() / "Library" / "Logs" / "DiagnosticReports"
+    if not directory.exists():
+        return []
+    cutoff = time.time() - 86_400
+    reports: list[dict[str, Any]] = []
+    for path in sorted(directory.glob("Atelier*")):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        if stat.st_mtime >= cutoff:
+            reports.append({
+                "path": str(path),
+                "modifiedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                "bytes": stat.st_size,
+            })
+    return reports
+
+
+def collect_capture(
+    pid: int,
+    seconds: int,
+    source_directory: Path,
+    artifact_directory: Path,
+) -> dict[str, Any]:
+    collectors: dict[str, Any] = {}
+    for name in ("snapshot.json", "flight-recorder.json"):
+        source = source_directory / name
+        destination = artifact_directory / name
+        try:
+            shutil.copy2(source, destination)
+            collectors[name] = {"status": "ok", "output": str(destination)}
+        except OSError as error:
+            collectors[name] = {"status": "degraded", "error": str(error)}
+    collectors["sample"] = run_collector(
+        ["sample", str(pid), str(seconds), "-file", str(artifact_directory / "sample.txt")],
+        artifact_directory / "sample-command.txt",
+    )
+    collectors["sample"]["artifact"] = str(artifact_directory / "sample.txt")
+    collectors["log"] = run_collector(
+        [
+            "log", "show", "--last", f"{max(60, seconds + 5)}s", "--style", "compact",
+            "--predicate", 'process == "Atelier" OR subsystem == "app.atelier.Atelier"',
+        ],
+        artifact_directory / "log.txt",
+    )
+    collectors["vmmap"] = run_collector(
+        ["vmmap", "-summary", str(pid)],
+        artifact_directory / "vmmap-summary.txt",
+    )
+    reports = recent_reports()
+    atomic_json_write(artifact_directory / "diagnostic-reports.json", reports)
+    collectors["diagnosticReports"] = {
+        "status": "ok",
+        "count": len(reports),
+        "output": str(artifact_directory / "diagnostic-reports.json"),
+    }
+    return collectors
+
+
+def command_capture(args: argparse.Namespace) -> int:
+    status, exit_code = load_status()
+    if exit_code != 0:
+        print_json(status)
+        return exit_code
+    artifact_directory = Path(tempfile.mkdtemp(prefix="atelier-runtime-capture-"))
+    os.chmod(artifact_directory, 0o700)
+    started_at = datetime.now(timezone.utc).isoformat()
+    collectors = collect_capture(
+        pid=status["pid"],
+        seconds=max(1, args.seconds),
+        source_directory=runtime_directory(),
+        artifact_directory=artifact_directory,
+    )
+    manifest = {
+        "schemaVersion": SCHEMA_VERSION,
+        "createdAt": started_at,
+        "pid": status["pid"],
+        "seconds": max(1, args.seconds),
+        "collectors": collectors,
+    }
+    atomic_json_write(artifact_directory / "manifest.json", manifest)
+    print(str(artifact_directory.resolve()))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="atelier-doctor")
+    subcommands = parser.add_subparsers(dest="command", required=True)
+
+    status = subcommands.add_parser("status")
+    status.add_argument("--json", action="store_true")
+    status.set_defaults(handler=command_status)
+
+    watch = subcommands.add_parser("watch")
+    watch.add_argument("--interval", type=float, default=1.0)
+    watch.set_defaults(handler=command_watch)
+
+    capture = subcommands.add_parser("capture")
+    capture.add_argument("--seconds", type=int, default=3)
+    capture.set_defaults(handler=command_capture)
+
+    probe = subcommands.add_parser("probe")
+    probe.add_argument("probe_command", choices=("main", "editor", "editor-scroll"))
+    probe.add_argument("--delta", type=float, default=400.0)
+    probe.add_argument("--restore", action="store_true")
+    probe.set_defaults(handler=command_probe)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return int(args.handler(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

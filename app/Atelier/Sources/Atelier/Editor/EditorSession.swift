@@ -5,9 +5,13 @@ import Observation
 @Observable
 final class EditorSession {
     let document: EditorDocument
+    private let diagnosticSessionID = UUID().uuidString
     private(set) var content: FileContent = .loading
     private(set) var selectedLineRange: ClosedRange<Int>?
     var isWordWrapEnabled = true
+    private(set) var diagnosticLoadedBytes = 0
+    private(set) var diagnosticLineCount = 0
+    private(set) var diagnosticLoadState = "loading"
     private var loadTask: Task<Void, Never>?
     private weak var surface: (any EditorSurface)?
 
@@ -17,17 +21,56 @@ final class EditorSession {
     }
 
     func reload() {
-        loadTask?.cancel()
+        if loadTask != nil {
+            RuntimeDiagnosticsService.shared.record(
+                category: "editorSession",
+                name: "loadCancelled",
+                correlationID: diagnosticSessionID
+            )
+            loadTask?.cancel()
+        }
         content = .loading
+        diagnosticLoadedBytes = 0
+        diagnosticLineCount = 0
+        diagnosticLoadState = "loading"
         let url = document.url
+        RuntimeDiagnosticsService.shared.record(
+            category: "editorSession",
+            name: "loadStarted",
+            correlationID: diagnosticSessionID
+        )
+        let fileLoadSignpost = RuntimeSignposts.signposter.beginInterval("FileLoad")
         loadTask = Task { [weak self] in
+            defer {
+                RuntimeSignposts.signposter.endInterval("FileLoad", fileLoadSignpost)
+            }
             let content = await FileLoader.loadAsync(url: url)
             guard !Task.isCancelled else { return }
-            self?.content = content
+            guard let self else { return }
+            self.content = content
+            self.updateDiagnosticContentMetrics(content)
+            self.loadTask = nil
+            RuntimeDiagnosticsService.shared.record(
+                category: "editorSession",
+                name: "loadCompleted",
+                metadata: [
+                    "bytes": .integer(self.diagnosticLoadedBytes),
+                    "lines": .integer(self.diagnosticLineCount),
+                    "state": .string(self.diagnosticLoadState)
+                ],
+                correlationID: self.diagnosticSessionID
+            )
         }
     }
 
     func close() {
+        if loadTask != nil {
+            RuntimeDiagnosticsService.shared.record(
+                category: "editorSession",
+                name: "loadCancelled",
+                correlationID: diagnosticSessionID
+            )
+        }
         loadTask?.cancel()
         loadTask = nil
         surface = nil
@@ -36,15 +79,92 @@ final class EditorSession {
 
     func toggleWordWrap() {
         isWordWrapEnabled.toggle()
+        RuntimeDiagnosticsService.shared.record(
+            category: "editor",
+            name: "wordWrapChanged",
+            metadata: ["enabled": .boolean(isWordWrapEnabled)],
+            correlationID: runtimeControllerID
+        )
     }
 
     func attach(surface: any EditorSurface) {
         self.surface = surface
+        RuntimeDiagnosticsService.shared.record(
+            category: "editor",
+            name: "nativeEditorAttached",
+            correlationID: (surface as? any RuntimeDiagnosableEditorSurface)?.runtimeDiagnosticID
+        )
     }
 
     func detach(surface: any EditorSurface) {
         guard self.surface === surface else { return }
         self.surface = nil
+        RuntimeDiagnosticsService.shared.record(
+            category: "editor",
+            name: "nativeEditorDetached",
+            correlationID: (surface as? any RuntimeDiagnosableEditorSurface)?.runtimeDiagnosticID
+        )
+    }
+
+    var runtimeControllerID: String? {
+        (surface as? any RuntimeDiagnosableEditorSurface)?.runtimeDiagnosticID
+    }
+
+    func runtimeEditorSnapshot() -> RuntimeEditorSnapshot {
+        guard let surface = surface as? any RuntimeDiagnosableEditorSurface else {
+            return RuntimeEditorSnapshot(
+                contentBytes: diagnosticLoadedBytes,
+                lineCount: diagnosticLineCount
+            )
+        }
+        var snapshot = surface.runtimeSnapshot()
+        if snapshot.contentBytes == 0 {
+            snapshot.contentBytes = diagnosticLoadedBytes
+            snapshot.lineCount = diagnosticLineCount
+        }
+        return snapshot
+    }
+
+    func runRuntimeScrollProbe(delta: Double, restore: Bool) async -> (
+        status: String,
+        elapsedMs: Double,
+        result: [String: RuntimeScalar]
+    ) {
+        guard let surface = surface as? any RuntimeDiagnosableEditorSurface else {
+            return ("notApplicable", 0, ["reason": .string("No mounted text editor.")])
+        }
+        return await surface.runScrollProbe(delta: delta, restore: restore)
+    }
+
+    private func updateDiagnosticContentMetrics(_ content: FileContent) {
+        switch content {
+        case .text(let text):
+            diagnosticLoadedBytes = text.utf8.count
+            diagnosticLineCount = text.isEmpty ? 0 : text.utf8.reduce(into: 1) { count, byte in
+                if byte == 0x0A { count += 1 }
+            }
+            diagnosticLoadState = "text"
+        case .image(let data):
+            diagnosticLoadedBytes = data.count
+            diagnosticLineCount = 0
+            diagnosticLoadState = "image"
+        case .loading:
+            diagnosticLoadedBytes = 0
+            diagnosticLineCount = 0
+            diagnosticLoadState = "loading"
+        case .binary:
+            diagnosticLoadedBytes = 0
+            diagnosticLineCount = 0
+            diagnosticLoadState = "binary"
+        case .tooLarge:
+            diagnosticLoadedBytes = 0
+            diagnosticLineCount = 0
+            diagnosticLoadState = "tooLarge"
+        case .error:
+            diagnosticLoadedBytes = 0
+            diagnosticLineCount = 0
+            diagnosticLoadState = "error"
+        }
     }
 
     func performFindAction(_ action: EditorFindAction) {

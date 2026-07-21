@@ -9,9 +9,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasPreparedForTermination = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard ResourceWatchdog.shouldRun() else { return }
+        let diagnosticsEnabled = RuntimeDiagnosticsService.shouldRun()
+        let watchdogEnabled = ResourceWatchdog.shouldRun()
+        if diagnosticsEnabled {
+            RuntimeDiagnosticsService.shared.start(
+                sampleInternally: !watchdogEnabled,
+                mainSnapshotProvider: { [weak self] in
+                    self?.model?.runtimeDiagnosticsSnapshot() ?? RuntimeMainSnapshot()
+                },
+                probeHandler: { [weak self] request in
+                    guard let model = self?.model else {
+                        let isMainProbe = request.command == .main
+                        return RuntimeProbeResponse(
+                            schemaVersion: 1,
+                            id: request.id,
+                            command: request.command,
+                            status: isMainProbe ? "ok" : "notApplicable",
+                            completedAt: Date().formatted(.iso8601),
+                            elapsedMs: 0,
+                            result: isMainProbe ? [
+                                "timeout": .boolean(false),
+                                "heartbeatAgeMs": .double(
+                                    RuntimeDiagnosticsService.shared
+                                        .currentHeartbeatAgeMilliseconds()
+                                )
+                            ] : [:],
+                            editor: nil,
+                            error: isMainProbe ? nil : "Application model is unavailable."
+                        )
+                    }
+                    return await model.handleRuntimeProbe(request)
+                }
+            )
+        }
+        guard watchdogEnabled else { return }
         DefaultWatchdogResponder.requestNotificationAuthorization()
-        let watchdog = ResourceWatchdog.makeDefault()
+        let sampleObserver: (@Sendable (ProcessSample, Double) -> Void)?
+        if diagnosticsEnabled {
+            sampleObserver = { @Sendable (sample: ProcessSample, time: Double) in
+                RuntimeDiagnosticsService.shared.consumeProcessSample(sample, at: time)
+            }
+        } else {
+            sampleObserver = nil
+        }
+        let watchdog = ResourceWatchdog.makeDefault(
+            sampleObserver: sampleObserver
+        )
         self.watchdog = watchdog
         watchdog.start()
     }
@@ -30,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        RuntimeDiagnosticsService.shared.stop()
         watchdog?.stop()
         if terminationTask == nil, !hasPreparedForTermination {
             model?.stop()

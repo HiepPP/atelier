@@ -11,6 +11,7 @@ nonisolated protocol WatchdogResponder: Sendable {
 nonisolated final class ResourceWatchdog: @unchecked Sendable {
     private let sampler: ProcessMetricsSampling
     private let responder: WatchdogResponder
+    private let sampleObserver: (@Sendable (ProcessSample, Double) -> Void)?
     private let interval: TimeInterval
     private let queue = DispatchQueue(label: "app.atelier.watchdog", qos: .utility)
 
@@ -22,12 +23,14 @@ nonisolated final class ResourceWatchdog: @unchecked Sendable {
         sampler: ProcessMetricsSampling,
         responder: WatchdogResponder,
         thresholds: WatchdogThresholds = .default,
-        interval: TimeInterval = 1
+        interval: TimeInterval = 1,
+        sampleObserver: (@Sendable (ProcessSample, Double) -> Void)? = nil
     ) {
         self.sampler = sampler
         self.responder = responder
         self.evaluator = WatchdogEvaluator(thresholds: thresholds)
         self.interval = interval
+        self.sampleObserver = sampleObserver
     }
 
     func start() {
@@ -52,6 +55,7 @@ nonisolated final class ResourceWatchdog: @unchecked Sendable {
         guard !hasFired else { return }
         let sample = sampler.sample()
         let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+        sampleObserver?(sample, now)
         guard let breach = evaluator.evaluate(sample, at: now) else { return }
         hasFired = true
         timer?.cancel()
@@ -61,11 +65,15 @@ nonisolated final class ResourceWatchdog: @unchecked Sendable {
 }
 
 extension ResourceWatchdog {
-    static func makeDefault(thresholds: WatchdogThresholds = .default) -> ResourceWatchdog {
+    static func makeDefault(
+        thresholds: WatchdogThresholds = .default,
+        sampleObserver: (@Sendable (ProcessSample, Double) -> Void)? = nil
+    ) -> ResourceWatchdog {
         ResourceWatchdog(
             sampler: ProcessMetrics(),
             responder: DefaultWatchdogResponder(),
-            thresholds: thresholds
+            thresholds: thresholds,
+            sampleObserver: sampleObserver
         )
     }
 

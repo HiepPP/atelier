@@ -12,4 +12,12 @@ nonisolated enum AppLogger {
     static let commands = Logger(subsystem: subsystem, category: "Commands")
     static let editor = Logger(subsystem: subsystem, category: "Editor")
     static let agent = Logger(subsystem: subsystem, category: "Agent")
+    static let runtimeDiagnostics = Logger(subsystem: subsystem, category: "RuntimeDiagnostics")
+}
+
+nonisolated enum RuntimeSignposts {
+    static let signposter = OSSignposter(
+        subsystem: "app.atelier.Atelier",
+        category: "RuntimeDiagnostics"
+    )
 }

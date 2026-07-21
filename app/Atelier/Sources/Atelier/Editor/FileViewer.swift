@@ -2,6 +2,21 @@ import AppKit
 import HighlightSwift
 import SwiftUI
 
+@MainActor
+private final class RuntimeDiagnosticScrollView: NSScrollView {
+    weak var runtimeDiagnosticsController: FileViewer.NativeEditorController?
+
+    override func scrollWheel(with event: NSEvent) {
+        let before = contentView.bounds.origin.y
+        super.scrollWheel(with: event)
+        runtimeDiagnosticsController?.recordScrollInput(
+            beforeY: before,
+            afterY: contentView.bounds.origin.y,
+            deltaY: event.scrollingDeltaY
+        )
+    }
+}
+
 enum FileHighlightPolicy {
     static let maximumHighlightedBytes = 200_000
 
@@ -54,7 +69,8 @@ struct FileViewer: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
+        let mountState = RuntimeSignposts.signposter.beginInterval("EditorMount")
+        let scrollView = RuntimeDiagnosticScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = !isWordWrapEnabled
         scrollView.autohidesScrollers = true
@@ -123,6 +139,8 @@ struct FileViewer: NSViewRepresentable {
         )
 
         context.coordinator.attach(scrollView: scrollView, textView: textView)
+        scrollView.runtimeDiagnosticsController = context.coordinator
+        RuntimeSignposts.signposter.endInterval("EditorMount", mountState)
         return scrollView
     }
 
@@ -166,7 +184,7 @@ struct FileViewer: NSViewRepresentable {
     }
 
     @MainActor
-    final class NativeEditorController: NSObject, NSTextViewDelegate, EditorSurface {
+    final class NativeEditorController: NSObject, NSTextViewDelegate, RuntimeDiagnosableEditorSurface {
         private static let highlightService = SyntaxHighlightService()
         private static let saveDelay: UInt64 = 350_000_000
         private static let highlightDelay: UInt64 = 450_000_000
@@ -186,6 +204,29 @@ struct FileViewer: NSViewRepresentable {
         private var saveGeneration = 0
         private var saveTask: Task<Void, Never>?
         private var isApplyingText = false
+        let runtimeDiagnosticID = UUID().uuidString
+        private var runtimeObservationTokens: [NSObjectProtocol] = []
+        private var runtimeWindowStartedAt = 0.0
+        private var runtimeScrollInputs = 0
+        private var runtimeBoundsChanges = 0
+        private var runtimeEligibleNoMovementInputs = 0
+        private var runtimeDocumentHeightChanges = 0
+        private var runtimeCompletedScrollInputs = 0
+        private var runtimeCompletedBoundsChanges = 0
+        private var runtimeCompletedEligibleNoMovementInputs = 0
+        private var runtimeCompletedDocumentHeightChanges = 0
+        private var runtimeCompletedWindowAt = 0.0
+        private var runtimeLastDocumentHeight = 0.0
+        private var runtimeLastViewportWidth = 0.0
+        private var runtimeLastBoundsOriginY = 0.0
+        private var runtimeLayoutGraceUntil = 0.0
+        private var runtimeHighlightState = "idle"
+        private var runtimeHighlightStartedAt = 0.0
+        private var runtimeHighlightDurationMs = 0.0
+        private var runtimeHighlightCancellationCount = 0
+        private var runtimeTextApplyDurationMs = 0.0
+        private var runtimeContentBytes = 0
+        private var runtimeLineCount = 0
         // Mirror of the current document text, kept in sync on content set and on
         // edit. Selection changes read this instead of rematerializing the whole
         // document string on every cursor move.
@@ -197,10 +238,42 @@ struct FileViewer: NSViewRepresentable {
         // AppKit writes on unrelated SwiftUI updates.
         var appliedBackgroundIsDark: Bool?
 
+        override init() {
+            runtimeWindowStartedAt = Self.runtimeNow()
+            super.init()
+            RuntimeDiagnosticsService.shared.registerEditorController(id: runtimeDiagnosticID)
+        }
+
         func attach(scrollView: NSScrollView, textView: NSTextView) {
             self.scrollView = scrollView
             self.textView = textView
             textView.delegate = self
+            scrollView.contentView.postsBoundsChangedNotifications = true
+            textView.postsFrameChangedNotifications = true
+            runtimeLastDocumentHeight = textView.frame.height
+            runtimeLastViewportWidth = scrollView.contentView.bounds.width
+            runtimeLastBoundsOriginY = scrollView.contentView.bounds.origin.y
+            runtimeObservationTokens = [
+                NotificationCenter.default.addObserver(
+                    forName: NSView.boundsDidChangeNotification,
+                    object: scrollView.contentView,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.recordBoundsChange() }
+                },
+                NotificationCenter.default.addObserver(
+                    forName: NSView.frameDidChangeNotification,
+                    object: textView,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.recordDocumentHeightChange() }
+                }
+            ]
+            RuntimeDiagnosticsService.shared.record(
+                category: "editor",
+                name: "nativeEditorMounted",
+                correlationID: runtimeDiagnosticID
+            )
         }
 
         @MainActor
@@ -243,12 +316,26 @@ struct FileViewer: NSViewRepresentable {
             textView?.allowsUndo = textView?.isEditable == true
 
             if wordWrapChanged {
+                beginRuntimeLayoutGrace()
+                RuntimeDiagnosticsService.shared.record(
+                    category: "editor",
+                    name: "wordWrapLayoutChanged",
+                    metadata: ["enabled": .boolean(isWordWrapEnabled)],
+                    correlationID: runtimeDiagnosticID
+                )
                 applyWordWrap(isEnabled: isWordWrapEnabled)
             }
             if scaleChanged {
+                beginRuntimeLayoutGrace()
+                RuntimeDiagnosticsService.shared.record(
+                    category: "editor",
+                    name: "fontLayoutChanged",
+                    correlationID: runtimeDiagnosticID
+                )
                 applyFont()
             }
             if contentChanged {
+                beginRuntimeLayoutGrace()
                 renderedContent = content
                 renderedLanguage = language?.rawValue
                 render(content: content, language: language)
@@ -263,6 +350,11 @@ struct FileViewer: NSViewRepresentable {
             saveGeneration += 1
             saveTask?.cancel()
             saveTask = nil
+            for token in runtimeObservationTokens {
+                NotificationCenter.default.removeObserver(token)
+            }
+            runtimeObservationTokens.removeAll(keepingCapacity: false)
+            (scrollView as? RuntimeDiagnosticScrollView)?.runtimeDiagnosticsController = nil
             textView?.delegate = nil
             surfaceOwner?.detach(surface: self)
             surfaceOwner = nil
@@ -270,6 +362,15 @@ struct FileViewer: NSViewRepresentable {
             scrollView = nil
             document = nil
             onEdit = {}
+            RuntimeDiagnosticsService.shared.record(
+                category: "editor",
+                name: "nativeEditorStopped",
+                correlationID: runtimeDiagnosticID
+            )
+        }
+
+        isolated deinit {
+            RuntimeDiagnosticsService.shared.unregisterEditorController(id: runtimeDiagnosticID)
         }
 
         func open(_ document: EditorDocument) {
@@ -332,6 +433,8 @@ struct FileViewer: NSViewRepresentable {
                   let fileURL else { return }
             let text = textView.string
             cachedText = text
+            updateRuntimeContentMetrics(text)
+            beginRuntimeLayoutGrace()
             lineNumberView?.updateLineStarts(for: text)
             onEdit()
             scheduleSave(text: text, url: fileURL)
@@ -343,6 +446,7 @@ struct FileViewer: NSViewRepresentable {
             highlightGeneration += 1
             highlightTask?.cancel()
             highlightTask = nil
+            beginRuntimeLayoutGrace()
 
             let isText: Bool
             let foregroundColor: NSColor
@@ -404,6 +508,15 @@ struct FileViewer: NSViewRepresentable {
         ) {
             highlightGeneration += 1
             let expectedGeneration = highlightGeneration
+            if highlightTask != nil {
+                runtimeHighlightCancellationCount += 1
+                runtimeHighlightState = "cancelled"
+                RuntimeDiagnosticsService.shared.record(
+                    category: "editor",
+                    name: "highlightCancelled",
+                    correlationID: runtimeDiagnosticID
+                )
+            }
             highlightTask?.cancel()
             highlightTask = nil
             guard FileHighlightPolicy.usesSyntaxHighlighting(byteCount: text.utf8.count) else {
@@ -411,7 +524,18 @@ struct FileViewer: NSViewRepresentable {
             }
 
             let languageName = language?.rawValue
+            runtimeHighlightState = "running"
+            runtimeHighlightStartedAt = Self.runtimeNow()
+            RuntimeDiagnosticsService.shared.record(
+                category: "editor",
+                name: "highlightStarted",
+                correlationID: runtimeDiagnosticID
+            )
+            let highlightSignpost = RuntimeSignposts.signposter.beginInterval("SyntaxHighlight")
             highlightTask = Task { [weak self] in
+                defer {
+                    RuntimeSignposts.signposter.endInterval("SyntaxHighlight", highlightSignpost)
+                }
                 do {
                     if delayed {
                         try await Task.sleep(nanoseconds: Self.highlightDelay)
@@ -429,6 +553,17 @@ struct FileViewer: NSViewRepresentable {
                         expectedGeneration: expectedGeneration
                     )
                 } catch {
+                    guard let self, self.highlightGeneration == expectedGeneration else { return }
+                    if error is CancellationError {
+                        self.runtimeHighlightState = "cancelled"
+                    } else {
+                        self.runtimeHighlightState = "failed"
+                        RuntimeDiagnosticsService.shared.record(
+                            category: "editor",
+                            name: "highlightFailed",
+                            correlationID: self.runtimeDiagnosticID
+                        )
+                    }
                     return
                 }
             }
@@ -477,6 +612,15 @@ struct FileViewer: NSViewRepresentable {
                 }
             }
             textStorage.endEditing()
+            runtimeHighlightDurationMs = max(0, Self.runtimeNow() - runtimeHighlightStartedAt) * 1_000
+            runtimeHighlightState = "idle"
+            highlightTask = nil
+            RuntimeDiagnosticsService.shared.record(
+                category: "editor",
+                name: "highlightCompleted",
+                durationMs: runtimeHighlightDurationMs,
+                correlationID: runtimeDiagnosticID
+            )
         }
 
         @MainActor
@@ -484,10 +628,25 @@ struct FileViewer: NSViewRepresentable {
             guard let scrollView,
                   let textView = scrollView.documentView as? NSTextView,
                   let textStorage = textView.textStorage else { return }
+            let applyStartedAt = Self.runtimeNow()
+            let signpost = RuntimeSignposts.signposter.beginInterval("TextApply")
+            defer {
+                RuntimeSignposts.signposter.endInterval("TextApply", signpost)
+                runtimeTextApplyDurationMs = max(0, Self.runtimeNow() - applyStartedAt) * 1_000
+                RuntimeDiagnosticsService.shared.record(
+                    category: "editor",
+                    name: "textApplied",
+                    durationMs: runtimeTextApplyDurationMs,
+                    metadata: ["bytes": .integer(runtimeContentBytes)],
+                    correlationID: runtimeDiagnosticID
+                )
+            }
             let origin = scrollView.contentView.bounds.origin
             let selection = textView.selectedRange()
             let string = text.string
             cachedText = string
+            updateRuntimeContentMetrics(string)
+            beginRuntimeLayoutGrace()
             isApplyingText = true
             textStorage.setAttributedString(text)
             isApplyingText = false
@@ -553,6 +712,177 @@ struct FileViewer: NSViewRepresentable {
             textView.needsLayout = true
             textView.needsDisplay = true
             lineNumberView?.needsDisplay = true
+        }
+
+        func recordScrollInput(beforeY: Double, afterY: Double, deltaY: Double) {
+            rollRuntimeWindowIfNeeded()
+            runtimeScrollInputs += 1
+            let maximumY = maximumRuntimeScrollY
+            let eligible = abs(deltaY) > 0.01
+                && maximumY > 1
+                && beforeY > 1
+                && beforeY < maximumY - 1
+            if abs(afterY - beforeY) > 0.5 {
+                runtimeBoundsChanges += 1
+                runtimeLastBoundsOriginY = afterY
+            } else if eligible {
+                runtimeEligibleNoMovementInputs += 1
+            }
+        }
+
+        func runtimeSnapshot() -> RuntimeEditorSnapshot {
+            rollRuntimeWindowIfNeeded()
+            let now = Self.runtimeNow()
+            let useCompletedWindow = now - runtimeCompletedWindowAt < 1.5
+            let clipBounds = scrollView?.contentView.bounds ?? .zero
+            let documentHeight = scrollView?.documentView?.frame.height ?? 0
+            let maximumY = max(0, documentHeight - clipBounds.height)
+            return RuntimeEditorSnapshot(
+                selectedControllerID: runtimeDiagnosticID,
+                contentBytes: runtimeContentBytes,
+                lineCount: runtimeLineCount,
+                viewportOriginY: clipBounds.origin.y,
+                viewportHeight: clipBounds.height,
+                documentHeight: documentHeight,
+                maximumScrollY: maximumY,
+                canScrollVertically: maximumY > 1,
+                scrollInputsWindow: useCompletedWindow
+                    ? runtimeCompletedScrollInputs : runtimeScrollInputs,
+                boundsChangesWindow: useCompletedWindow
+                    ? runtimeCompletedBoundsChanges : runtimeBoundsChanges,
+                eligibleNoMovementInputsWindow: useCompletedWindow
+                    ? runtimeCompletedEligibleNoMovementInputs : runtimeEligibleNoMovementInputs,
+                documentHeightChangesWindow: useCompletedWindow
+                    ? runtimeCompletedDocumentHeightChanges : runtimeDocumentHeightChanges,
+                highlightState: runtimeHighlightState,
+                highlightDurationMs: runtimeHighlightDurationMs,
+                highlightCancellationCount: runtimeHighlightCancellationCount,
+                textApplyDurationMs: runtimeTextApplyDurationMs,
+                attached: scrollView != nil && textView != nil
+            )
+        }
+
+        func runScrollProbe(delta: Double, restore: Bool) async -> (
+            status: String,
+            elapsedMs: Double,
+            result: [String: RuntimeScalar]
+        ) {
+            guard let scrollView else {
+                return ("notApplicable", 0, ["reason": .string("Editor is not attached.")])
+            }
+            let maximumY = maximumRuntimeScrollY
+            let originalOrigin = scrollView.contentView.bounds.origin
+            let beforeY = originalOrigin.y
+            guard maximumY > 1 else {
+                return ("notApplicable", 0, ["reason": .string("Editor has no vertical scroll range.")])
+            }
+            let targetY = min(max(0, beforeY + delta), maximumY)
+            guard abs(targetY - beforeY) > 0.5 else {
+                return ("notApplicable", 0, ["reason": .string("Requested scroll is already at an edge.")])
+            }
+            let startedAt = Self.runtimeNow()
+            let signpost = RuntimeSignposts.signposter.beginInterval("ActiveProbe")
+            defer {
+                if restore {
+                    scrollView.contentView.scroll(to: originalOrigin)
+                    scrollView.reflectScrolledClipView(scrollView.contentView)
+                }
+                RuntimeSignposts.signposter.endInterval("ActiveProbe", signpost)
+            }
+            scrollView.contentView.scroll(to: NSPoint(x: originalOrigin.x, y: targetY))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            await Task.yield()
+            let afterY = scrollView.contentView.bounds.origin.y
+            let elapsedMs = max(0, Self.runtimeNow() - startedAt) * 1_000
+            return (
+                "ok",
+                elapsedMs,
+                [
+                    "originBeforeY": .double(beforeY),
+                    "originAfterY": .double(afterY),
+                    "movementY": .double(afterY - beforeY),
+                    "maximumScrollY": .double(maximumY),
+                    "restored": .boolean(restore)
+                ]
+            )
+        }
+
+        private func recordBoundsChange() {
+            rollRuntimeWindowIfNeeded()
+            guard let scrollView else { return }
+            let bounds = scrollView.contentView.bounds
+            if abs(bounds.width - runtimeLastViewportWidth) > 1 {
+                runtimeLastViewportWidth = bounds.width
+                beginRuntimeLayoutGrace()
+            }
+            if abs(bounds.origin.y - runtimeLastBoundsOriginY) > 0.5 {
+                runtimeBoundsChanges += 1
+                runtimeLastBoundsOriginY = bounds.origin.y
+            }
+        }
+
+        private func recordDocumentHeightChange() {
+            rollRuntimeWindowIfNeeded()
+            guard let height = scrollView?.documentView?.frame.height else { return }
+            defer { runtimeLastDocumentHeight = height }
+            guard abs(height - runtimeLastDocumentHeight) > 1,
+                  Self.runtimeNow() >= runtimeLayoutGraceUntil else { return }
+            runtimeDocumentHeightChanges += 1
+            RuntimeDiagnosticsService.shared.record(
+                category: "editor",
+                name: "documentHeightChangedWithoutContentChange",
+                metadata: [
+                    "from": .double(runtimeLastDocumentHeight),
+                    "to": .double(height)
+                ],
+                correlationID: runtimeDiagnosticID
+            )
+        }
+
+        private func rollRuntimeWindowIfNeeded() {
+            let now = Self.runtimeNow()
+            guard now - runtimeWindowStartedAt >= 1 else { return }
+            if runtimeEligibleNoMovementInputs >= 3 && runtimeBoundsChanges == 0 {
+                RuntimeDiagnosticsService.shared.record(
+                    category: "editor",
+                    name: "scrollAnomalyWindowDetected",
+                    metadata: [
+                        "inputs": .integer(runtimeScrollInputs),
+                        "eligibleNoMovement": .integer(runtimeEligibleNoMovementInputs)
+                    ],
+                    correlationID: runtimeDiagnosticID
+                )
+            }
+            runtimeCompletedScrollInputs = runtimeScrollInputs
+            runtimeCompletedBoundsChanges = runtimeBoundsChanges
+            runtimeCompletedEligibleNoMovementInputs = runtimeEligibleNoMovementInputs
+            runtimeCompletedDocumentHeightChanges = runtimeDocumentHeightChanges
+            runtimeCompletedWindowAt = now
+            runtimeWindowStartedAt = now
+            runtimeScrollInputs = 0
+            runtimeBoundsChanges = 0
+            runtimeEligibleNoMovementInputs = 0
+            runtimeDocumentHeightChanges = 0
+        }
+
+        private func beginRuntimeLayoutGrace() {
+            runtimeLayoutGraceUntil = Self.runtimeNow() + 1
+        }
+
+        private func updateRuntimeContentMetrics(_ text: String) {
+            runtimeContentBytes = text.utf8.count
+            runtimeLineCount = text.isEmpty ? 0 : text.utf8.reduce(into: 1) { count, byte in
+                if byte == 0x0A { count += 1 }
+            }
+        }
+
+        private var maximumRuntimeScrollY: Double {
+            guard let scrollView else { return 0 }
+            return max(0, (scrollView.documentView?.frame.height ?? 0) - scrollView.contentView.bounds.height)
+        }
+
+        private static func runtimeNow() -> Double {
+            Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
         }
 
         @MainActor

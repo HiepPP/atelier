@@ -331,6 +331,65 @@ final class TerminalTabsModel {
         }
     }
 
+    func runtimeDiagnosticsSnapshot(workspaceRoot: URL) -> RuntimeMainSnapshot {
+        var workspace = RuntimeWorkspaceSnapshot(
+            active: true,
+            relativeRootName: workspaceRoot.lastPathComponent,
+            tabCount: tabs.count
+        )
+        var editor = RuntimeEditorSnapshot()
+        for tab in tabs {
+            switch tab.content {
+            case .terminal:
+                workspace.terminalTabCount += 1
+            case .file(let session):
+                workspace.fileTabCount += 1
+                workspace.loadedFileBytes += session.diagnosticLoadedBytes
+                if session.diagnosticLoadedBytes > 0 { workspace.fileSessionCount += 1 }
+                if tab.isPreview {
+                    workspace.previewFileCount += 1
+                } else {
+                    workspace.permanentFileCount += 1
+                }
+                if workspace.fileTabs.count < RuntimeDiagnosticsService.fileMetricCapacity,
+                   let relativePath = FileTreePathPolicy.relativePath(
+                       of: session.document.url,
+                       within: workspaceRoot
+                   ) {
+                    workspace.fileTabs.append(RuntimeFileTabMetric(
+                        relativePath: relativePath,
+                        loadedBytes: session.diagnosticLoadedBytes,
+                        loadState: session.diagnosticLoadState,
+                        isPreview: tab.isPreview
+                    ))
+                }
+            case .gitDiff:
+                workspace.gitDiffTabCount += 1
+            case .gemma:
+                workspace.gemmaTabCount += 1
+            }
+        }
+        if let selectedTab {
+            switch selectedTab.content {
+            case .terminal:
+                workspace.selectedTabKind = "terminal"
+            case .file(let session):
+                workspace.selectedTabKind = "file"
+                workspace.selectedFileRelativePath = FileTreePathPolicy.relativePath(
+                    of: session.document.url,
+                    within: workspaceRoot
+                )
+                editor = session.runtimeEditorSnapshot()
+                editor.selectedControllerID = session.runtimeControllerID
+            case .gitDiff:
+                workspace.selectedTabKind = "gitDiff"
+            case .gemma:
+                workspace.selectedTabKind = "gemma"
+            }
+        }
+        return RuntimeMainSnapshot(workspace: workspace, editor: editor)
+    }
+
     var openTerminalTabs: [OpenTerminalTab] {
         tabs.compactMap { tab in
             guard case .terminal(let session) = tab.content else { return nil }

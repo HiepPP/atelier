@@ -5,3 +5,5 @@ app/Atelier/dist/
 tmp/
 *.xcodeproj/xcuserdata/
 .DS_Store
+__pycache__/
+*.pyc

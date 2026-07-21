@@ -695,6 +695,24 @@ Rules:
 - Keep the workspace catalog on `MainActor`. Do not share workspace-owned model instances between sessions.
 - Keep preview state session-only. Keep navigation history session-only.
 
+## Runtime Diagnostics Contract
+
+Atelier exposes a terminal-first Runtime Probe for causal runtime evidence. Diagnostics must remain bounded, private, and independent from SwiftUI rendering.
+
+- Write schema-versioned snapshots atomically to the bundle cache at `Runtime/current/snapshot.json` no more than once per second.
+- Keep process sampling, heartbeat evaluation, snapshot encoding, mailbox polling, and file writes off the main thread.
+- Read workspace, tab, editor, and AppKit geometry only on `MainActor`. Transfer immutable `Sendable` snapshots to the diagnostics worker.
+- Allow one outstanding main-thread heartbeat. Never queue heartbeat work while an earlier ping remains pending.
+- Reuse `ProcessMetrics` and the watchdog sample cadence. Never run two process samplers concurrently.
+- Keep the flight recorder at 512 events. Aggregate scroll counters into one-second windows instead of recording each frame.
+- Record only scalar metrics, diagnostic identifiers, and workspace-relative paths. Never record file content, selections, terminal output, prompts, responses, diffs, environment values, or credentials.
+- Keep verdicts heuristic. Every verdict includes severity, confidence, summary, and raw evidence.
+- Keep active probes local to the generated cache mailbox. Use one request at a time, atomic files, current-user permissions, bounded timeouts, and reversible editor scroll restoration.
+- Active editor probes must not change focus, selection, content, undo state, or word-wrap state. They must not force full-document layout.
+- Diagnostics failures must degrade independently. They must never crash, freeze, force-exit, or alter existing watchdog breach behavior.
+- Disable production diagnostics for `--selftest` and when `ATELIER_DISABLE_RUNTIME_DIAGNOSTICS=1`.
+- `atelier-doctor capture` is read-only. Each collector reports its own status so one failure never discards other evidence.
+
 ## Verification Rules
 
 Every UI change must pass deterministic and native checks.

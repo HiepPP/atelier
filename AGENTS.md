@@ -113,6 +113,249 @@ These rules come from a shipped crash: zooming the window crossed a width breakp
 - When investigating a crash, read the full `.ips` report, including `asiBacktraces`, not only the exception summary.
 - Pure breakpoint policy needs a matching UI smoke that drives resize and zoom across each breakpoint. Unit tests on the policy alone do not cover the layout-pass wiring.
 
+## Reading Atelier Runtime Evidence
+
+This is a runtime-reading guide, not an implementation-reading guide. Start with live evidence. Do not open diagnostics source or query GitNexus until the runtime evidence identifies a useful clue.
+
+### Runtime Mental Model
+
+Read the snapshot as six independent layers. One layer supplies context for the next layer.
+
+| Layer | Question it answers | Primary fields |
+|-------|---------------------|----------------|
+| Process | Is the whole process busy or growing? | PID, uptime, CPU delta, CPU time, physical footprint |
+| Main thread | Can AppKit still service work? | Last heartbeat, heartbeat age, pending heartbeat |
+| Workspace | What user state was active? | Workspace name, selected tab, tab counts, loaded file bytes |
+| Editor | What was the selected editor doing? | Controller identity, geometry, scroll windows, height changes, highlight state |
+| Diagnostics | Can this evidence be trusted? | Snapshot age, event count, dropped events, flush duration, write error |
+| Verdicts | Which hypothesis deserves the next check? | Code, severity, confidence, summary, raw evidence |
+
+Never skip directly to verdicts. A verdict is a heuristic pointer. The raw fields and capture artifacts remain the evidence.
+
+### Collection Order
+
+Use terminal commands from the repository root. Keep this pass read-only.
+
+```bash
+app/Atelier/scripts/atelier-doctor status --json
+app/Atelier/scripts/atelier-doctor status --json
+app/Atelier/scripts/atelier-doctor status --json
+app/Atelier/scripts/atelier-doctor watch --interval 1
+app/Atelier/scripts/atelier-doctor probe main
+app/Atelier/scripts/atelier-doctor probe editor
+app/Atelier/scripts/atelier-doctor probe editor-scroll --delta 400 --restore
+app/Atelier/scripts/atelier-doctor capture --seconds 3
+```
+
+- Record the exact trigger time before reproducing the issue.
+- Collect three status snapshots across at least two snapshot intervals.
+- Use `watch` when the symptom develops over time. Stop it cleanly with Ctrl+C.
+- Run `capture` immediately after the symptom. Do not change tabs or window state first.
+- Run editor probes only when a text editor is selected.
+- If the CLI cannot respond, use `pgrep -x Atelier`, then external `sample` on that PID.
+
+### Read the Status Envelope First
+
+Read fields outside `snapshot` before reading internal metrics.
+
+| Field | Healthy reading | Suspicious reading | Meaning |
+|-------|-----------------|--------------------|---------|
+| `status` | `healthy` | `stale`, `degraded`, or `stopped` | Whether the CLI found a running app and usable snapshot |
+| `pid` | Matches the active Atelier process | Missing or changes unexpectedly | Which process every later artifact must match |
+| `schemaVersion` | `1` | Missing or unsupported | Whether this guide can interpret the JSON contract |
+| `snapshotAgeSeconds` | Below the stale threshold | Increasing across reads | Whether the writer is still publishing evidence |
+| `snapshotPath` | Bundle cache Runtime path | Unexpected location | Which generated file the CLI read |
+
+Stop normal interpretation when status is `degraded`. Report the degraded reason first. A malformed or missing snapshot cannot prove application health.
+
+### Read Snapshot Time Before Values
+
+- Compare `generatedAt` across three reads. It should advance about once per second.
+- Compare `monotonicTimeSeconds` for duration and event correlation.
+- Use `generatedAt` for wall-clock matching with logs and reports.
+- Use monotonic time for heartbeat age, event order, probe duration, and staleness.
+- If values repeat because `generatedAt` did not advance, they are one observation, not three samples.
+
+### Read Process and Main Thread Together
+
+| Signal | How to read it | What it can support |
+|--------|----------------|---------------------|
+| `cpuPercent` | Compare several fresh snapshots and `ps`. Look for sustained values | Process-level load, never root cause alone |
+| `cpuTimeSeconds` | Confirm it keeps rising while CPU remains high | Real CPU consumption instead of one noisy percentage |
+| `physicalFootprintBytes` | Compare trend before and after the trigger | Memory pressure or retention suspicion |
+| `heartbeatAgeMs` | Compare with the 250-500 ms cadence | Main-thread responsiveness |
+| `pendingHeartbeat` | Read with age, never alone | `true` is normal while one ping is in flight |
+| `lastHeartbeatAt` | Compare across fresh snapshots | Whether the main actor still acknowledges work |
+
+Use these combinations:
+
+| Heartbeat | CPU | Initial classification |
+|-----------|-----|------------------------|
+| Healthy | Low | Normal idle or non-CPU issue |
+| Healthy | Sustained high | Background CPU loop or main work between acknowledgements |
+| Stale above 1,000 ms | Sustained high | Main-thread CPU-bound suspected |
+| Stale above 1,000 ms | Low | Main-thread blocked or waiting suspected |
+
+Do not call low CPU healthy when the heartbeat is stale. Do not call high CPU a loop without a repeating sample stack.
+
+### Read Workspace Context Before Editor Metrics
+
+- `active` tells whether a workspace exists.
+- `relativeRootName` identifies the workspace without exposing an absolute path.
+- `selectedTabKind` decides which editor fields are applicable.
+- Tab counts explain the expected number of retained sessions and controllers.
+- `loadedFileBytes` is total retained file content, not proof of a leak.
+- `fileSessionCount` should be read with file-tab counts and close events.
+- `fileTabs` gives per-file byte count, load state, and preview state without content.
+
+If `selectedTabKind` is `terminal`, an unattached editor and zero editor geometry are expected. Do not diagnose an editor failure from those zeros.
+
+### Read Editor Metrics as One Geometry State
+
+| Field group | How to read it | Suspicious pattern |
+|-------------|----------------|--------------------|
+| Controller | Compare selected ID, live count, and expected count | Live remains above expected after the grace window |
+| Content | Compare bytes and line count only when content changes | Bytes remain after the owning file session closes |
+| Viewport | Read origin, viewport height, document height, and maximum scroll together | Impossible range, changing document height, or origin outside range |
+| Scroll window | Read inputs, bounds changes, and eligible no-movement inputs together | Several eligible inputs with no bounds movement away from edges |
+| Height window | Read height-change count with recent content, font, wrap, or resize activity | Three or more unexplained changes in one window |
+| Highlight | Read state, duration, and cancellation count as a sequence | Long running state or repeated cancellation without completion |
+| Text apply | Compare duration only when a `textApplied` event occurred | Repeated long applies that align with the symptom |
+
+`canScrollVertically` and `maximumScrollY` must both show remaining range. A no-movement input at the top or bottom edge is not an anomaly.
+
+### Read Diagnostics Health Before Trusting Absence
+
+- `eventCount` shows how much recent context is available.
+- `droppedEventCount` means older recorder events were evicted by the hard cap.
+- `lastFlushDurationMs` shows writer cost. Read its trend, not one flush.
+- `lastWriteError` must be `null` for a healthy writer.
+- An empty verdict list only means no current heuristic crossed its threshold.
+- Stale snapshots cannot prove that counters stayed zero.
+
+### Read Probe Results
+
+| Probe | `ok` means | `notApplicable` means | `timeout` means |
+|-------|------------|-----------------------|-----------------|
+| `main` | Main actor acknowledged and returned latency | Not normally expected | Main actor did not answer before the mailbox timeout |
+| `editor` | Fresh selected-editor snapshot was read without forcing layout | No selected text editor or no mounted editor | Main actor could not return editor state |
+| `editor-scroll` | Origin moved toward the clamped target and cleanup ran | No editor, no scroll range, or request already at an edge | Probe could not finish before timeout |
+
+For `editor-scroll`, compare `originBeforeY`, `originAfterY`, `movementY`, `maximumScrollY`, elapsed time, and `restored`. Positive movement with `restored: true` supports that the reversible probe and cleanup path completed.
+
+### Read Capture Artifacts in Order
+
+| Order | Artifact | Read | Extract |
+|------:|----------|------|---------|
+| 1 | `manifest.json` | Collector status, exit code, PID, timestamp | Which artifacts are trustworthy and which are degraded |
+| 2 | `snapshot.json` | Same field order as live status | Frozen runtime state near capture time |
+| 3 | `flight-recorder.json` | Monotonic event order and correlation IDs | What changed immediately before and during the symptom |
+| 4 | `sample.txt` | Main thread, busy threads, repeated stacks, stack summary | Where CPU time or waiting accumulated |
+| 5 | `log.txt` | Faults, errors, RuntimeDiagnostics category, signpost timing | Failed operations and interval boundaries |
+| 6 | `vmmap-summary.txt` | Physical footprint and largest memory regions | Which memory class dominates the process |
+| 7 | `diagnostic-reports.json` | Report timestamps and paths | Whether the reproduction created a new crash or hang report |
+
+One degraded collector does not invalidate successful collectors. Qualify only the conclusion that depended on the missing evidence.
+
+### Read the Flight Recorder as a Timeline
+
+1. Start from the recorded trigger time.
+2. Select the final 5-10 seconds around that time.
+3. Sort by `monotonicTimeSeconds`, not JSON position assumptions.
+4. Group by `correlationID` for one controller, tab, session, or probe.
+5. Read lifecycle pairs and missing counterparts.
+6. Compare event durations with snapshot counters and sample stacks.
+
+Important sequences:
+
+```text
+loadStarted -> loadCompleted | loadCancelled
+nativeEditorInitialized -> nativeEditorMounted -> nativeEditorAttached
+nativeEditorDetached -> nativeEditorStopped -> nativeEditorDeinitialized
+highlightStarted -> highlightCompleted | highlightCancelled | highlightFailed
+wordWrapLayoutChanged | fontLayoutChanged -> grace window -> stable height
+editor-scroll probe -> movement result -> restore
+```
+
+A missing counterpart is a clue, not proof. The capture window may begin after the matching start event or end before cleanup.
+
+### Read Sample Output
+
+Read the sample in this order:
+
+1. Confirm the sampled PID matches status and manifest.
+2. Find `com.apple.main-thread` and inspect its dominant repeated stack.
+3. Inspect other threads with repeated compute frames.
+4. Read `Sort by top of stack` for dominant leaf frames.
+5. Count recurrence across samples. Ignore one-off frames.
+6. Match hot frames to the flight-recorder time window and symptom class.
+
+```bash
+rg -n "Call graph:|com.apple.main-thread|RuntimeDiagnostics|TextKit|layout|wait|lock|Total number in stack|Sort by top of stack" <capture>/sample.txt
+```
+
+| Sample pattern | Runtime interpretation |
+|----------------|------------------------|
+| Repeating main-thread compute frames, stale heartbeat, high CPU | Main-thread CPU-bound clue |
+| Main thread parked in wait or lock, stale heartbeat, low CPU | Main-thread blocking clue |
+| Repeating background compute frames, healthy heartbeat, high CPU | Background loop clue |
+| Repeating layout or TextKit frames plus height churn | Layout churn clue |
+| Diagnostics queue dominates samples or flush duration grows | Diagnostics overhead clue |
+
+The hottest frame is not automatically the cause. Prefer the first app-owned frame that repeats and explains the broken runtime state.
+
+### Read Memory Evidence
+
+- Use `physicalFootprintBytes` and `vmmap-summary.txt`. Do not substitute RSS.
+- Compare footprint before the trigger, during growth, and after closing the suspected tabs.
+- Compare loaded file bytes, file-session count, file-tab count, and controller counts at the same times.
+- A falling loaded-byte count with a rising footprint points away from file-content retention.
+- A stable loaded-byte count with growing controllers points toward lifecycle retention.
+- A large stable footprint is not a leak. A repeatable upward trend without release is the clue.
+
+### Cross-Check Verdicts
+
+| Verdict | Required cross-check |
+|---------|----------------------|
+| `mainThreadCpuBoundSuspected` | Stale heartbeat, sustained CPU, repeating main compute stack |
+| `mainThreadBlockedSuspected` | Stale heartbeat, low CPU, wait or lock evidence |
+| `scrollInputWithoutMovement` | Remaining scroll range, away from edge, editor-scroll probe |
+| `documentHeightChurn` | Height timeline without content, font, wrap, or resize cause |
+| `editorControllerLeakSuspected` | Lifecycle imbalance and live count above expected after grace |
+| `physicalFootprintPressure` | Footprint trend and `vmmap` region evidence |
+| `diagnosticsStale` | Live PID with non-advancing `generatedAt` |
+| `diagnosticsWriterFailure` | Write error, flush-failure event, and filesystem or collector evidence |
+
+Never restate a verdict as root cause. Report it as a hypothesis with supporting or conflicting evidence.
+
+### Produce the Trace Clue
+
+The runtime-reading result must narrow the next investigation to one thread, event sequence, state transition, or retained identity.
+
+```text
+Symptom:
+Trigger time:
+PID and workspace context:
+Freshness and diagnostics health:
+Heartbeat and CPU pattern:
+Editor or retention pattern:
+Recorder sequence and correlation ID:
+Repeated sample stack:
+Verdict cross-check:
+Most useful trace clue:
+Confidence:
+Missing evidence:
+Artifact path:
+```
+
+Only after this packet exists should the agent read implementation code or use GitNexus. Start GitNexus with the hot app-owned symbol, event name, or lifecycle transition found above. Do not start with a broad architecture query.
+
+The handoff chain is:
+
+```text
+runtime symptom -> fresh state -> time-correlated events -> repeated stack -> one trace clue
+```
+
 ## Testing Guidelines
 
 Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swift` for packaged binary checks. Every change must pass build, tests, and self-test. Run native UI checks with Atelier's window zoomed to full size by default. Do not test every window size. Record exact failures and screenshots when relevant.
@@ -151,7 +394,7 @@ Pull requests should include a short problem statement, implementation summary, 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **atelier** (6992 symbols, 44919 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **atelier** (7393 symbols, 47000 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
