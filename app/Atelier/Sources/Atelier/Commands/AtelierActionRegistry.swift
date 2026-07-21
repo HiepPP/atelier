@@ -5,6 +5,8 @@ nonisolated enum AtelierActionID: String, CaseIterable, Identifiable, Sendable {
     case closeWorkspace
     case nextWorkspace
     case newTerminal
+    case newClaudeCodeTerminal
+    case newCodexTerminal
     case closeTab
     case navigateBack
     case navigateForward
@@ -45,6 +47,8 @@ struct AtelierActionHandlers {
     let closeWorkspace: () -> Void
     let nextWorkspace: () -> Void
     let newTerminal: () -> Void
+    let newClaudeCodeTerminal: () -> Void
+    let newCodexTerminal: () -> Void
     let closeTab: () -> Void
     let navigateBack: () -> Void
     let navigateForward: () -> Void
@@ -61,6 +65,8 @@ struct AtelierActionHandlers {
             closeWorkspace: model.closeWorkspace,
             nextWorkspace: model.selectNextWorkspace,
             newTerminal: { model.workspace?.terminalTabs.add() },
+            newClaudeCodeTerminal: { model.workspace?.terminalTabs.addAndRun("c") },
+            newCodexTerminal: { model.workspace?.terminalTabs.addAndRun("cc") },
             closeTab: { model.workspace?.terminalTabs.closeSelectedTab() },
             navigateBack: { model.workspace?.terminalTabs.navigateBack() },
             navigateForward: { model.workspace?.terminalTabs.navigateForward() },
@@ -106,6 +112,20 @@ nonisolated enum AtelierActionRegistry {
             category: "Terminal",
             systemImage: "terminal",
             shortcutLabel: "Command-T"
+        ),
+        AtelierActionDescriptor(
+            id: .newClaudeCodeTerminal,
+            title: "New Claude Code Terminal",
+            category: "Terminal",
+            systemImage: "terminal",
+            shortcutLabel: "Command-Shift-,"
+        ),
+        AtelierActionDescriptor(
+            id: .newCodexTerminal,
+            title: "New Codex Terminal",
+            category: "Terminal",
+            systemImage: "terminal",
+            shortcutLabel: "Command-Shift-."
         ),
         AtelierActionDescriptor(
             id: .closeTab,
@@ -201,7 +221,7 @@ nonisolated enum AtelierActionRegistry {
             context.canCloseWorkspace
         case .nextWorkspace:
             context.canCycleWorkspaces
-        case .newTerminal, .openGemma:
+        case .newTerminal, .newClaudeCodeTerminal, .newCodexTerminal, .openGemma:
             context.hasWorkspace
         case .closeTab:
             context.canCloseTab
@@ -250,6 +270,10 @@ nonisolated enum AtelierActionRegistry {
             handlers.nextWorkspace()
         case .newTerminal:
             handlers.newTerminal()
+        case .newClaudeCodeTerminal:
+            handlers.newClaudeCodeTerminal()
+        case .newCodexTerminal:
+            handlers.newCodexTerminal()
         case .closeTab:
             handlers.closeTab()
         case .navigateBack:

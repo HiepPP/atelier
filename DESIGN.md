@@ -661,6 +661,9 @@ The five background features, all read-only and cancellable:
 |---|---|
 | `Cmd-O` | Open Folder |
 | `Cmd-T` | New Terminal |
+| `Cmd-Shift-,` | New Terminal and run `c` for Claude Code |
+| `Cmd-Shift-.` | New Terminal and run `cc` for Codex |
+| `Cmd-Shift-;` | New empty terminal |
 | `Cmd-P` | Quick Open |
 | `Cmd-Shift-P` | Command Palette |
 | `Cmd-F` | Find in active text file |
@@ -683,6 +686,8 @@ The five background features, all read-only and cancellable:
 Rules:
 
 - Menu items, palette actions, and toolbar controls must call the same typed action.
+- Agent terminal shortcuts create a fresh terminal in the active workspace, type the exact alias,
+  and submit it once.
 - `Cmd-W` never closes the workspace window. With no active tab or only the final terminal active, it does nothing.
 - `Cmd-W` asks for confirmation only when Claude Code or Codex is the detected foreground agent.
 - Show live enabled state in every action surface.

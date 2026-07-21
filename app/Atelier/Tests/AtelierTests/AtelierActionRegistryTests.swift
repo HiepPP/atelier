@@ -14,6 +14,8 @@ struct AtelierActionRegistryTests {
             .closeWorkspace,
             .nextWorkspace,
             .newTerminal,
+            .newClaudeCodeTerminal,
+            .newCodexTerminal,
             .closeTab,
             .navigateBack,
             .navigateForward,
@@ -45,6 +47,8 @@ struct AtelierActionRegistryTests {
         #expect(AtelierActionRegistry.isEnabled(.openFolder, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.closeWorkspace, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.newTerminal, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.newClaudeCodeTerminal, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.newCodexTerminal, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.closeTab, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.navigateBack, context: empty))
         #expect(AtelierActionRegistry.isEnabled(.navigateForward, context: empty))
@@ -69,6 +73,8 @@ struct AtelierActionRegistryTests {
         )
         #expect(AtelierActionRegistry.isEnabled(.closeWorkspace, context: unavailableSelection))
         #expect(!AtelierActionRegistry.isEnabled(.newTerminal, context: unavailableSelection))
+        #expect(!AtelierActionRegistry.isEnabled(.newClaudeCodeTerminal, context: unavailableSelection))
+        #expect(!AtelierActionRegistry.isEnabled(.newCodexTerminal, context: unavailableSelection))
     }
 
     @Test("Focus mode title reflects current state")
@@ -88,6 +94,8 @@ struct AtelierActionRegistryTests {
             closeWorkspace: { recorded.append(.closeWorkspace) },
             nextWorkspace: { recorded.append(.nextWorkspace) },
             newTerminal: { recorded.append(.newTerminal) },
+            newClaudeCodeTerminal: { recorded.append(.newClaudeCodeTerminal) },
+            newCodexTerminal: { recorded.append(.newCodexTerminal) },
             closeTab: { recorded.append(.closeTab) },
             navigateBack: { recorded.append(.navigateBack) },
             navigateForward: { recorded.append(.navigateForward) },

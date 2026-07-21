@@ -24,6 +24,24 @@ struct AppCommands: Commands {
             .keyboardShortcut("t", modifiers: .command)
             .disabled(!isEnabled(.newTerminal))
 
+            Button(title(.newClaudeCodeTerminal)) {
+                perform(.newClaudeCodeTerminal)
+            }
+            .keyboardShortcut(",", modifiers: [.command, .shift])
+            .disabled(!isEnabled(.newClaudeCodeTerminal))
+
+            Button(title(.newCodexTerminal)) {
+                perform(.newCodexTerminal)
+            }
+            .keyboardShortcut(".", modifiers: [.command, .shift])
+            .disabled(!isEnabled(.newCodexTerminal))
+
+            Button("New Empty Terminal") {
+                perform(.newTerminal)
+            }
+            .keyboardShortcut(";", modifiers: [.command, .shift])
+            .disabled(!isEnabled(.newTerminal))
+
             Button(title(.closeWorkspace)) {
                 perform(.closeWorkspace)
             }

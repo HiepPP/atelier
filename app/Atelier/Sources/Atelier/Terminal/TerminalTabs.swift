@@ -648,6 +648,12 @@ final class TerminalTabsModel {
         select(tab)
     }
 
+    func addAndRun(_ command: String) {
+        guard !command.isEmpty else { return }
+        add()
+        _ = pasteIntoSelectedTerminal("\(command)\n")
+    }
+
     func closeAll() {
         for tab in tabs {
             switch tab.content {
