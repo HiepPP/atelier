@@ -232,6 +232,7 @@ nonisolated enum GitProcessEnvironment {
             paths.append(directory)
         }
         environment["PATH"] = paths.joined(separator: ":")
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
         return environment
     }
 }

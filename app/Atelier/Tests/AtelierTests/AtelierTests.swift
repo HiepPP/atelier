@@ -311,6 +311,7 @@ struct AtelierTests {
             environment["PATH"]
                 == "/usr/bin:/custom/bin:/usr/local/bin:/opt/homebrew/bin:/Users/tester/.local/bin"
         )
+        #expect(environment["GIT_OPTIONAL_LOCKS"] == "0")
         #expect(environment["SSH_AUTH_SOCK"] == "/tmp/agent.sock")
     }
 

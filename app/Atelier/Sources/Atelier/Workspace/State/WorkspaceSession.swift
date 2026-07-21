@@ -72,10 +72,14 @@ final class WorkspaceSession {
         agentResponses.start()
         gemmaSidecar.start()
 
-        let watcher = FileWatcher(path: rootURL.path) { [weak self] in
+        let watcher = FileWatcher(path: rootURL.path) { [weak self] invalidation in
             guard let self else { return }
-            invalidateFileTree()
-            gitModel.invalidate()
+            if invalidation.contains(.workspaceContent) {
+                invalidateFileTree()
+            }
+            gitModel.invalidate(
+                repositoryMetadataChanged: invalidation.contains(.gitMetadata)
+            )
         }
         fileWatcher = watcher
         watcher.start()

@@ -1,17 +1,71 @@
 import Foundation
 import CoreServices
 
+nonisolated struct FileWatcherInvalidation: OptionSet, Sendable {
+    let rawValue: UInt8
+
+    static let workspaceContent = FileWatcherInvalidation(rawValue: 1 << 0)
+    static let gitMetadata = FileWatcherInvalidation(rawValue: 1 << 1)
+}
+
+nonisolated enum FileWatcherEventPolicy {
+    static func invalidation(
+        paths: [String],
+        rootPath: String,
+        mustRescan: Bool = false
+    ) -> FileWatcherInvalidation {
+        if mustRescan {
+            return [.workspaceContent, .gitMetadata]
+        }
+
+        var result: FileWatcherInvalidation = []
+        for eventPath in paths {
+            if isRelevantGitMetadata(eventPath, rootPath: rootPath) {
+                result.insert(.gitMetadata)
+            } else if !isGitInternal(eventPath, rootPath: rootPath),
+                      !IgnoreRules.shouldIgnoreEventPath(eventPath) {
+                result.insert(.workspaceContent)
+            }
+        }
+        return result
+    }
+
+    private static func isRelevantGitMetadata(_ eventPath: String, rootPath: String) -> Bool {
+        let gitRoot = rootPath.hasSuffix("/") ? "\(rootPath).git" : "\(rootPath)/.git"
+        guard eventPath.hasPrefix("\(gitRoot)/") else { return false }
+
+        var relativePath = String(eventPath.dropFirst(gitRoot.count + 1))
+        if relativePath.hasSuffix(".lock") {
+            relativePath.removeLast(5)
+        }
+        return relativePath == "index"
+            || relativePath == "HEAD"
+            || relativePath == "packed-refs"
+            || relativePath == "refs"
+            || relativePath.hasPrefix("refs/")
+    }
+
+    private static func isGitInternal(_ eventPath: String, rootPath: String) -> Bool {
+        let gitRoot = rootPath.hasSuffix("/") ? "\(rootPath).git" : "\(rootPath)/.git"
+        return eventPath == gitRoot || eventPath.hasPrefix("\(gitRoot)/")
+    }
+}
+
 // Core Services invokes callbacks across threads. Every mutable field is protected by stateLock.
 nonisolated final class FileWatcher: @unchecked Sendable {
     private let path: String
-    private let onInvalidate: @MainActor @Sendable () -> Void
+    private let onInvalidate: @MainActor @Sendable (FileWatcherInvalidation) -> Void
     private let queue = DispatchQueue(label: "app.atelier.file-watcher", qos: .utility)
     private let stateLock = NSLock()
     private var stream: FSEventStreamRef?
     private var pendingWork: DispatchWorkItem?
+    private var pendingInvalidation: FileWatcherInvalidation = []
     private var generation = 0
 
-    init(path: String, onInvalidate: @escaping @MainActor @Sendable () -> Void) {
+    init(
+        path: String,
+        onInvalidate: @escaping @MainActor @Sendable (FileWatcherInvalidation) -> Void
+    ) {
         self.path = path
         self.onInvalidate = onInvalidate
     }
@@ -60,6 +114,7 @@ nonisolated final class FileWatcher: @unchecked Sendable {
         generation += 1
         let work = pendingWork
         pendingWork = nil
+        pendingInvalidation = []
         stateLock.unlock()
         work?.cancel()
         guard let stream else { return }
@@ -81,21 +136,23 @@ nonisolated final class FileWatcher: @unchecked Sendable {
                 | kFSEventStreamEventFlagRootChanged
         )
         let mustRescan = flags.contains { $0 & rescanFlags != 0 }
-        // Build products and dependency directories churn thousands of events
-        // during compiles; reacting to them spawns git and reloads the file
-        // tree for content the app never shows.
-        guard mustRescan || paths.contains(where: {
-            !isGitInternal($0) && !IgnoreRules.shouldIgnoreEventPath($0)
-        }) else { return }
+        let invalidation = FileWatcherEventPolicy.invalidation(
+            paths: paths,
+            rootPath: path,
+            mustRescan: mustRescan
+        )
+        guard !invalidation.isEmpty else { return }
 
         stateLock.lock()
         pendingWork?.cancel()
+        pendingInvalidation.formUnion(invalidation)
         let expectedGeneration = generation
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.isCurrent(expectedGeneration) else { return }
+            guard let self,
+                  let invalidation = self.takePendingInvalidation(expectedGeneration) else { return }
             let onInvalidate = self.onInvalidate
             Task { @MainActor in
-                onInvalidate()
+                onInvalidate(invalidation)
             }
         }
         pendingWork = work
@@ -103,13 +160,17 @@ nonisolated final class FileWatcher: @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + 0.2, execute: work)
     }
 
-    private func isCurrent(_ expectedGeneration: Int) -> Bool {
+    private func takePendingInvalidation(
+        _ expectedGeneration: Int
+    ) -> FileWatcherInvalidation? {
         stateLock.lock()
         defer { stateLock.unlock() }
-        return generation == expectedGeneration && stream != nil
-    }
-
-    private func isGitInternal(_ eventPath: String) -> Bool {
-        eventPath == "\(path)/.git" || eventPath.contains("\(path)/.git/")
+        guard generation == expectedGeneration,
+              stream != nil,
+              !pendingInvalidation.isEmpty else { return nil }
+        let invalidation = pendingInvalidation
+        pendingInvalidation = []
+        pendingWork = nil
+        return invalidation
     }
 }

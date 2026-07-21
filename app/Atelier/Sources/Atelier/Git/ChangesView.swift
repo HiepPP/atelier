@@ -168,6 +168,7 @@ final class GitWorkspaceModel {
     private var commitMessageTask: Task<Void, Never>?
     private var refreshID = UUID()
     private var statusRefreshID = UUID()
+    private var pendingRepositoryMetadataRefresh = false
 
     init(
         workspacePath: String,
@@ -250,14 +251,23 @@ final class GitWorkspaceModel {
     }
 
     /// Filesystem-driven invalidations arrive in bursts; debounce the git
-    /// subprocess refresh so a stream of events yields one status refresh.
-    func invalidate() {
+    /// subprocess refresh. Repository metadata changes require a full snapshot
+    /// so branch and ref state cannot remain stale.
+    func invalidate(repositoryMetadataChanged: Bool = false) {
         onRepositoryChange()
+        pendingRepositoryMetadataRefresh = pendingRepositoryMetadataRefresh
+            || repositoryMetadataChanged
         invalidateTask?.cancel()
         invalidateTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
-            guard !Task.isCancelled else { return }
-            self?.refreshStatus()
+            guard let self, !Task.isCancelled else { return }
+            let refreshRepositoryMetadata = pendingRepositoryMetadataRefresh
+            pendingRepositoryMetadataRefresh = false
+            if refreshRepositoryMetadata {
+                refresh()
+            } else {
+                refreshStatus()
+            }
         }
     }
 
@@ -267,6 +277,7 @@ final class GitWorkspaceModel {
         actionTask?.cancel()
         invalidateTask?.cancel()
         invalidateTask = nil
+        pendingRepositoryMetadataRefresh = false
         cancelCommitMessageGeneration()
         pushPhase = .idle
     }

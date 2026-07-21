@@ -5,6 +5,74 @@ import Testing
 @Suite("Workspace lifecycle")
 @MainActor
 struct WorkspaceLifecycleTests {
+    @Test("Watcher accepts only visible Git metadata")
+    func gitMetadataEventPolicy() {
+        let root = "/tmp/atelier-watcher-policy"
+        let relevantPaths = [
+            "\(root)/.git/index",
+            "\(root)/.git/index.lock",
+            "\(root)/.git/HEAD",
+            "\(root)/.git/HEAD.lock",
+            "\(root)/.git/packed-refs",
+            "\(root)/.git/refs/heads/main",
+            "\(root)/.git/refs/remotes/origin/main.lock"
+        ]
+        let ignoredPaths = [
+            "\(root)/.git/objects/12/3456",
+            "\(root)/.git/logs/HEAD",
+            "\(root)/.git/COMMIT_EDITMSG"
+        ]
+
+        for path in relevantPaths {
+            #expect(
+                FileWatcherEventPolicy.invalidation(paths: [path], rootPath: root)
+                    == .gitMetadata
+            )
+        }
+        for path in ignoredPaths {
+            #expect(
+                FileWatcherEventPolicy.invalidation(paths: [path], rootPath: root).isEmpty
+            )
+        }
+    }
+
+    @Test("Watcher preserves ignored paths and coalesces invalidation kinds")
+    func fileWatcherEventPolicy() {
+        let root = "/tmp/atelier-watcher-policy"
+
+        #expect(
+            FileWatcherEventPolicy.invalidation(
+                paths: ["\(root)/Sources/App.swift"],
+                rootPath: root
+            ) == .workspaceContent
+        )
+        #expect(
+            FileWatcherEventPolicy.invalidation(
+                paths: ["\(root)/.build/debug/Atelier"],
+                rootPath: root
+            ).isEmpty
+        )
+        #expect(
+            FileWatcherEventPolicy.invalidation(
+                paths: ["\(root)/node_modules/package/index.js"],
+                rootPath: root
+            ).isEmpty
+        )
+        #expect(
+            FileWatcherEventPolicy.invalidation(
+                paths: ["\(root)/Sources/App.swift", "\(root)/.git/HEAD"],
+                rootPath: root
+            ) == [.workspaceContent, .gitMetadata]
+        )
+        #expect(
+            FileWatcherEventPolicy.invalidation(
+                paths: ["\(root)/.build/debug/Atelier"],
+                rootPath: root,
+                mustRescan: true
+            ) == [.workspaceContent, .gitMetadata]
+        )
+    }
+
     @Test("Catalog persistence round-trips and decodes legacy state")
     func persistenceAndMigration() async throws {
         let root = temporaryDirectory("persistence")

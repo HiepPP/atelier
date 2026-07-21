@@ -518,6 +518,13 @@ Persistence boundaries:
 ### Git
 
 - Keep repository, branch, summary, commit input, and change groups in the sidebar.
+- Refresh Git state after external commits, pushes, checkouts, and branch switches by
+  watching only repository metadata that can change the visible snapshot: `.git/index`,
+  `.git/HEAD`, `.git/packed-refs`, and `.git/refs/**`.
+- Keep unrelated `.git` internals, build products, and dependency directories ignored.
+  Coalesce watcher bursts through the existing debounce before refreshing.
+- Run Atelier-owned Git subprocesses with optional locks disabled so background reads
+  never rewrite watched metadata and trigger another refresh.
 - Place a compact Gemma action beside the commit-message label.
 - Generate one editable Conventional Commit subject from changed file paths only. Never send diff or file contents.
 - Replace the commit action with Push. Push must generate a fresh Gemma subject, commit the
