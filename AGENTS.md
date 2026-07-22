@@ -58,6 +58,16 @@ Use four-space indentation and standard Swift API naming. Types use `UpperCamelC
 
 Use `rg` for plain-text repository search: literal strings, symbol names, file globs, quick greps. Use GitNexus for code intelligence: impact analysis before edits, caller/callee context, execution-flow tracing, safe renames, and pre-commit change detection. Pick the tool by purpose; do not use GitNexus as a text grep, and do not use `rg` to reason about the call graph.
 
+## Issue Investigation Workflow
+
+- Do not use Computer Use, screenshots, or screen recordings to diagnose or prove an issue fix unless the user explicitly requests visual verification.
+- Start with `rg` to locate exact strings, conditional branches, state mutations, and nearby symbols.
+- Use GitNexus `query`, `context`, and `impact` to trace callers, callees, and execution flows around the suspected symbol.
+- Trace the reported transition directly through source code: user action -> state mutation -> conditional branch -> affected symbol.
+- Compare the working and failing paths. Use code-backed reasoning to discard hypotheses that do not match the exact trigger.
+- Narrow the change to the smallest causal symbol and state transition before editing. Do not widen the fix into adjacent cleanup.
+- Verify with focused code inspection, deterministic tests, build, self-test, and GitNexus `detect_changes`.
+
 ## Performance Rules
 
 These rules come from shipped CPU/RAM regressions (100% CPU file-tree reload loop, per-draw color allocation). Follow them for every change.
@@ -358,7 +368,7 @@ runtime symptom -> fresh state -> time-correlated events -> repeated stack -> on
 
 ## Testing Guidelines
 
-Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swift` for packaged binary checks. Every change must pass build, tests, and self-test. Run native UI checks with Atelier's window zoomed to full size by default. Do not test every window size. Record exact failures and screenshots when relevant.
+Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swift` for packaged binary checks. Every change must pass build, tests, and self-test. Run native UI checks with Atelier's window zoomed to full size by default. Do not test every window size. Record exact failures. Capture screenshots only when the user explicitly requests visual evidence.
 
 ### Test Scope and UI Automation
 
@@ -374,14 +384,14 @@ Add deterministic non-UI coverage under `Tests/AtelierTests`. Keep `SelfTest.swi
 - Use `$computer-use:computer-use` only for behavior that requires native UI interaction. Use shell commands for process, logs, CPU, crash reports, builds, and tests.
 - Keep one persistent `node_repl` session. Initialize Computer Use once, then target Atelier directly with bundle identifier `app.atelier.Atelier`.
 - Call `get_app_state` once before each acceptance path. Use the default accessibility-tree diff; request a full tree only when prior context is missing.
-- Prefer accessibility text and `element_index` actions. Capture a screenshot only for visual evidence or when accessibility data is insufficient.
+- Prefer accessibility text and `element_index` actions. Capture a screenshot only when the user explicitly requests visual evidence.
 - Batch deterministic actions until the next decision point, then inspect state once. Do not inspect after every click, key, or text entry.
 - Re-read state after UI changes and derive fresh element indexes. Never reuse an index from an older tree.
 - Confirm app and window identity at path start and after any app switch. Do not re-confirm before every input while the same verified window stays active.
 - Do not add manual sleeps. The runtime already waits after actions. If state looks stale, refresh once.
-- On failure, retry once with fresh state. If direct targeting fails, call `list_apps` once and retry with its identifier. Then allow one screenshot-based coordinate action.
+- On failure, retry once with fresh state. If direct targeting fails, call `list_apps` once and retry with its identifier. Do not use screenshot-based coordinate actions unless the user explicitly requests them.
 - For blank titlebar or custom chrome, refresh accessibility state and target an accessible title or control first. Coordinates are last resort.
-- Default budget per acceptance path: five minutes, six state reads, one screenshot, and one retry per failed action. Report why before exceeding it.
+- Default budget per acceptance path: five minutes, six state reads, no screenshots, and one retry per failed action. Report why before exceeding it.
 - Keep final proof compact: tested path, visible sentinel, result, and console or crash status. Do not include raw accessibility trees or action transcripts.
 - Prefer read-only system checks. Change accessibility or system settings only when required, then restore the original value.
 

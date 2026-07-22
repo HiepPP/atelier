@@ -1144,13 +1144,16 @@ struct TerminalTabs: View {
                             }
                         }
 
-                        if let selectedID = model.selectedID,
-                           let frame = tabFrames[selectedID]?.insetBy(dx: 3, dy: 5) {
-                            AtelierMovingGlassIndicator(
-                                frame: frame,
-                                tint: AtelierTheme.chromeSelection.opacity(0.5),
-                                fallbackFill: AtelierTheme.chromeSelection
-                            )
+                        GlassEffectContainer(spacing: 0) {
+                            if let selectedID = model.selectedID,
+                               let frame = tabFrames[selectedID]?.insetBy(dx: 3, dy: 5) {
+                                AtelierMovingGlassIndicator(
+                                    frame: frame,
+                                    tint: AtelierTheme.chromeSelection.opacity(0.5),
+                                    fallbackFill: AtelierTheme.chromeSelection
+                                )
+                                .glassEffectTransition(.identity)
+                            }
                         }
 
                         HStack(spacing: 0) {
