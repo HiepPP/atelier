@@ -1375,7 +1375,8 @@ struct TerminalTabs: View {
 
             ZStack {
                 ForEach(model.visibleTabs) { tab in
-                    if case .terminal(let session) = tab.content {
+                    switch tab.content {
+                    case .terminal(let session):
                         let isActive = TerminalWorkspaceActivationPolicy.isActive(
                             workspaceIsActive: isWorkspaceActive,
                             selectedID: model.selectedID,
@@ -1393,11 +1394,7 @@ struct TerminalTabs: View {
                         .allowsHitTesting(isActive)
                         .accessibilityHidden(!isActive)
                         .zIndex(isActive ? 1 : 0)
-                    }
-                }
-
-                ForEach(model.visibleTabs) { tab in
-                    if case .file(let file) = tab.content {
+                    case .file(let file):
                         let isActive = isWorkspaceActive && model.selectedID == tab.id
                         FileTabView(
                             file: file,
@@ -1417,6 +1414,8 @@ struct TerminalTabs: View {
                         .disabled(!isActive)
                         .accessibilityHidden(!isActive)
                         .zIndex(isActive ? 1 : 0)
+                    case .gitDiff, .gemma:
+                        EmptyView()
                     }
                 }
 
