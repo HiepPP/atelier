@@ -11,6 +11,9 @@ extension AppModel {
         snapshot.fileTree = RuntimeFileTreeMetricsStore.shared.snapshot(
             rootPath: workspace.rootURL.standardizedFileURL.path
         )
+        snapshot.editor.expectedControllerCount = liveSessions.reduce(into: 0) { count, session in
+            count += session.terminalTabs.fileTabCount
+        }
 
         var terminal = RuntimeTerminalSnapshot()
         for session in liveSessions {
@@ -109,10 +112,9 @@ extension AppModel {
     ) -> RuntimeEditorSnapshot {
         var editor = editorSession.runtimeEditorSnapshot()
         editor.liveControllerCount = RuntimeDiagnosticsService.shared.currentLiveControllerCount()
-        editor.expectedControllerCount = workspace.map {
-            $0.terminalTabs.runtimeDiagnosticsSnapshot(workspaceRoot: $0.rootURL)
-                .workspace.fileTabCount
-        } ?? 0
+        editor.expectedControllerCount = liveSessions.reduce(into: 0) { count, session in
+            count += session.terminalTabs.fileTabCount
+        }
         return editor
     }
 }

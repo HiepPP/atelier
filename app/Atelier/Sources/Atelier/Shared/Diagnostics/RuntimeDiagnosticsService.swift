@@ -251,7 +251,6 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
 
         var editor = mainSnapshot.editor
         editor.liveControllerCount = liveControllerIDs.count
-        editor.expectedControllerCount = mainSnapshot.workspace.fileTabCount
         if editor.liveControllerCount > editor.expectedControllerCount {
             if controllerLeakStartedAt == nil { controllerLeakStartedAt = now }
         } else {

@@ -1396,13 +1396,12 @@ struct TerminalTabs: View {
                     }
                 }
 
-                if let tab = model.selectedTab {
-                    switch tab.content {
-                    case .terminal:
-                        EmptyView()
-                    case .file(let file):
+                ForEach(model.visibleTabs) { tab in
+                    if case .file(let file) = tab.content {
+                        let isActive = isWorkspaceActive && model.selectedID == tab.id
                         FileTabView(
                             file: file,
+                            isActive: isActive,
                             showsPreview: showsRenderedPreview(
                                 tabID: tab.id,
                                 fileURL: file.document.url
@@ -1410,9 +1409,21 @@ struct TerminalTabs: View {
                         ) {
                             model.promotePreview(for: file.document.url)
                         }
-                            .id(tab.id)
-                            .background(AtelierTheme.editor)
-                            .environment(\.atelierZoomScale, zoom.contentScale)
+                        .id(tab.id)
+                        .background(AtelierTheme.editor)
+                        .environment(\.atelierZoomScale, zoom.contentScale)
+                        .opacity(isActive ? 1 : 0)
+                        .allowsHitTesting(isActive)
+                        .disabled(!isActive)
+                        .accessibilityHidden(!isActive)
+                        .zIndex(isActive ? 1 : 0)
+                    }
+                }
+
+                if let tab = model.selectedTab {
+                    switch tab.content {
+                    case .terminal, .file:
+                        EmptyView()
                     case .gitDiff(let diff):
                         GitDiffTabView(session: diff)
                             .id(tab.id)
@@ -1648,6 +1659,7 @@ private struct TabCloseButton: View {
 
 private struct FileTabView: View {
     let file: EditorSession
+    let isActive: Bool
     let showsPreview: Bool
     let onEdit: () -> Void
 
@@ -1660,6 +1672,7 @@ private struct FileTabView: View {
                 FileViewer(
                     content: file.content,
                     fileURL: file.document.url,
+                    isActive: isActive && !showsPreview,
                     isWordWrapEnabled: file.isWordWrapEnabled,
                     surfaceOwner: file,
                     onEdit: onEdit
@@ -1672,7 +1685,7 @@ private struct FileTabView: View {
                     kind: previewKind,
                     content: file.content,
                     fileURL: file.document.url,
-                    isActive: showsPreview
+                    isActive: isActive && showsPreview
                 )
                 .opacity(showsPreview ? 1 : 0)
                 .allowsHitTesting(showsPreview)
@@ -1682,6 +1695,7 @@ private struct FileTabView: View {
             FileViewer(
                 content: file.content,
                 fileURL: file.document.url,
+                isActive: isActive,
                 isWordWrapEnabled: file.isWordWrapEnabled,
                 surfaceOwner: file,
                 onEdit: onEdit

@@ -44,6 +44,7 @@ struct FileViewer: NSViewRepresentable {
     let content: FileContent
     let fileURL: URL?
     let language: HighlightLanguage?
+    let isActive: Bool
     let isWordWrapEnabled: Bool
     let surfaceOwner: EditorSession?
     let onEdit: () -> Void
@@ -52,6 +53,7 @@ struct FileViewer: NSViewRepresentable {
         content: FileContent,
         fileURL: URL? = nil,
         language: HighlightLanguage? = nil,
+        isActive: Bool = true,
         isWordWrapEnabled: Bool = true,
         surfaceOwner: EditorSession? = nil,
         onEdit: @escaping () -> Void = {}
@@ -59,6 +61,7 @@ struct FileViewer: NSViewRepresentable {
         self.content = content
         self.fileURL = fileURL
         self.language = language ?? fileURL.flatMap(FileViewerLanguage.language(for:))
+        self.isActive = isActive
         self.isWordWrapEnabled = isWordWrapEnabled
         self.surfaceOwner = surfaceOwner
         self.onEdit = onEdit
@@ -162,6 +165,7 @@ struct FileViewer: NSViewRepresentable {
             scale: scale,
             displayScale: displayScale,
             usesDarkAppearance: usesDarkAppearance,
+            isActive: isActive,
             isWordWrapEnabled: isWordWrapEnabled,
             surfaceOwner: surfaceOwner,
             onEdit: onEdit
@@ -198,6 +202,7 @@ struct FileViewer: NSViewRepresentable {
         private var renderedScale: CGFloat = 0
         private var renderedDisplayScale: CGFloat = 0
         private var usesDarkAppearance = false
+        private var isActive = false
         private var renderedWordWrapEnabled: Bool?
         private var highlightGeneration = 0
         private var highlightTask: Task<Void, Never>?
@@ -284,6 +289,7 @@ struct FileViewer: NSViewRepresentable {
             scale: CGFloat,
             displayScale: CGFloat,
             usesDarkAppearance: Bool,
+            isActive: Bool,
             isWordWrapEnabled: Bool,
             surfaceOwner: EditorSession?,
             onEdit: @escaping () -> Void
@@ -305,6 +311,7 @@ struct FileViewer: NSViewRepresentable {
             renderedScale = scale
             renderedDisplayScale = displayScale
             self.usesDarkAppearance = usesDarkAppearance
+            updateActiveState(isActive)
             renderedWordWrapEnabled = isWordWrapEnabled
             if self.surfaceOwner !== surfaceOwner {
                 self.surfaceOwner?.detach(surface: self)
@@ -312,7 +319,7 @@ struct FileViewer: NSViewRepresentable {
                 surfaceOwner?.attach(surface: self)
             }
             self.onEdit = onEdit
-            textView?.isEditable = fileURL != nil && content.isEditableText
+            textView?.isEditable = isActive && fileURL != nil && content.isEditableText
             textView?.allowsUndo = textView?.isEditable == true
 
             if wordWrapChanged {
@@ -340,6 +347,21 @@ struct FileViewer: NSViewRepresentable {
                 renderedLanguage = language?.rawValue
                 render(content: content, language: language)
             }
+        }
+
+        private func updateActiveState(_ isActive: Bool) {
+            guard self.isActive != isActive else { return }
+            self.isActive = isActive
+            guard !isActive,
+                  let textView,
+                  let scrollView,
+                  let window = textView.window,
+                  let responder = window.firstResponder else { return }
+            let responderView = responder as? NSView
+            guard responder === textView || responderView?.isDescendant(of: scrollView) == true else {
+                return
+            }
+            window.makeFirstResponder(nil)
         }
 
         @MainActor

@@ -868,17 +868,26 @@ struct WorkspaceView: View {
 
             sidebarBodyToolbar
 
-            switch selectedSidebarTab {
-            case .explorer:
+            ZStack {
                 explorerContent
-            case .sourceControl:
+                    .opacity(selectedSidebarTab == .explorer ? 1 : 0)
+                    .allowsHitTesting(selectedSidebarTab == .explorer)
+                    .disabled(selectedSidebarTab != .explorer)
+                    .accessibilityHidden(selectedSidebarTab != .explorer)
+
                 ChangesView(
                     model: gitModel,
                     selectedDiff: terminalTabs.selectedGitDiffSelection,
                     onOpenDiff: terminalTabs.openGitDiff,
                     showsPanelHeader: false
                 )
+                .opacity(selectedSidebarTab == .sourceControl ? 1 : 0)
+                .allowsHitTesting(selectedSidebarTab == .sourceControl)
+                .disabled(selectedSidebarTab != .sourceControl)
+                .accessibilityHidden(selectedSidebarTab != .sourceControl)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
         }
         .background(AtelierTheme.sidebar)
     }
