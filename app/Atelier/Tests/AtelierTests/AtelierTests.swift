@@ -61,8 +61,11 @@ struct AtelierTests {
         #expect(FilePreviewPolicy.showsPreviewByDefault(
             for: URL(fileURLWithPath: "/tmp/index.html")
         ))
-        #expect(!FilePreviewPolicy.showsPreviewByDefault(
+        #expect(FilePreviewPolicy.showsPreviewByDefault(
             for: URL(fileURLWithPath: "/tmp/README.md")
+        ))
+        #expect(!FilePreviewPolicy.showsPreviewByDefault(
+            for: URL(fileURLWithPath: "/tmp/source.swift")
         ))
         #expect(HTMLFilePreviewPolicy.allowsContentJavaScript)
         #expect(HTMLFilePreviewPolicy.readAccessURL(

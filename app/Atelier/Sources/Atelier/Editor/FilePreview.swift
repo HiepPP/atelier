@@ -20,7 +20,7 @@ nonisolated enum FilePreviewPolicy {
     }
 
     static func showsPreviewByDefault(for url: URL) -> Bool {
-        kind(for: url) == .html
+        kind(for: url) != nil
     }
 }
 

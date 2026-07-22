@@ -605,8 +605,8 @@ Persistence boundaries:
 - Keep native previous, next, replace, replace-all, selection, match-mode, and result-count behavior.
 - Keep search inside the file scroll view. Closing search restores focus to the editor.
 - Keep editor word wrap as a per-file setting.
-- Offer Source and Preview modes for `.md` and `.html` text files. Open Markdown in Source mode
-  and HTML in Preview mode. Keep the native editor mounted while Preview is visible, and keep
+- Offer Source and Preview modes for `.md` and `.html` text files. Open both Markdown and HTML in
+  Preview mode by default. Keep the native editor mounted while Preview is visible, and keep
   explicit per-tab mode changes session-only.
 - Render Markdown through the native Atelier Markdown surface. Render HTML from its original file
   URL in a non-persistent WebKit surface. Allow relative resources from the containing directory
