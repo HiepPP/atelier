@@ -73,6 +73,19 @@ struct AtelierTests {
         ) == URL(fileURLWithPath: "/tmp/site", isDirectory: true).standardizedFileURL)
     }
 
+    @Test("Markdown document outline visibility needs space and headings")
+    func markdownDocumentOutlinePolicy() {
+        #expect(!MarkdownFileDocumentPolicy.showsOutline(headingCount: 1, containerWidth: 2_000))
+        #expect(!MarkdownFileDocumentPolicy.showsOutline(headingCount: 4, containerWidth: 0))
+        #expect(!MarkdownFileDocumentPolicy.showsOutline(headingCount: 4, containerWidth: 800))
+        #expect(MarkdownFileDocumentPolicy.showsOutline(headingCount: 4, containerWidth: 1_200))
+
+        let document = ParsedMarkdownDocument(source: "# A\n\n## B\n\nBody\n")
+        #expect(document.blocks.count == 3)
+        #expect(document.outline.map(\.title) == ["A", "B"])
+        #expect(ParsedMarkdownDocument.empty.blocks.isEmpty)
+    }
+
     @Test("Editor session routes every file find action to its surface")
     func editorFindActions() async throws {
         let root = temporaryDirectory("editor-find")

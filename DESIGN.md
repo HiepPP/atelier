@@ -117,6 +117,9 @@ Rules:
 | `workspaceRailItemHeight` | 44 | Two-line workspace row target |
 | `workspaceRailItemGap` | 4 | Vertical space between workspace rows |
 | `projectMenuWidth` | 420 | Principal project menu command-center width |
+| `transcriptMaxWidth` | 680 | Agent Markdown prose measure |
+| `documentMaxWidth` | 720 | Markdown file-preview prose measure |
+| `markdownOutlineWidth` | 200 | Trailing "On This Page" outline rail |
 
 ## Color Tokens
 
@@ -612,9 +615,31 @@ Persistence boundaries:
   URL in a non-persistent WebKit surface. Allow relative resources from the containing directory
   and run the page's scripts so interactive local previews render correctly.
 - Render Markdown file-preview body text at `editorSize` so Source and Preview share the same
-  base text size.
+  base text size. Use the document presentation for file preview (not the agent transcript
+  presentation): center a `documentMaxWidth` prose column, use roomier line and section spacing,
+  enable text selection, and render H1/H2 with the editorial serif face.
 - Treat Markdown as an editorial document. Keep prose on a readable measure and give heading
   levels distinct scale, weight, spacing, and restrained accent rules.
+- When a Markdown file has two or more headings, show a quiet trailing "On This Page" outline
+  that jumps to the matching heading. Hide the outline when the center column is too narrow to
+  keep a readable measure. Keep outline state session-only.
+- Keep the outline selection in sync with the document scroll position (active section). Outline
+  rows use the pointer cursor on hover. Outline scroll chrome uses overlay auto-hiding scrollers
+  like other panels; never leave a permanent scroller gutter.
+- While Markdown/HTML Preview is visible, keep the native editor mounted but hide it from AppKit
+  hit-testing and cursor-rect participation (`isHidden`, non-selectable) so NSTextView I-beam does
+  not bleed through the preview or On This Page rail.
+- Parse each Markdown source once per content change and share blocks with the outline. Prefer a
+  lazy document stack so off-screen blocks are not built eagerly. Never measure a second full
+  document tree to decide outline visibility.
+- Keep Markdown scroll hot paths cheap: precompute inline attributed runs at parse time, report
+  heading positions into a non-view-invalidating store (no PreferenceKey storms), update outline
+  selection only when the active section ID changes, and never animate outline rail scroll during
+  passive document scrolling.
+- Outline jump must reach the target section reliably: prefer AppKit content-offset scroll when the
+  heading Y is known, otherwise seed near a measured predecessor and retry until the anchor is
+  materialised. Keep the document stack lazy so freewheel scroll stays smooth; never drive the
+  outline rail's scroll position during passive document scrolling.
 - Render unordered, ordered, and task lists, block quotes, code blocks, tables, and dividers as
   distinct native components. Keep the palette quiet and reserve terracotta for semantic accents.
 - Render fenced code with cached syntax-token colors when a language is known. Preserve source

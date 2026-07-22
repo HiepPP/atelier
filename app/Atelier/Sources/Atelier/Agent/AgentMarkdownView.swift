@@ -37,7 +37,14 @@ nonisolated enum AgentCodeHighlightPolicy {
 }
 
 enum AgentMarkdownInlinePolicy {
+    private static let cacheLimit = 512
+    private static var cache: [String: AttributedString] = [:]
+    private static var cacheOrder: [String] = []
+
     static func attributedString(_ content: String) -> AttributedString {
+        if let cached = cache[content] {
+            return cached
+        }
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
             failurePolicy: .returnPartiallyParsedIfPossible
@@ -51,7 +58,19 @@ enum AgentMarkdownInlinePolicy {
             attributed[range].foregroundColor = AtelierTheme.accent
             attributed[range].backgroundColor = AtelierTheme.accent.opacity(0.12)
         }
+        storeCached(content, attributed)
         return attributed
+    }
+
+    private static func storeCached(_ key: String, _ value: AttributedString) {
+        if cache[key] == nil {
+            cacheOrder.append(key)
+        }
+        cache[key] = value
+        while cacheOrder.count > cacheLimit {
+            let evicted = cacheOrder.removeFirst()
+            cache.removeValue(forKey: evicted)
+        }
     }
 }
 
@@ -72,64 +91,377 @@ nonisolated enum MermaidResponsePresentationPolicy {
     }
 }
 
-struct AgentMarkdownView: View {
+/// Layout and type treatment for Markdown surfaces.
+/// - `transcript`: compact agent responses
+/// - `document`: file-preview reading layout
+nonisolated enum AgentMarkdownPresentation: Equatable, Sendable {
+    case transcript
+    case document
+}
+
+enum MarkdownDocumentCoordinateSpace {
+    nonisolated static let name = "atelier.markdown.document"
+}
+
+nonisolated struct MarkdownOutlineEntry: Equatable, Identifiable, Sendable {
+    let id: String
+    let level: Int
+    let title: String
+}
+
+/// Maps document scroll position to the outline entry that owns the viewport.
+nonisolated enum MarkdownOutlineSyncPolicy {
+    static let viewportLead: CGFloat = 64
+    /// Ignore sub-pixel offset thrash while still catching section boundaries.
+    static let offsetQuantization: CGFloat = 0.5
+
+    static func quantizeOffset(_ value: CGFloat) -> CGFloat {
+        (value / offsetQuantization).rounded() * offsetQuantization
+    }
+
+    static func activeOutlineID(
+        entries: [MarkdownOutlineEntry],
+        offsets: [String: CGFloat],
+        contentOffsetY: CGFloat,
+        lead: CGFloat = viewportLead
+    ) -> String? {
+        guard !entries.isEmpty else { return nil }
+        let threshold = max(0, contentOffsetY) + lead
+        var active: String?
+        for entry in entries {
+            guard let y = offsets[entry.id] else { continue }
+            if y <= threshold {
+                active = entry.id
+            } else if active != nil {
+                break
+            }
+        }
+        return active ?? entries.first?.id
+    }
+
+    /// Nearest already-measured heading at or before `targetID` (for LazyVStack materialization).
+    static func nearestMeasuredID(
+        targetID: String,
+        entries: [MarkdownOutlineEntry],
+        offsets: [String: CGFloat]
+    ) -> String? {
+        var nearest: String?
+        for entry in entries {
+            if offsets[entry.id] != nil {
+                nearest = entry.id
+            }
+            if entry.id == targetID {
+                return nearest
+            }
+        }
+        return nearest
+    }
+
+    static func clampedContentOffset(
+        targetY: CGFloat,
+        viewportHeight: CGFloat,
+        contentHeight: CGFloat
+    ) -> CGFloat {
+        let maxOrigin = max(0, contentHeight - max(viewportHeight, 1))
+        return min(max(0, targetY), maxOrigin)
+    }
+}
+
+/// Class-backed heading offsets. Mutations do not invalidate SwiftUI views.
+final class MarkdownHeadingOffsetStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var map: [String: CGFloat] = [:]
+    private var contentOffsetY: CGFloat = 0
+    private var suppressSyncUntil: Date?
+
+    func reset() {
+        lock.lock()
+        map.removeAll(keepingCapacity: true)
+        contentOffsetY = 0
+        suppressSyncUntil = nil
+        lock.unlock()
+    }
+
+    func setContentOffset(_ y: CGFloat) {
+        lock.lock()
+        contentOffsetY = y
+        lock.unlock()
+    }
+
+    func setSuppressSyncUntil(_ date: Date?) {
+        lock.lock()
+        suppressSyncUntil = date
+        lock.unlock()
+    }
+
+    @discardableResult
+    func setOffset(id: String, y: CGFloat) -> Bool {
+        let quantized = MarkdownOutlineSyncPolicy.quantizeOffset(y)
+        lock.lock()
+        defer { lock.unlock() }
+        if let old = map[id], abs(old - quantized) < 0.25 {
+            return false
+        }
+        map[id] = quantized
+        return true
+    }
+
+    func offset(for id: String) -> CGFloat? {
+        lock.lock()
+        defer { lock.unlock() }
+        return map[id]
+    }
+
+    func snapshotOffsets() -> [String: CGFloat] {
+        lock.lock()
+        defer { lock.unlock() }
+        return map
+    }
+
+    func activeOutlineID(entries: [MarkdownOutlineEntry]) -> String? {
+        lock.lock()
+        let snapshot = map
+        let offsetY = contentOffsetY
+        lock.unlock()
+        return MarkdownOutlineSyncPolicy.activeOutlineID(
+            entries: entries,
+            offsets: snapshot,
+            contentOffsetY: offsetY
+        )
+    }
+
+    var currentContentOffsetY: CGFloat {
+        lock.lock()
+        defer { lock.unlock() }
+        return contentOffsetY
+    }
+
+    var isSyncSuppressed: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let suppressSyncUntil else { return false }
+        return Date() < suppressSyncUntil
+    }
+}
+
+/// Weak AppKit handle for reliable outline jumps (SwiftUI scrollTo is flaky with LazyVStack).
+final class MarkdownDocumentScrollSurface: @unchecked Sendable {
+    weak var scrollView: NSScrollView?
+
+    @discardableResult
+    func scrollToContentY(_ y: CGFloat, animated: Bool, duration: TimeInterval) -> Bool {
+        guard let scrollView,
+              let documentView = scrollView.documentView else { return false }
+        let clipView = scrollView.contentView
+        let targetY = MarkdownOutlineSyncPolicy.clampedContentOffset(
+            targetY: y,
+            viewportHeight: clipView.bounds.height,
+            contentHeight: documentView.frame.height
+        )
+        var origin = clipView.bounds.origin
+        guard abs(origin.y - targetY) > 0.5 else {
+            scrollView.reflectScrolledClipView(clipView)
+            return true
+        }
+        origin.y = targetY
+        if animated, duration > 0 {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = duration
+                context.allowsImplicitAnimation = true
+                clipView.animator().setBoundsOrigin(origin)
+                scrollView.reflectScrolledClipView(clipView)
+            }
+        } else {
+            clipView.setBoundsOrigin(origin)
+            scrollView.reflectScrolledClipView(clipView)
+        }
+        return true
+    }
+}
+
+private struct MarkdownHeadingOffsetStoreKey: EnvironmentKey {
+    static let defaultValue: MarkdownHeadingOffsetStore? = nil
+}
+
+extension EnvironmentValues {
+    var markdownHeadingOffsetStore: MarkdownHeadingOffsetStore? {
+        get { self[MarkdownHeadingOffsetStoreKey.self] }
+        set { self[MarkdownHeadingOffsetStoreKey.self] = newValue }
+    }
+}
+
+/// One-shot parse shared by document layout, outline, and block rendering.
+struct ParsedMarkdownDocument: Equatable {
+    let source: String
+    let blocks: [AgentMarkdownBlock]
+    let outline: [MarkdownOutlineEntry]
+    /// Pre-parsed inline runs aligned with `blocks` (nil for non-text blocks).
+    let inlineRuns: [AttributedString?]
+
+    static let empty = ParsedMarkdownDocument(
+        source: "",
+        blocks: [],
+        outline: [],
+        inlineRuns: []
+    )
+
+    init(source: String) {
+        self.source = source
+        let blocks = AgentMarkdownBlock.parse(source)
+        self.blocks = blocks
+        self.outline = AgentMarkdownBlock.outline(from: blocks)
+        self.inlineRuns = Self.makeInlineRuns(for: blocks)
+    }
+
+    init(source: String, blocks: [AgentMarkdownBlock]) {
+        self.source = source
+        self.blocks = blocks
+        self.outline = AgentMarkdownBlock.outline(from: blocks)
+        self.inlineRuns = Self.makeInlineRuns(for: blocks)
+    }
+
+    init(
+        source: String,
+        blocks: [AgentMarkdownBlock],
+        outline: [MarkdownOutlineEntry],
+        inlineRuns: [AttributedString?] = []
+    ) {
+        self.source = source
+        self.blocks = blocks
+        self.outline = outline
+        self.inlineRuns = inlineRuns
+    }
+
+    private static func makeInlineRuns(for blocks: [AgentMarkdownBlock]) -> [AttributedString?] {
+        blocks.map { block in
+            guard let text = AgentMarkdownBlock.inlineSource(for: block) else { return nil }
+            return AgentMarkdownInlinePolicy.attributedString(text)
+        }
+    }
+}
+
+struct AgentMarkdownView: View, Equatable {
     let source: String
     let bodyFontSize: CGFloat
+    let presentation: AgentMarkdownPresentation
+    let blocks: [AgentMarkdownBlock]?
+    let inlineRuns: [AttributedString?]?
 
-    init(source: String, bodyFontSize: CGFloat = AtelierTypography.body) {
+    @Environment(\.markdownHeadingOffsetStore) private var headingOffsetStore
+
+    init(
+        source: String,
+        bodyFontSize: CGFloat = AtelierTypography.body,
+        presentation: AgentMarkdownPresentation = .transcript,
+        blocks: [AgentMarkdownBlock]? = nil,
+        inlineRuns: [AttributedString?]? = nil
+    ) {
         self.source = source
         self.bodyFontSize = bodyFontSize
+        self.presentation = presentation
+        self.blocks = blocks
+        self.inlineRuns = inlineRuns
+    }
+
+    static func == (lhs: AgentMarkdownView, rhs: AgentMarkdownView) -> Bool {
+        // Source identity is enough: blocks/inlines are derived for the same source.
+        lhs.source == rhs.source
+            && lhs.bodyFontSize == rhs.bodyFontSize
+            && lhs.presentation == rhs.presentation
+    }
+
+    private var proseMaxWidth: CGFloat {
+        presentation == .document
+            ? AtelierMetrics.documentMaxWidth
+            : AtelierMetrics.transcriptMaxWidth
+    }
+
+    private var proseLineSpacing: CGFloat {
+        presentation == .document ? AtelierMetrics.spaceS : AtelierMetrics.spaceXS
+    }
+
+    private var resolvedBlocks: [AgentMarkdownBlock] {
+        blocks ?? AgentMarkdownBlock.parse(source)
     }
 
     var body: some View {
-        let blocks = AgentMarkdownBlock.parse(source)
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(blocks.indices, id: \.self) { index in
-                blockView(blocks[index])
-                    .padding(.top, blockTopSpacing(for: blocks[index], at: index))
+        let resolved = resolvedBlocks
+        Group {
+            if presentation == .document {
+                // Always lazy: eager VStack made free scroll hitch on medium/large files.
+                // Outline jump uses AppKit offset + materialize retries instead.
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
+                    blockStack(resolved)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    blockStack(resolved)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
     }
 
     @ViewBuilder
-    private func blockView(_ block: AgentMarkdownBlock) -> some View {
+    private func blockStack(_ blocks: [AgentMarkdownBlock]) -> some View {
+        ForEach(blocks.indices, id: \.self) { index in
+            let block = blocks[index]
+            let anchorID = AgentMarkdownBlock.blockAnchorID(index)
+            blockView(block, index: index)
+                .padding(.top, blockTopSpacing(for: block, at: index))
+                .id(anchorID)
+                .modifier(
+                    MarkdownHeadingOffsetReporter(
+                        isEnabled: presentation == .document && {
+                            if case .heading = block { return true }
+                            return false
+                        }(),
+                        anchorID: anchorID,
+                        store: headingOffsetStore
+                    )
+                )
+        }
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: AgentMarkdownBlock, index: Int) -> some View {
         switch block {
         case .heading(let level, let content):
-            heading(level: level, content: content)
+            heading(level: level, content: content, index: index)
         case .paragraph(let content):
-            inlineText(content)
+            inlineText(content, index: index)
                 .atelierFont(size: bodyFontSize)
-                .lineSpacing(AtelierMetrics.spaceXS)
-                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
+                .lineSpacing(proseLineSpacing)
+                .frame(maxWidth: proseMaxWidth, alignment: .leading)
         case .unorderedItem(let content):
-            listRow(marker: .bullet, content: content)
-                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
+            listRow(marker: .bullet, content: content, index: index)
+                .frame(maxWidth: proseMaxWidth, alignment: .leading)
         case .orderedItem(let number, let content):
-            listRow(marker: .number(number), content: content)
-                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
+            listRow(marker: .number(number), content: content, index: index)
+                .frame(maxWidth: proseMaxWidth, alignment: .leading)
         case .taskItem(let isCompleted, let content):
-            listRow(marker: .task(isCompleted), content: content)
-                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
+            listRow(marker: .task(isCompleted), content: content, index: index)
+                .frame(maxWidth: proseMaxWidth, alignment: .leading)
         case .quote(let content):
             HStack(alignment: .top, spacing: AtelierMetrics.spaceM) {
                 RoundedRectangle(cornerRadius: AtelierTheme.strokeFocus)
                     .fill(AtelierTheme.accent.opacity(0.78))
                     .frame(width: AtelierTheme.strokeFocus)
                     .accessibilityHidden(true)
-                inlineText(content)
+                inlineText(content, index: index)
                     .atelierFont(size: bodyFontSize, weight: .medium, design: .serif)
-                    .lineSpacing(AtelierMetrics.spaceXS)
+                    .lineSpacing(proseLineSpacing)
                     .foregroundStyle(.secondary)
             }
-            .padding(AtelierMetrics.spaceM)
+            .padding(presentation == .document ? AtelierMetrics.spaceL : AtelierMetrics.spaceM)
             .background(AtelierTheme.raised.opacity(0.42))
             .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
             .overlay {
                 RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
                     .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeHairline)
             }
-            .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
+            .frame(maxWidth: proseMaxWidth, alignment: .leading)
         case .code(let language, let content):
             codeBlock(language: language, content: content)
         case .mermaid(let source):
@@ -147,15 +479,19 @@ struct AgentMarkdownView: View {
                     .fill(AtelierTheme.border)
                     .frame(height: AtelierTheme.strokeHairline)
             }
-            .frame(maxWidth: AtelierMetrics.transcriptMaxWidth)
+            .frame(maxWidth: proseMaxWidth)
         }
     }
 
-    private func heading(level: Int, content: String) -> some View {
+    private func heading(level: Int, content: String, index: Int) -> some View {
         VStack(alignment: .leading, spacing: level <= 2 ? AtelierMetrics.spaceS : 0) {
-            inlineText(content)
-                .atelierFont(size: headingSize(level), weight: headingWeight(level))
-                .tracking(level == 1 ? -0.5 : -0.2)
+            inlineText(content, index: index)
+                .atelierFont(
+                    size: headingSize(level),
+                    weight: headingWeight(level),
+                    design: headingDesign(level)
+                )
+                .tracking(level == 1 ? -0.6 : (level == 2 ? -0.3 : -0.15))
                 .foregroundStyle(level >= 4 ? .secondary : .primary)
                 .accessibilityAddTraits(.isHeader)
 
@@ -174,7 +510,28 @@ struct AgentMarkdownView: View {
                 .accessibilityHidden(true)
             }
         }
-        .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
+        .frame(maxWidth: proseMaxWidth, alignment: .leading)
+        .padding(.top, presentation == .document && level <= 2 ? AtelierMetrics.spaceXS : 0)
+    }
+
+    /// Reports heading Y into a class store without PreferenceKey invalidation storms.
+    private struct MarkdownHeadingOffsetReporter: ViewModifier {
+        let isEnabled: Bool
+        let anchorID: String
+        let store: MarkdownHeadingOffsetStore?
+
+        func body(content: Content) -> some View {
+            if isEnabled, store != nil {
+                content
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.frame(in: .named(MarkdownDocumentCoordinateSpace.name)).minY
+                    } action: { _, minY in
+                        store?.setOffset(id: anchorID, y: minY)
+                    }
+            } else {
+                content
+            }
+        }
     }
 
     private func codeBlock(language: String?, content: String) -> some View {
@@ -283,7 +640,7 @@ struct AgentMarkdownView: View {
         } else {
             Color.clear
         }
-        let cell = inlineText(value)
+        let cell = Text(AgentMarkdownInlinePolicy.attributedString(value))
             .atelierFont(
                 size: AtelierTypography.label,
                 weight: isHeader ? .semibold : .regular
@@ -308,13 +665,13 @@ struct AgentMarkdownView: View {
         NSPasteboard.general.setString(value, forType: .string)
     }
 
-    private func listRow(marker: MarkdownListMarker, content: String) -> some View {
+    private func listRow(marker: MarkdownListMarker, content: String, index: Int) -> some View {
         HStack(alignment: .top, spacing: AtelierMetrics.spaceM) {
             listMarker(marker)
-                .frame(width: AtelierMetrics.spaceL, height: bodyFontSize + AtelierMetrics.spaceXS)
-            inlineText(content)
+                .frame(width: AtelierMetrics.spaceL, height: bodyFontSize + proseLineSpacing)
+            inlineText(content, index: index)
                 .atelierFont(size: bodyFontSize)
-                .lineSpacing(AtelierMetrics.spaceXS)
+                .lineSpacing(proseLineSpacing)
         }
         .accessibilityElement(children: .combine)
     }
@@ -341,12 +698,25 @@ struct AgentMarkdownView: View {
         }
     }
 
-    private func inlineText(_ content: String) -> Text {
-        Text(AgentMarkdownInlinePolicy.attributedString(content))
+    private func inlineText(_ content: String, index: Int) -> Text {
+        if let inlineRuns,
+           inlineRuns.indices.contains(index),
+           let precomputed = inlineRuns[index] {
+            return Text(precomputed)
+        }
+        return Text(AgentMarkdownInlinePolicy.attributedString(content))
     }
 
     private func headingSize(_ level: Int) -> CGFloat {
-        switch level {
+        if presentation == .document {
+            return switch level {
+            case 1: max(28, bodyFontSize * 1.85)
+            case 2: max(22, bodyFontSize * 1.45)
+            case 3: max(AtelierTypography.headline, bodyFontSize * 1.18)
+            default: max(AtelierTypography.uiSize, bodyFontSize)
+            }
+        }
+        return switch level {
         case 1: max(AtelierTypography.display, bodyFontSize * 1.8)
         case 2: max(AtelierTypography.title, bodyFontSize * 1.45)
         case 3: max(AtelierTypography.headline, bodyFontSize * 1.2)
@@ -355,20 +725,31 @@ struct AgentMarkdownView: View {
     }
 
     private func headingWeight(_ level: Int) -> Font.Weight {
-        level <= 2 ? .bold : .semibold
+        if presentation == .document {
+            return level <= 2 ? .semibold : .medium
+        }
+        return level <= 2 ? .bold : .semibold
+    }
+
+    private func headingDesign(_ level: Int) -> Font.Design {
+        if presentation == .document, level <= 2 {
+            return .serif
+        }
+        return .default
     }
 
     private func blockTopSpacing(for block: AgentMarkdownBlock, at index: Int) -> CGFloat {
         guard index > 0 else { return 0 }
+        let documentBoost: CGFloat = presentation == .document ? AtelierMetrics.spaceS : 0
         return switch block {
         case .heading(let level, _):
-            level <= 2 ? AtelierMetrics.space2XL : AtelierMetrics.spaceXL
+            (level <= 2 ? AtelierMetrics.space2XL : AtelierMetrics.spaceXL) + documentBoost
         case .code, .mermaid, .invalidMermaid, .table, .quote, .divider:
-            AtelierMetrics.spaceL
+            AtelierMetrics.spaceL + (presentation == .document ? AtelierMetrics.spaceXS : 0)
         case .paragraph:
-            AtelierMetrics.spaceM
+            AtelierMetrics.spaceM + documentBoost * 0.5
         case .unorderedItem, .orderedItem, .taskItem:
-            AtelierMetrics.spaceS
+            presentation == .document ? AtelierMetrics.spaceS + 2 : AtelierMetrics.spaceS
         }
     }
 }
@@ -396,6 +777,9 @@ private struct MarkdownHighlightedCodeText: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .task(id: request) {
                 highlightedContent = nil
+                // Yield so scroll/layout can finish before syntax work.
+                await Task.yield()
+                guard !Task.isCancelled else { return }
                 do {
                     let result = try await Self.highlightService.highlightPreservingWhitespace(
                         content,
@@ -606,6 +990,41 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
     case invalidMermaid(source: String, error: String)
     case table(headers: [String], rows: [[String]])
     case divider
+
+    static func blockAnchorID(_ index: Int) -> String {
+        "md-block-\(index)"
+    }
+
+    static func inlineSource(for block: Self) -> String? {
+        switch block {
+        case .heading(_, let content),
+                .paragraph(let content),
+                .unorderedItem(let content),
+                .orderedItem(_, let content),
+                .taskItem(_, let content),
+                .quote(let content):
+            content
+        case .code, .mermaid, .invalidMermaid, .table, .divider:
+            nil
+        }
+    }
+
+    static func outline(from source: String) -> [MarkdownOutlineEntry] {
+        outline(from: parse(source))
+    }
+
+    static func outline(from blocks: [Self]) -> [MarkdownOutlineEntry] {
+        blocks.enumerated().compactMap { index, block in
+            guard case .heading(let level, let content) = block else { return nil }
+            let title = content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return nil }
+            return MarkdownOutlineEntry(
+                id: blockAnchorID(index),
+                level: level,
+                title: title
+            )
+        }
+    }
 
     static func parse(_ source: String) -> [Self] {
         var blocks: [Self] = []

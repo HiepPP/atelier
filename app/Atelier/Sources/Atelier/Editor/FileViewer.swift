@@ -319,8 +319,9 @@ struct FileViewer: NSViewRepresentable {
                 surfaceOwner?.attach(surface: self)
             }
             self.onEdit = onEdit
-            textView?.isEditable = isActive && fileURL != nil && content.isEditableText
-            textView?.allowsUndo = textView?.isEditable == true
+            applySurfaceInteraction(
+                isEditable: isActive && fileURL != nil && content.isEditableText
+            )
 
             if wordWrapChanged {
                 beginRuntimeLayoutGrace()
@@ -350,9 +351,14 @@ struct FileViewer: NSViewRepresentable {
         }
 
         private func updateActiveState(_ isActive: Bool) {
-            guard self.isActive != isActive else { return }
+            let becameInactive = self.isActive && !isActive
             self.isActive = isActive
-            guard !isActive,
+            // Always re-apply: SwiftUI hit-testing off is not enough to stop NSTextView
+            // I-beam cursor rects while the native surface stays mounted under preview.
+            applySurfaceInteraction(
+                isEditable: isActive && fileURL != nil && (renderedContent?.isEditableText ?? false)
+            )
+            guard becameInactive,
                   let textView,
                   let scrollView,
                   let window = textView.window,
@@ -362,6 +368,25 @@ struct FileViewer: NSViewRepresentable {
                 return
             }
             window.makeFirstResponder(nil)
+        }
+
+        /// Keep the editor mounted, but remove AppKit hit-testing and I-beam cursor
+        /// rects while a rendered Markdown/HTML preview covers this surface.
+        private func applySurfaceInteraction(isEditable: Bool) {
+            guard let scrollView, let textView else { return }
+            let shouldExpose = isActive
+            // isHidden is more reliable than SwiftUI allowsHitTesting for NSTextView
+            // cursor rects: opacity 0 still leaves I-beam registered under the outline.
+            if scrollView.isHidden == shouldExpose {
+                scrollView.isHidden = !shouldExpose
+            }
+            textView.isSelectable = shouldExpose
+            textView.isEditable = shouldExpose && isEditable
+            textView.allowsUndo = textView.isEditable
+            if let window = scrollView.window {
+                window.invalidateCursorRects(for: textView)
+                window.invalidateCursorRects(for: scrollView)
+            }
         }
 
         @MainActor

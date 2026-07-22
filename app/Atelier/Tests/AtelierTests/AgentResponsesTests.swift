@@ -416,6 +416,126 @@ struct AgentResponsesTests {
         ])
     }
 
+    @Test("Markdown outline lists heading anchors in document order")
+    func markdownOutline() {
+        let markdown = """
+        # Title
+
+        Intro.
+
+        ## Section
+
+        ### Deep
+
+        ## Empty heading title becomes
+        """
+        // trailing space-only heading should be dropped
+        let withBlankHeading = markdown + "\n#   \n"
+        let outline = AgentMarkdownBlock.outline(from: withBlankHeading)
+        #expect(outline.map(\.title) == [
+            "Title",
+            "Section",
+            "Deep",
+            "Empty heading title becomes"
+        ])
+        #expect(outline.map(\.level) == [1, 2, 3, 2])
+        #expect(outline.map(\.id) == [
+            AgentMarkdownBlock.blockAnchorID(0),
+            AgentMarkdownBlock.blockAnchorID(2),
+            AgentMarkdownBlock.blockAnchorID(3),
+            AgentMarkdownBlock.blockAnchorID(4)
+        ])
+    }
+
+    @Test("Markdown outline selection follows document scroll offsets")
+    func markdownOutlineScrollSync() {
+        let entries = [
+            MarkdownOutlineEntry(id: "h1", level: 1, title: "One"),
+            MarkdownOutlineEntry(id: "h2", level: 2, title: "Two"),
+            MarkdownOutlineEntry(id: "h3", level: 2, title: "Three")
+        ]
+        let offsets: [String: CGFloat] = [
+            "h1": 0,
+            "h2": 400,
+            "h3": 900
+        ]
+        #expect(
+            MarkdownOutlineSyncPolicy.activeOutlineID(
+                entries: entries,
+                offsets: offsets,
+                contentOffsetY: 0
+            ) == "h1"
+        )
+        #expect(
+            MarkdownOutlineSyncPolicy.activeOutlineID(
+                entries: entries,
+                offsets: offsets,
+                contentOffsetY: 380
+            ) == "h2"
+        )
+        #expect(
+            MarkdownOutlineSyncPolicy.activeOutlineID(
+                entries: entries,
+                offsets: offsets,
+                contentOffsetY: 1_000
+            ) == "h3"
+        )
+        #expect(
+            MarkdownOutlineSyncPolicy.activeOutlineID(
+                entries: entries,
+                offsets: [:],
+                contentOffsetY: 200
+            ) == "h1"
+        )
+
+        let store = MarkdownHeadingOffsetStore()
+        store.setOffset(id: "h1", y: 0.2)
+        store.setOffset(id: "h2", y: 400.1)
+        store.setOffset(id: "h3", y: 900.4)
+        store.setContentOffset(380)
+        #expect(store.activeOutlineID(entries: entries) == "h2")
+        store.setSuppressSyncUntil(Date().addingTimeInterval(1))
+        #expect(store.isSyncSuppressed)
+        store.setSuppressSyncUntil(nil)
+        #expect(!store.isSyncSuppressed)
+        #expect(
+            MarkdownOutlineSyncPolicy.quantizeOffset(10.1)
+                == MarkdownOutlineSyncPolicy.quantizeOffset(10.2)
+        )
+        #expect(
+            MarkdownOutlineSyncPolicy.quantizeOffset(10.1)
+                != MarkdownOutlineSyncPolicy.quantizeOffset(10.6)
+        )
+        #expect(
+            MarkdownOutlineSyncPolicy.nearestMeasuredID(
+                targetID: "h3",
+                entries: entries,
+                offsets: ["h1": 0, "h2": 400]
+            ) == "h2"
+        )
+        #expect(
+            MarkdownOutlineSyncPolicy.nearestMeasuredID(
+                targetID: "h1",
+                entries: entries,
+                offsets: ["h1": 0]
+            ) == "h1"
+        )
+        #expect(
+            MarkdownOutlineSyncPolicy.clampedContentOffset(
+                targetY: 9_999,
+                viewportHeight: 800,
+                contentHeight: 2_000
+            ) == 1_200
+        )
+
+        let document = ParsedMarkdownDocument(source: "# Title\n\nHello `x`\n")
+        #expect(document.blocks.count == 2)
+        #expect(document.inlineRuns.count == 2)
+        #expect(document.inlineRuns[0] != nil)
+        #expect(document.inlineRuns[1] != nil)
+        #expect(AgentMarkdownBlock.inlineSource(for: document.blocks[0]) == "Title")
+    }
+
     @Test("Bounded code display keeps complete copy source")
     func codeCopyPolicy() {
         let source = String(repeating: "x", count: AgentCodeBlockPolicy.displayLimit + 25)

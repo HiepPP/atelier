@@ -1707,6 +1707,7 @@ private struct FileTabView: View {
                 .opacity(showsPreview ? 0 : 1)
                 .allowsHitTesting(!showsPreview)
                 .accessibilityHidden(showsPreview)
+                .zIndex(0)
 
                 FileRenderedPreview(
                     kind: previewKind,
@@ -1717,6 +1718,7 @@ private struct FileTabView: View {
                 .opacity(showsPreview ? 1 : 0)
                 .allowsHitTesting(showsPreview)
                 .accessibilityHidden(!showsPreview)
+                .zIndex(1)
             }
         } else {
             FileViewer(

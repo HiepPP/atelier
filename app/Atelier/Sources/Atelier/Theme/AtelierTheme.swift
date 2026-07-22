@@ -125,6 +125,8 @@ enum AtelierMetrics {
     static let fieldHeight: CGFloat = 32
     static let rowHeight: CGFloat = 28
     static let transcriptMaxWidth: CGFloat = 680
+    static let documentMaxWidth: CGFloat = 720
+    static let markdownOutlineWidth: CGFloat = 200
     static let emptyStateMaxWidth: CGFloat = 460
     static let workspaceRailWidth: CGFloat = 176
     static let workspaceRailItemHeight: CGFloat = 44
