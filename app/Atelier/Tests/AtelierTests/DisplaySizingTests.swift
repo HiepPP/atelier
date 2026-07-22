@@ -248,6 +248,26 @@ struct DisplaySizingTests {
         )
     }
 
+    @Test("Workspace divider keeps a stable resize interaction band")
+    func workspaceDividerInteractionBand() {
+        let bounds = NSRect(x: 0, y: 0, width: 900, height: 600)
+        let vertical = WorkspaceDividerInteractionPolicy.effectiveRect(
+            proposed: NSRect(x: 338, y: 0, width: 4, height: 600),
+            isVertical: true,
+            within: bounds
+        )
+        let horizontal = WorkspaceDividerInteractionPolicy.effectiveRect(
+            proposed: NSRect(x: 0, y: 298, width: 900, height: 4),
+            isVertical: false,
+            within: bounds
+        )
+
+        #expect(vertical.width == WorkspaceDividerInteractionPolicy.minimumThickness)
+        #expect(vertical.midX == 340)
+        #expect(horizontal.height == WorkspaceDividerInteractionPolicy.minimumThickness)
+        #expect(horizontal.midY == 300)
+    }
+
     @Test("Workspace native split restores panels without owning window chrome")
     func workspaceNativeSplitRestoresPanelGeometry() async {
         typealias NativeSplit = WorkspaceNativeSplitView<

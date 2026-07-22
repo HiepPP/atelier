@@ -33,6 +33,44 @@ nonisolated enum WorkspaceSplitLayoutPolicy {
     static let panelCollapseBehavior = NSSplitViewItem.CollapseBehavior.useConstraints
 }
 
+nonisolated enum WorkspaceDividerInteractionPolicy {
+    static let minimumThickness: CGFloat = 12
+
+    static func effectiveRect(
+        proposed: NSRect,
+        isVertical: Bool,
+        within bounds: NSRect
+    ) -> NSRect {
+        let thickness = isVertical ? proposed.width : proposed.height
+        let expansion = max(0, (minimumThickness - thickness) / 2)
+        let expanded = isVertical
+            ? proposed.insetBy(dx: -expansion, dy: 0)
+            : proposed.insetBy(dx: 0, dy: -expansion)
+        return expanded.intersection(bounds)
+    }
+}
+
+private final class WorkspaceSplitViewController: NSSplitViewController {
+    override func splitView(
+        _ splitView: NSSplitView,
+        effectiveRect proposedEffectiveRect: NSRect,
+        forDrawnRect drawnRect: NSRect,
+        ofDividerAt dividerIndex: Int
+    ) -> NSRect {
+        let systemRect = super.splitView(
+            splitView,
+            effectiveRect: proposedEffectiveRect,
+            forDrawnRect: drawnRect,
+            ofDividerAt: dividerIndex
+        )
+        return WorkspaceDividerInteractionPolicy.effectiveRect(
+            proposed: systemRect,
+            isVertical: splitView.isVertical,
+            within: splitView.bounds
+        )
+    }
+}
+
 struct WorkspacePanelMotionContainer<Content: View>: View {
     let content: Content
     let isPresented: Bool
@@ -70,7 +108,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
     }
 
     func makeNSViewController(context: Context) -> NSSplitViewController {
-        let controller = NSSplitViewController()
+        let controller = WorkspaceSplitViewController()
         controller.splitView.isVertical = true
         controller.splitView.dividerStyle = .thin
 
