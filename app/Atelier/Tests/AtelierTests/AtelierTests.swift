@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import Atelier
 
@@ -160,6 +162,117 @@ struct AtelierTests {
         #expect(folderLink.isSymbolicLink)
         #expect(!folderLink.isDirectory)
         #expect(folderLink.symbolicLinkTargetIsDirectory)
+    }
+
+    @Test("Explorer uses one row cursor owner")
+    @MainActor
+    func fileTreeUsesOneRowCursorOwner() async throws {
+        let root = temporaryDirectory("file-tree-pointer-cursor")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for folderName in ["tmp", "Vendor/Luminare/.build", "app"] {
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent(folderName),
+                withIntermediateDirectories: true
+            )
+        }
+        try Data().write(to: root.appendingPathComponent("README.md"))
+
+        let controller = FileTreeController(
+            rootURL: root,
+            ignoredPaths: ["tmp/", "Vendor/Luminare/.build/"],
+            onTargetDirectoryChange: { _ in },
+            onCreateItem: { _, _ in },
+            onRenameItem: { _, _ in },
+            onMoveItemToTrash: { _ in },
+            onAddItemToGitIgnore: { _ in },
+            onPasteRelativePath: { _ in false },
+            onPreview: { _ in },
+            onOpen: { _ in }
+        )
+        defer { controller.stop() }
+
+        let scrollView = controller.makeView(scale: 1, displayScale: 2)
+        scrollView.frame = NSRect(x: 0, y: 0, width: 320, height: 200)
+        let window = NSWindow(
+            contentRect: scrollView.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = scrollView
+        let outlineView = try #require(scrollView.documentView as? NSOutlineView)
+
+        for _ in 0..<200 where outlineView.numberOfRows < 4 {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(outlineView.numberOfRows == 4)
+        outlineView.layoutSubtreeIfNeeded()
+        outlineView.updateTrackingAreas()
+        #expect(!outlineView.trackingAreas.contains { $0.options.contains(.cursorUpdate) })
+
+        var alphaByName: [String: CGFloat] = [:]
+        for row in 0..<outlineView.numberOfRows {
+            let node = try #require(outlineView.item(atRow: row) as? FileTreeNode)
+            let cell = try #require(
+                outlineView.view(atColumn: 0, row: row, makeIfNecessary: true)
+            )
+            let label = try #require((cell as? NSTableCellView)?.textField)
+            #expect(!label.isEditable)
+            #expect(!label.isSelectable)
+            #expect(!outlineView.rect(ofRow: row).intersection(outlineView.visibleRect).isEmpty)
+            alphaByName[node.name] = cell.alphaValue
+        }
+        #expect(alphaByName["tmp"] == 0.5)
+        #expect(alphaByName["Vendor"] == 1)
+        #expect(alphaByName["app"] == 1)
+        #expect(alphaByName["README.md"] == 1)
+    }
+
+    @Test("Inactive Git sidebar does not mount its native text editor")
+    @MainActor
+    func inactiveGitSidebarDoesNotMountTextEditor() {
+        func nativeTextViews(in view: NSView) -> [NSTextView] {
+            let current = (view as? NSTextView).map { [$0] } ?? []
+            return current + view.subviews.flatMap { nativeTextViews(in: $0) }
+        }
+
+        let model = GitWorkspaceModel(
+            workspacePath: temporaryDirectory("inactive-git-sidebar").path
+        )
+        let zoom = AtelierZoomModel(windowController: WindowController())
+        let inactiveView = NSHostingView(
+            rootView: ChangesView(
+                model: model,
+                selectedDiff: nil,
+                onOpenDiff: { _ in },
+                isActive: false
+            )
+            .environment(zoom)
+        )
+        inactiveView.frame = NSRect(x: 0, y: 0, width: 240, height: 800)
+        let window = NSWindow(
+            contentRect: inactiveView.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = inactiveView
+        inactiveView.layoutSubtreeIfNeeded()
+        #expect(nativeTextViews(in: inactiveView).isEmpty)
+
+        let activeView = NSHostingView(
+            rootView: ChangesView(
+                model: model,
+                selectedDiff: nil,
+                onOpenDiff: { _ in },
+                isActive: true
+            )
+            .environment(zoom)
+        )
+        activeView.frame = inactiveView.frame
+        window.contentView = activeView
+        activeView.layoutSubtreeIfNeeded()
+        #expect(!nativeTextViews(in: activeView).isEmpty)
     }
 
     @Test("File tree service creates files and folders without overwriting")

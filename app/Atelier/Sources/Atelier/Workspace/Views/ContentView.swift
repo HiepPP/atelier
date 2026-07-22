@@ -879,6 +879,7 @@ struct WorkspaceView: View {
                     model: gitModel,
                     selectedDiff: terminalTabs.selectedGitDiffSelection,
                     onOpenDiff: terminalTabs.openGitDiff,
+                    isActive: selectedSidebarTab == .sourceControl,
                     showsPanelHeader: false
                 )
                 .opacity(selectedSidebarTab == .sourceControl ? 1 : 0)

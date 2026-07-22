@@ -599,6 +599,7 @@ struct ChangesView: View {
     let model: GitWorkspaceModel
     let selectedDiff: DiffSelection?
     let onOpenDiff: (DiffSelection) -> Void
+    let isActive: Bool
     var onClose: (() -> Void)? = nil
     var showsPanelHeader = true
 
@@ -787,13 +788,19 @@ struct ChangesView: View {
                         .allowsHitTesting(false)
                 }
 
-                TextEditor(text: $commitMessage)
-                    .scrollContentBackground(.hidden)
-                    .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.editor)
-                    .atelierFont(size: AtelierTypography.uiSize)
-                    .focused($isCommitFieldFocused)
-                    .padding(AtelierMetrics.spaceXS)
-                    .frame(minHeight: 76, maxHeight: 92)
+                Group {
+                    if isActive {
+                        TextEditor(text: $commitMessage)
+                            .scrollContentBackground(.hidden)
+                            .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.editor)
+                            .atelierFont(size: AtelierTypography.uiSize)
+                            .focused($isCommitFieldFocused)
+                            .padding(AtelierMetrics.spaceXS)
+                    } else {
+                        Color.clear
+                    }
+                }
+                .frame(minHeight: 76, maxHeight: 92)
             }
             .atelierField(isFocused: isCommitFieldFocused)
 
