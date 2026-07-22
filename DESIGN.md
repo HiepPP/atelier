@@ -485,6 +485,10 @@ Persistence boundaries:
 - Keep body toolbar actions at 24 points, with quiet hover and pressed fills.
 - Keep selected file labels in the primary text color. Use one rounded, warm-tinted native material
   surface with no accent edge and no inverted text.
+- Treat each complete file-tree row, including its icon, label, and trailing empty area, as one
+  pointer-cursor hit target.
+- Every Explorer item keeps the pointing-hand cursor over its disclosure, icon, label, badges, and
+  trailing row area. No item subview may expose the text or arrow cursor.
 - Vertically center the disclosure, icon, and label within every file-tree row.
 - Use overlay Explorer scroll indicators that fade away when scrolling stops.
 - Keep the base file or folder icon and add an `arrow.turn.up.right` badge after symlink names.
