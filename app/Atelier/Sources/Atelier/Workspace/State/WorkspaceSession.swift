@@ -13,8 +13,10 @@ final class WorkspaceSession {
     let gemmaSidecar: GemmaSidecarModel
     let agentResponses: AgentResponsesModel
     let chrome = WorkspaceChromeModel()
+    let watchtower = WatchtowerModel()
     private(set) var fileTreeRevision = 0
     private(set) var isAgentSidecarPresented = false
+    private(set) var isWatchtowerPresented = false
 
     private let fileTreeService = FileTreeService()
     private var fileWatcher: FileWatcher?
@@ -69,6 +71,7 @@ final class WorkspaceSession {
         guard !isStarted else { return }
         isStarted = true
         gitModel.refresh()
+        watchtower.setRoot(rootURL.path)
         agentResponses.start()
         gemmaSidecar.start()
 
@@ -76,6 +79,9 @@ final class WorkspaceSession {
             guard let self else { return }
             if invalidation.contains(.workspaceContent) {
                 invalidateFileTree()
+            }
+            if invalidation.contains(.watchtowerPlan) {
+                watchtower.refresh()
             }
             gitModel.invalidate(
                 repositoryMetadataChanged: invalidation.contains(.gitMetadata)
@@ -91,6 +97,7 @@ final class WorkspaceSession {
             isStarted = false
             fileWatcher?.stop()
             fileWatcher = nil
+            watchtower.setRoot(nil)
             gitModel.stop()
             gemmaAgent.close()
             gemmaSidecar.stop()
@@ -159,6 +166,14 @@ final class WorkspaceSession {
 
     func closeAgentSidecar() {
         isAgentSidecarPresented = false
+    }
+
+    func toggleWatchtower() {
+        isWatchtowerPresented.toggle()
+    }
+
+    func closeWatchtower() {
+        isWatchtowerPresented = false
     }
 
     /// Current open tabs, for catalog persistence.

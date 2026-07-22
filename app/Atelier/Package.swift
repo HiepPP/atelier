@@ -33,6 +33,9 @@ let package = Package(
         .testTarget(
             name: "AtelierTests",
             dependencies: ["Atelier"],
+            resources: [
+                .copy("Fixtures")
+            ],
             swiftSettings: [
                 .defaultIsolation(MainActor.self),
                 .enableUpcomingFeature("NonisolatedNonsendingByDefault")

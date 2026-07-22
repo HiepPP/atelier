@@ -654,6 +654,19 @@ final class TerminalTabsModel {
         _ = pasteIntoSelectedTerminal("\(command)\n")
     }
 
+    // Runs a command in the selected terminal, or opens a new one when the
+    // active tab is not a terminal. Used by the Watchtower command drop.
+    @discardableResult
+    func runCommand(_ command: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if isTerminalSelected {
+            return pasteIntoSelectedTerminal("\(trimmed)\n")
+        }
+        addAndRun(trimmed)
+        return true
+    }
+
     func closeAll() {
         for tab in tabs {
             switch tab.content {
@@ -1395,6 +1408,10 @@ struct TerminalTabs: View {
                             isActive: isActive,
                             onClose: onCloseAgentSidecar
                         )
+                        .dropDestination(for: WatchtowerCommandDrop.self) { drops, _ in
+                            guard let drop = drops.first else { return false }
+                            return model.runCommand(drop.command)
+                        }
                         .opacity(isActive ? 1 : 0)
                         .allowsHitTesting(isActive)
                         .accessibilityHidden(!isActive)

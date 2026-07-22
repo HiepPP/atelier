@@ -6,6 +6,7 @@ nonisolated struct FileWatcherInvalidation: OptionSet, Sendable {
 
     static let workspaceContent = FileWatcherInvalidation(rawValue: 1 << 0)
     static let gitMetadata = FileWatcherInvalidation(rawValue: 1 << 1)
+    static let watchtowerPlan = FileWatcherInvalidation(rawValue: 1 << 2)
 }
 
 nonisolated enum FileWatcherEventPolicy {
@@ -15,7 +16,7 @@ nonisolated enum FileWatcherEventPolicy {
         mustRescan: Bool = false
     ) -> FileWatcherInvalidation {
         if mustRescan {
-            return [.workspaceContent, .gitMetadata]
+            return [.workspaceContent, .gitMetadata, .watchtowerPlan]
         }
 
         var result: FileWatcherInvalidation = []
@@ -25,9 +26,18 @@ nonisolated enum FileWatcherEventPolicy {
             } else if !isGitInternal(eventPath, rootPath: rootPath),
                       !IgnoreRules.shouldIgnoreEventPath(eventPath) {
                 result.insert(.workspaceContent)
+                if isWatchtowerPlan(eventPath, rootPath: rootPath) {
+                    result.insert(.watchtowerPlan)
+                }
             }
         }
         return result
+    }
+
+    // Narrow scope: only changes under <root>/watchtower/ refresh the plan model.
+    private static func isWatchtowerPlan(_ eventPath: String, rootPath: String) -> Bool {
+        let base = rootPath.hasSuffix("/") ? "\(rootPath)watchtower" : "\(rootPath)/watchtower"
+        return eventPath == base || eventPath.hasPrefix("\(base)/")
     }
 
     private static func isRelevantGitMetadata(_ eventPath: String, rootPath: String) -> Bool {

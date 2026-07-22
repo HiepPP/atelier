@@ -420,6 +420,26 @@ struct ContentView: View {
                     windowController: app.windowController,
                     reduceMotion: reduceMotion
                 )
+                withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+                    session.toggleWatchtower()
+                }
+            } label: {
+                Image(systemName: "binoculars")
+            }
+            .accessibilityLabel(
+                session.isWatchtowerPresented ? "Hide Watchtower plan" : "Show Watchtower plan"
+            )
+            .help(
+                session.isWatchtowerPresented ? "Hide Watchtower Plan" : "Show Watchtower Plan"
+            )
+            .atelierPointerCursor()
+
+            Button {
+                chrome.dismissProjectMenu(
+                    restoresResponder: false,
+                    windowController: app.windowController,
+                    reduceMotion: reduceMotion
+                )
                 AtelierActionRegistry.perform(.toggleWorkspacePanels, model: app)
             } label: {
                 Image(
@@ -676,6 +696,11 @@ struct WorkspaceView: View {
                 .allowsHitTesting(chrome.isProjectMenuPresented)
                 .accessibilityHidden(!chrome.isProjectMenuPresented)
                 .zIndex(1)
+
+                if session.isWatchtowerPresented {
+                    watchtowerOverlay
+                        .zIndex(2)
+                }
             }
             .background(AtelierTheme.editor)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -805,6 +830,37 @@ struct WorkspaceView: View {
             session.closeAgentSidecar()
             app.windowController.restoreFirstResponder(responderBeforeAgentPreview)
             responderBeforeAgentPreview = nil
+        }
+    }
+
+    // Floating trailing panel. It lives in the ZStack outside the native split
+    // view, so it overlays the editor without changing the split's proposed size
+    // at any window width. Toggled by user action only, never layout-derived.
+    private var watchtowerOverlay: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            WatchtowerPanelView(
+                model: session.watchtower,
+                onOpenFile: { terminalTabs.previewFile($0) },
+                onClose: { closeWatchtower() }
+            )
+                .frame(width: AtelierMetrics.workspaceSidebarIdealWidth, alignment: .leading)
+                .frame(maxHeight: .infinity)
+                .background(AtelierTheme.panel)
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(AtelierTheme.border)
+                        .frame(width: AtelierTheme.strokeHairline)
+                }
+                .shadow(color: AtelierTheme.shadowFloating, radius: 18, x: -6, y: 0)
+                .onExitCommand { closeWatchtower() }
+        }
+        .transition(.move(edge: .trailing))
+    }
+
+    private func closeWatchtower() {
+        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+            session.closeWatchtower()
         }
     }
 

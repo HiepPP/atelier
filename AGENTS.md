@@ -58,6 +58,16 @@ Use four-space indentation and standard Swift API naming. Types use `UpperCamelC
 
 Use `rg` for plain-text repository search: literal strings, symbol names, file globs, quick greps. Use GitNexus for code intelligence: impact analysis before edits, caller/callee context, execution-flow tracing, safe renames, and pre-commit change detection. Pick the tool by purpose; do not use GitNexus as a text grep, and do not use `rg` to reason about the call graph.
 
+## Interaction Rules
+
+### Pointer Cursor on Every Clickable (Hard Rule)
+
+- Every clickable control MUST show the link pointer cursor on hover. Apply `.atelierPointerCursor()` (defined in `Theme/AtelierLuminareStyle.swift`) to it.
+- This is non-negotiable and applies to every interactive element: `Button`, tappable rows, links, icon buttons, chips, tags, disclosure headers, `onTapGesture` surfaces, drag handles, and any custom control with an action.
+- `.atelierPointerCursor()` already switches to the default cursor when the control is disabled (`isEnabled`), so keep it on disabled controls too; do not gate it behind an enabled check.
+- Built-in Atelier button styles that already include the pointer cursor (for example `AtelierLuminareIconButtonStyle`) satisfy this rule; do not double-apply.
+- Before finishing any UI change, audit every new or edited interactive element and confirm it has the pointer cursor. A clickable element without the pointer cursor is a bug.
+
 ## Issue Investigation Workflow
 
 - Do not use Computer Use, screenshots, or screen recordings to diagnose or prove an issue fix unless the user explicitly requests visual verification.

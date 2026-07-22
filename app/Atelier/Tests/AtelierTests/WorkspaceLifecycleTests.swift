@@ -69,7 +69,32 @@ struct WorkspaceLifecycleTests {
                 paths: ["\(root)/.build/debug/Atelier"],
                 rootPath: root,
                 mustRescan: true
-            ) == [.workspaceContent, .gitMetadata]
+            ) == [.workspaceContent, .gitMetadata, .watchtowerPlan]
+        )
+    }
+
+    @Test("Watcher flags watchtower plan changes narrowly")
+    func watchtowerEventPolicy() {
+        let root = "/tmp/atelier-watcher-policy"
+
+        #expect(
+            FileWatcherEventPolicy.invalidation(
+                paths: ["\(root)/watchtower/NEXT.md"],
+                rootPath: root
+            ) == [.workspaceContent, .watchtowerPlan]
+        )
+        #expect(
+            FileWatcherEventPolicy.invalidation(
+                paths: ["\(root)/watchtower/tasks/TASK-001-foo.md"],
+                rootPath: root
+            ) == [.workspaceContent, .watchtowerPlan]
+        )
+        // A non-watchtower workspace file must not flag the plan.
+        #expect(
+            !FileWatcherEventPolicy.invalidation(
+                paths: ["\(root)/Sources/App.swift"],
+                rootPath: root
+            ).contains(.watchtowerPlan)
         )
     }
 
