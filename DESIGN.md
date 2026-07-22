@@ -107,7 +107,7 @@ Rules:
 |---|---:|---|
 | `panelHeaderHeight` | 40 | Panel and diff headers |
 | `sectionHeaderHeight` | 36 | Section headers below panel chrome |
-| `tabBarHeight` | 34 | Center tab strip |
+| `tabBarHeight` | 40 | Center tab strip |
 | `statusBarHeight` | 26 | Bottom workspace status |
 | `fieldHeight` | 32 | Search and text fields |
 | `controlHeight` | 28 | Regular controls |

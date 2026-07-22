@@ -104,7 +104,7 @@ struct DisplaySizingTests {
 
         #expect(WorkspaceSidebarTab.allCases == [.explorer, .sourceControl])
 
-        #expect(AtelierMetrics.tabBarHeight == 34)
+        #expect(AtelierMetrics.tabBarHeight == 40)
         #expect(AtelierMetrics.workspaceRailWidth == 176)
         #expect(AtelierMetrics.workspaceRailItemHeight == 44)
         #expect(AtelierMetrics.workspaceRailItemGap == 4)

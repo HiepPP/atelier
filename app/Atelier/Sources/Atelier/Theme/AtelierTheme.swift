@@ -114,7 +114,7 @@ enum AtelierMetrics {
     static let space2XL: CGFloat = 32
     static let panelHeaderHeight: CGFloat = 40
     static let sectionHeaderHeight: CGFloat = 36
-    static let tabBarHeight: CGFloat = 34
+    static let tabBarHeight: CGFloat = 40
     static let statusBarHeight: CGFloat = 26
     static let iconButtonSize: CGFloat = 30
     static let smallIconSize: CGFloat = 8
