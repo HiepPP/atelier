@@ -1110,6 +1110,8 @@ struct TerminalTabs: View {
     @State private var draggedTabID: UUID?
     @State private var lastReorderTargetID: UUID?
     @State private var hoveredTabID: UUID?
+    @State private var renderedPreviewTabIDs: Set<UUID> = []
+    @State private var renderedSourceTabIDs: Set<UUID> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1298,20 +1300,55 @@ struct TerminalTabs: View {
                     }
 
                     if let editor = model.selectedEditor {
-                        Button {
-                            editor.toggleWordWrap()
-                        } label: {
-                            Image(
-                                systemName: editor.isWordWrapEnabled
-                                    ? "text.word.spacing"
-                                    : "arrow.left.and.right"
+                        if FilePreviewPolicy.kind(for: editor.document.url) != nil,
+                           let selectedID = model.selectedID {
+                            let showsPreview = showsRenderedPreview(
+                                tabID: selectedID,
+                                fileURL: editor.document.url
+                            )
+                            Button {
+                                if showsPreview {
+                                    renderedPreviewTabIDs.remove(selectedID)
+                                    renderedSourceTabIDs.insert(selectedID)
+                                } else {
+                                    renderedSourceTabIDs.remove(selectedID)
+                                    renderedPreviewTabIDs.insert(selectedID)
+                                }
+                            } label: {
+                                Image(
+                                    systemName: showsPreview
+                                        ? "chevron.left.forwardslash.chevron.right"
+                                        : "eye"
+                                )
+                            }
+                            .buttonStyle(AtelierLuminareIconButtonStyle())
+                            .help(showsPreview ? "Show Source" : "Show Preview")
+                            .accessibilityLabel(showsPreview ? "Show Source" : "Show Preview")
+                            .accessibilityValue(showsPreview ? "Preview" : "Source")
+                        }
+
+                        if !isRenderedPreviewVisible {
+                            Button {
+                                editor.toggleWordWrap()
+                            } label: {
+                                Image(
+                                    systemName: editor.isWordWrapEnabled
+                                        ? "text.word.spacing"
+                                        : "arrow.left.and.right"
+                                )
+                            }
+                            .buttonStyle(AtelierLuminareIconButtonStyle())
+                            .help(
+                                editor.isWordWrapEnabled
+                                    ? "Disable Word Wrap"
+                                    : "Enable Word Wrap"
+                            )
+                            .accessibilityLabel(
+                                editor.isWordWrapEnabled
+                                    ? "Disable Word Wrap"
+                                    : "Enable Word Wrap"
                             )
                         }
-                        .buttonStyle(AtelierLuminareIconButtonStyle())
-                        .help(editor.isWordWrapEnabled ? "Disable Word Wrap" : "Enable Word Wrap")
-                        .accessibilityLabel(
-                            editor.isWordWrapEnabled ? "Disable Word Wrap" : "Enable Word Wrap"
-                        )
                     }
 
                     Button {
@@ -1364,7 +1401,13 @@ struct TerminalTabs: View {
                     case .terminal:
                         EmptyView()
                     case .file(let file):
-                        FileTabView(file: file) {
+                        FileTabView(
+                            file: file,
+                            showsPreview: showsRenderedPreview(
+                                tabID: tab.id,
+                                fileURL: file.document.url
+                            )
+                        ) {
                             model.promotePreview(for: file.document.url)
                         }
                             .id(tab.id)
@@ -1395,7 +1438,7 @@ struct TerminalTabs: View {
                 }
             }
         }
-        .focusedSceneValue(\.activeEditor, model.selectedEditor)
+        .focusedSceneValue(\.activeEditor, activeEditorForCommands)
         .focusedSceneValue(\.insertSelectionReference, insertSelectionReferenceAction)
         .focusedSceneValue(\.renameActiveTab) {
             guard let selectedID = model.selectedID else { return }
@@ -1426,6 +1469,26 @@ struct TerminalTabs: View {
                 renameTargetID = nil
             }
         }
+        .onChange(of: model.visibleTabs.map(\.id)) { _, visibleIDs in
+            renderedPreviewTabIDs.formIntersection(visibleIDs)
+            renderedSourceTabIDs.formIntersection(visibleIDs)
+        }
+    }
+
+    private var isRenderedPreviewVisible: Bool {
+        guard let selectedID = model.selectedID,
+              let editor = model.selectedEditor else { return false }
+        return showsRenderedPreview(tabID: selectedID, fileURL: editor.document.url)
+    }
+
+    private func showsRenderedPreview(tabID: UUID, fileURL: URL) -> Bool {
+        if renderedSourceTabIDs.contains(tabID) { return false }
+        if renderedPreviewTabIDs.contains(tabID) { return true }
+        return FilePreviewPolicy.showsPreviewByDefault(for: fileURL)
+    }
+
+    private var activeEditorForCommands: EditorSession? {
+        isRenderedPreviewVisible ? nil : model.selectedEditor
     }
 
     private var renameSheetPresented: Binding<Bool> {
@@ -1438,11 +1501,12 @@ struct TerminalTabs: View {
     }
 
     private var toggleWordWrapAction: (() -> Void)? {
-        guard let editor = model.selectedEditor else { return nil }
+        guard let editor = activeEditorForCommands else { return nil }
         return { editor.toggleWordWrap() }
     }
 
     private var insertSelectionReferenceAction: (() -> Void)? {
+        guard !isRenderedPreviewVisible else { return nil }
         guard model.canPasteSelectedEditorReference else { return nil }
         return { model.pasteSelectedEditorReferenceIntoTerminal() }
     }
@@ -1584,12 +1648,36 @@ private struct TabCloseButton: View {
 
 private struct FileTabView: View {
     let file: EditorSession
+    let showsPreview: Bool
     let onEdit: () -> Void
 
     @ViewBuilder
     var body: some View {
         if case .image(let data) = file.content {
             ImageViewer(data: data, name: file.document.displayName)
+        } else if let previewKind = FilePreviewPolicy.kind(for: file.document.url) {
+            ZStack {
+                FileViewer(
+                    content: file.content,
+                    fileURL: file.document.url,
+                    isWordWrapEnabled: file.isWordWrapEnabled,
+                    surfaceOwner: file,
+                    onEdit: onEdit
+                )
+                .opacity(showsPreview ? 0 : 1)
+                .allowsHitTesting(!showsPreview)
+                .accessibilityHidden(showsPreview)
+
+                FileRenderedPreview(
+                    kind: previewKind,
+                    content: file.content,
+                    fileURL: file.document.url,
+                    isActive: showsPreview
+                )
+                .opacity(showsPreview ? 1 : 0)
+                .allowsHitTesting(showsPreview)
+                .accessibilityHidden(!showsPreview)
+            }
         } else {
             FileViewer(
                 content: file.content,

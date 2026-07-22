@@ -21,12 +21,24 @@ struct AtelierActionRegistryTests {
             .navigateForward,
             .reopenClosedTab,
             .openGemma,
+            .toggleLeftPanel,
+            .toggleWorkspacePanels,
+            .toggleRightPanel,
             .zoomIn,
             .zoomOut,
             .actualSize,
             .toggleFocusMode
         ])
         #expect(Set(ids).count == ids.count)
+        #expect(AtelierActionRegistry.descriptor(for: .reopenClosedTab).shortcutLabel == nil)
+        #expect(
+            AtelierActionRegistry.descriptor(for: .toggleLeftPanel).shortcutLabel
+                == "Command-Shift-E"
+        )
+        #expect(
+            AtelierActionRegistry.descriptor(for: .toggleRightPanel).shortcutLabel
+                == "Command-Shift-R"
+        )
     }
 
     @Test("Availability follows current action context")
@@ -39,6 +51,9 @@ struct AtelierActionRegistryTests {
             canNavigateBack: false,
             canNavigateForward: true,
             canReopenClosedTab: false,
+            canToggleLeftPanel: false,
+            canToggleWorkspacePanels: false,
+            canToggleRightPanel: false,
             canZoomIn: true,
             canZoomOut: false,
             isFocusMode: false
@@ -54,6 +69,9 @@ struct AtelierActionRegistryTests {
         #expect(AtelierActionRegistry.isEnabled(.navigateForward, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.reopenClosedTab, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.openGemma, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.toggleLeftPanel, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.toggleWorkspacePanels, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.toggleRightPanel, context: empty))
         #expect(AtelierActionRegistry.isEnabled(.zoomIn, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.zoomOut, context: empty))
         #expect(AtelierActionRegistry.isEnabled(.actualSize, context: empty))
@@ -67,6 +85,9 @@ struct AtelierActionRegistryTests {
             canNavigateBack: false,
             canNavigateForward: false,
             canReopenClosedTab: false,
+            canToggleLeftPanel: false,
+            canToggleWorkspacePanels: false,
+            canToggleRightPanel: false,
             canZoomIn: true,
             canZoomOut: true,
             isFocusMode: false
@@ -101,6 +122,9 @@ struct AtelierActionRegistryTests {
             navigateForward: { recorded.append(.navigateForward) },
             reopenClosedTab: { recorded.append(.reopenClosedTab) },
             openGemma: { recorded.append(.openGemma) },
+            toggleLeftPanel: { recorded.append(.toggleLeftPanel) },
+            toggleWorkspacePanels: { recorded.append(.toggleWorkspacePanels) },
+            toggleRightPanel: { recorded.append(.toggleRightPanel) },
             zoomIn: { recorded.append(.zoomIn) },
             zoomOut: { recorded.append(.zoomOut) },
             actualSize: { recorded.append(.actualSize) },
@@ -184,6 +208,9 @@ struct AtelierActionRegistryTests {
             canNavigateBack: true,
             canNavigateForward: true,
             canReopenClosedTab: true,
+            canToggleLeftPanel: !isFocusMode,
+            canToggleWorkspacePanels: true,
+            canToggleRightPanel: !isFocusMode,
             canZoomIn: true,
             canZoomOut: true,
             isFocusMode: isFocusMode

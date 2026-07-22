@@ -601,6 +601,14 @@ Persistence boundaries:
 - Keep native previous, next, replace, replace-all, selection, match-mode, and result-count behavior.
 - Keep search inside the file scroll view. Closing search restores focus to the editor.
 - Keep editor word wrap as a per-file setting.
+- Offer Source and Preview modes for `.md` and `.html` text files. Open Markdown in Source mode
+  and HTML in Preview mode. Keep the native editor mounted while Preview is visible, and keep
+  explicit per-tab mode changes session-only.
+- Render Markdown through the native Atelier Markdown surface. Render HTML from its original file
+  URL in a non-persistent WebKit surface. Allow relative resources from the containing directory
+  and run the page's scripts so interactive local previews render correctly.
+- Put the Source/Preview toggle in the trailing editor action group. Keep find and word-wrap
+  commands scoped to Source mode.
 - With a non-empty editor selection, `Cmd-Shift-C` inserts
   `@<workspace-relative-path>:<first-line>~<last-line> ` into the most recently selected terminal
   and switches to that terminal. Keep exactly one trailing space. Disable the command when no
@@ -710,7 +718,8 @@ The five background features, all read-only and cancellable:
 | `Cmd-W` | Close active closable center tab |
 | `Ctrl--` | Back |
 | `Ctrl-Shift--` | Forward |
-| `Cmd-Shift-T` | Reopen Closed Tab |
+| `Cmd-Shift-E` | Toggle Left Panel |
+| `Cmd-Shift-R` | Toggle Right Panel |
 | `Cmd-+` | Zoom In |
 | `Cmd--` | Zoom Out |
 | `Cmd-0` | Actual Size |
@@ -725,6 +734,7 @@ Rules:
   and submit it once.
 - `Cmd-W` never closes the workspace window. With no active tab or only the final terminal active, it does nothing.
 - `Cmd-W` asks for confirmation only when Claude Code or Codex is the detected foreground agent.
+- Keep Reopen Closed Tab available through menus and the command palette without a default shortcut.
 - Show live enabled state in every action surface.
 - Do not reuse an existing shortcut for a new action.
 - Keep shortcut labels monospaced in the command palette.

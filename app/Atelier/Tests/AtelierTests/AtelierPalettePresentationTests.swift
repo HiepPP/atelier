@@ -85,6 +85,9 @@ struct AtelierPalettePresentationTests {
             canNavigateBack: false,
             canNavigateForward: true,
             canReopenClosedTab: false,
+            canToggleLeftPanel: hasWorkspace,
+            canToggleWorkspacePanels: hasWorkspace,
+            canToggleRightPanel: hasWorkspace,
             canZoomIn: true,
             canZoomOut: true,
             isFocusMode: false

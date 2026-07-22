@@ -49,6 +49,25 @@ struct AtelierTests {
         #expect(!FileLayoutPolicy.usesFullLayout(byteCount: FileLoader.defaultLimit + 1))
     }
 
+    @Test("Rendered file preview supports Markdown and HTML only")
+    func filePreviewPolicy() {
+        #expect(FilePreviewPolicy.kind(for: URL(fileURLWithPath: "/tmp/README.md")) == .markdown)
+        #expect(FilePreviewPolicy.kind(for: URL(fileURLWithPath: "/tmp/index.HTML")) == .html)
+        #expect(FilePreviewPolicy.kind(for: URL(fileURLWithPath: "/tmp/readme.markdown")) == nil)
+        #expect(FilePreviewPolicy.kind(for: URL(fileURLWithPath: "/tmp/index.htm")) == nil)
+        #expect(FilePreviewPolicy.kind(for: URL(fileURLWithPath: "/tmp/source.swift")) == nil)
+        #expect(FilePreviewPolicy.showsPreviewByDefault(
+            for: URL(fileURLWithPath: "/tmp/index.html")
+        ))
+        #expect(!FilePreviewPolicy.showsPreviewByDefault(
+            for: URL(fileURLWithPath: "/tmp/README.md")
+        ))
+        #expect(HTMLFilePreviewPolicy.allowsContentJavaScript)
+        #expect(HTMLFilePreviewPolicy.readAccessURL(
+            for: URL(fileURLWithPath: "/tmp/site/index.html")
+        ) == URL(fileURLWithPath: "/tmp/site", isDirectory: true).standardizedFileURL)
+    }
+
     @Test("Editor session routes every file find action to its surface")
     func editorFindActions() async throws {
         let root = temporaryDirectory("editor-find")

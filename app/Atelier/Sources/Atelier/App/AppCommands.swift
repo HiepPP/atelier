@@ -89,8 +89,19 @@ struct AppCommands: Commands {
             Button(title(.reopenClosedTab)) {
                 perform(.reopenClosedTab)
             }
-            .keyboardShortcut("t", modifiers: [.command, .shift])
             .disabled(!isEnabled(.reopenClosedTab))
+
+            Button(title(.toggleLeftPanel)) {
+                perform(.toggleLeftPanel)
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(!isEnabled(.toggleLeftPanel))
+
+            Button(title(.toggleRightPanel)) {
+                perform(.toggleRightPanel)
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .disabled(!isEnabled(.toggleRightPanel))
 
             Divider()
 

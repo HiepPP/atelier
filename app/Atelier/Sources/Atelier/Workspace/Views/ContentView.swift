@@ -361,7 +361,7 @@ struct ContentView: View {
                     windowController: app.windowController,
                     reduceMotion: reduceMotion
                 )
-                chrome.toggleSidebar()
+                AtelierActionRegistry.perform(.toggleLeftPanel, model: app)
             } label: {
                 Image(systemName: "sidebar.leading")
             }
@@ -420,7 +420,7 @@ struct ContentView: View {
                     windowController: app.windowController,
                     reduceMotion: reduceMotion
                 )
-                toggleAllWorkspacePanels(chrome: chrome)
+                AtelierActionRegistry.perform(.toggleWorkspacePanels, model: app)
             } label: {
                 Image(
                     systemName: workspacePanelsArePresented(chrome: chrome)
@@ -446,7 +446,7 @@ struct ContentView: View {
                     windowController: app.windowController,
                     reduceMotion: reduceMotion
                 )
-                chrome.toggleInspector(windowController: app.windowController)
+                AtelierActionRegistry.perform(.toggleRightPanel, model: app)
             } label: {
                 Image(systemName: "sidebar.trailing")
             }
@@ -459,18 +459,6 @@ struct ContentView: View {
 
     private func workspacePanelsArePresented(chrome: WorkspaceChromeModel) -> Bool {
         !zoom.isFocusMode && chrome.panels.hasVisiblePanel
-    }
-
-    private func toggleAllWorkspacePanels(chrome: WorkspaceChromeModel) {
-        if workspacePanelsArePresented(chrome: chrome) || zoom.isFocusMode {
-            zoom.toggleFocusMode()
-            return
-        }
-
-        chrome.applyPanelPresentation(
-            chrome.panels.togglingAllPanels(layout: chrome.currentLayoutMode),
-            requestsAnimation: true
-        )
     }
 
     private var quickOpenAction: (() -> Void)? {

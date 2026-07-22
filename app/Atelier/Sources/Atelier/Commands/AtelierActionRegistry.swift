@@ -12,6 +12,9 @@ nonisolated enum AtelierActionID: String, CaseIterable, Identifiable, Sendable {
     case navigateForward
     case reopenClosedTab
     case openGemma
+    case toggleLeftPanel
+    case toggleWorkspacePanels
+    case toggleRightPanel
     case zoomIn
     case zoomOut
     case actualSize
@@ -36,6 +39,9 @@ nonisolated struct AtelierActionContext: Equatable, Sendable {
     let canNavigateBack: Bool
     let canNavigateForward: Bool
     let canReopenClosedTab: Bool
+    let canToggleLeftPanel: Bool
+    let canToggleWorkspacePanels: Bool
+    let canToggleRightPanel: Bool
     let canZoomIn: Bool
     let canZoomOut: Bool
     let isFocusMode: Bool
@@ -54,6 +60,9 @@ struct AtelierActionHandlers {
     let navigateForward: () -> Void
     let reopenClosedTab: () -> Void
     let openGemma: () -> Void
+    let toggleLeftPanel: () -> Void
+    let toggleWorkspacePanels: () -> Void
+    let toggleRightPanel: () -> Void
     let zoomIn: () -> Void
     let zoomOut: () -> Void
     let actualSize: () -> Void
@@ -72,6 +81,29 @@ struct AtelierActionHandlers {
             navigateForward: { model.workspace?.terminalTabs.navigateForward() },
             reopenClosedTab: { model.workspace?.terminalTabs.reopenClosedTab() },
             openGemma: { model.workspace?.openGemma() },
+            toggleLeftPanel: {
+                guard let chrome = model.workspace?.chrome,
+                      !model.zoom.isFocusMode,
+                      chrome.currentLayoutMode.docksSidebar else { return }
+                chrome.toggleSidebar()
+            },
+            toggleWorkspacePanels: {
+                guard let chrome = model.workspace?.chrome else { return }
+                if model.zoom.isFocusMode || chrome.panels.hasVisiblePanel {
+                    model.zoom.toggleFocusMode()
+                    return
+                }
+                chrome.applyPanelPresentation(
+                    chrome.panels.togglingAllPanels(layout: chrome.currentLayoutMode),
+                    requestsAnimation: true
+                )
+            },
+            toggleRightPanel: {
+                guard let chrome = model.workspace?.chrome,
+                      !model.zoom.isFocusMode,
+                      chrome.currentLayoutMode.supportsInspector else { return }
+                chrome.toggleInspector(windowController: model.windowController)
+            },
             zoomIn: {
                 model.windowController.maximizeWorkspaceWindow()
                 model.zoom.zoomIn()
@@ -153,7 +185,7 @@ nonisolated enum AtelierActionRegistry {
             title: "Reopen Closed Tab",
             category: "Tabs",
             systemImage: "arrow.uturn.backward",
-            shortcutLabel: "Command-Shift-T"
+            shortcutLabel: nil
         ),
         AtelierActionDescriptor(
             id: .openGemma,
@@ -161,6 +193,27 @@ nonisolated enum AtelierActionRegistry {
             category: "Agent",
             systemImage: "sparkles",
             shortcutLabel: nil
+        ),
+        AtelierActionDescriptor(
+            id: .toggleLeftPanel,
+            title: "Toggle Left Panel",
+            category: "View",
+            systemImage: "sidebar.leading",
+            shortcutLabel: "Command-Shift-E"
+        ),
+        AtelierActionDescriptor(
+            id: .toggleWorkspacePanels,
+            title: "Toggle Left and Right Panels",
+            category: "View",
+            systemImage: "rectangle.split.3x1",
+            shortcutLabel: nil
+        ),
+        AtelierActionDescriptor(
+            id: .toggleRightPanel,
+            title: "Toggle Right Panel",
+            category: "View",
+            systemImage: "sidebar.trailing",
+            shortcutLabel: "Command-Shift-R"
         ),
         AtelierActionDescriptor(
             id: .zoomIn,
@@ -231,6 +284,12 @@ nonisolated enum AtelierActionRegistry {
             context.canNavigateForward
         case .reopenClosedTab:
             context.canReopenClosedTab
+        case .toggleLeftPanel:
+            context.canToggleLeftPanel
+        case .toggleWorkspacePanels:
+            context.canToggleWorkspacePanels
+        case .toggleRightPanel:
+            context.canToggleRightPanel
         case .zoomIn:
             context.canZoomIn
         case .zoomOut:
@@ -248,6 +307,13 @@ nonisolated enum AtelierActionRegistry {
             canNavigateBack: model.workspace?.terminalTabs.canNavigateBack == true,
             canNavigateForward: model.workspace?.terminalTabs.canNavigateForward == true,
             canReopenClosedTab: model.workspace?.terminalTabs.canReopenClosedTab == true,
+            canToggleLeftPanel: model.workspace.map { workspace in
+                !model.zoom.isFocusMode && workspace.chrome.currentLayoutMode.docksSidebar
+            } ?? false,
+            canToggleWorkspacePanels: model.workspace != nil,
+            canToggleRightPanel: model.workspace.map { workspace in
+                !model.zoom.isFocusMode && workspace.chrome.currentLayoutMode.supportsInspector
+            } ?? false,
             canZoomIn: model.zoom.canZoomIn,
             canZoomOut: model.zoom.canZoomOut,
             isFocusMode: model.zoom.isFocusMode
@@ -284,6 +350,12 @@ nonisolated enum AtelierActionRegistry {
             handlers.reopenClosedTab()
         case .openGemma:
             handlers.openGemma()
+        case .toggleLeftPanel:
+            handlers.toggleLeftPanel()
+        case .toggleWorkspacePanels:
+            handlers.toggleWorkspacePanels()
+        case .toggleRightPanel:
+            handlers.toggleRightPanel()
         case .zoomIn:
             handlers.zoomIn()
         case .zoomOut:
