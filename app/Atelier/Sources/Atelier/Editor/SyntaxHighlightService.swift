@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import HighlightSwift
 
 actor SyntaxHighlightService {
@@ -42,6 +42,38 @@ actor SyntaxHighlightService {
         ).attributedText
         store(result, for: key)
         return result
+    }
+
+    func highlightPreservingWhitespace(
+        _ text: String,
+        languageName: String?,
+        usesDarkAppearance: Bool
+    ) async throws -> AttributedString {
+        let highlighted = try await highlight(
+            text,
+            languageName: languageName,
+            usesDarkAppearance: usesDarkAppearance
+        )
+        let nativeHighlight = NSAttributedString(highlighted)
+        let highlightedRange = (text as NSString).range(of: nativeHighlight.string)
+        guard highlightedRange.location != NSNotFound else {
+            return AttributedString(text)
+        }
+
+        let result = NSMutableAttributedString(string: text)
+        nativeHighlight.enumerateAttribute(
+            .foregroundColor,
+            in: NSRange(location: 0, length: nativeHighlight.length)
+        ) { value, range, _ in
+            guard let value else { return }
+            let target = NSRange(
+                location: highlightedRange.location + range.location,
+                length: range.length
+            )
+            guard NSMaxRange(target) <= result.length else { return }
+            result.addAttribute(.foregroundColor, value: value, range: target)
+        }
+        return AttributedString(result)
     }
 
     private func value(for key: Key) -> AttributedString? {

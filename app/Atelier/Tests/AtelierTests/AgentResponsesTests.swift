@@ -399,12 +399,71 @@ struct AgentResponsesTests {
         ])
     }
 
+    @Test("Markdown distinguishes task lists from unordered lists")
+    func markdownTaskLists() {
+        let markdown = """
+        - [ ] Pending
+        - [x] Done
+        * [X] Also done
+        - Regular
+        """
+
+        #expect(AgentMarkdownBlock.parse(markdown) == [
+            .taskItem(isCompleted: false, content: "Pending"),
+            .taskItem(isCompleted: true, content: "Done"),
+            .taskItem(isCompleted: true, content: "Also done"),
+            .unorderedItem("Regular")
+        ])
+    }
+
     @Test("Bounded code display keeps complete copy source")
     func codeCopyPolicy() {
         let source = String(repeating: "x", count: AgentCodeBlockPolicy.displayLimit + 25)
         #expect(AgentCodeBlockPolicy.displayedContent(source).hasSuffix("\n..."))
         #expect(AgentCodeBlockPolicy.displayedContent(source).count < source.count)
         #expect(AgentCodeBlockPolicy.copiedContent(source) == source)
+    }
+
+    @Test("Markdown code languages map common fence aliases")
+    func codeHighlightLanguageAliases() {
+        #expect(AgentCodeHighlightPolicy.languageName(for: "js") == "javaScript")
+        #expect(AgentCodeHighlightPolicy.languageName(for: "tsx") == "typeScript")
+        #expect(AgentCodeHighlightPolicy.languageName(for: "c++") == "cPlusPlus")
+        #expect(AgentCodeHighlightPolicy.languageName(for: "swift") == "swift")
+        #expect(AgentCodeHighlightPolicy.languageName(for: "  ") == nil)
+        #expect(AgentCodeHighlightPolicy.languageName(for: nil) == nil)
+    }
+
+    @Test("Markdown code highlighting preserves source and adds token colors")
+    func codeHighlightingPreservesSource() async throws {
+        let source = "  let claim = true\n"
+        let attributed = try await SyntaxHighlightService().highlightPreservingWhitespace(
+            source,
+            languageName: "swift",
+            usesDarkAppearance: false
+        )
+        let native = NSAttributedString(attributed)
+        var coloredRangeCount = 0
+        native.enumerateAttribute(
+            .foregroundColor,
+            in: NSRange(location: 0, length: native.length)
+        ) { value, _, _ in
+            if value != nil { coloredRangeCount += 1 }
+        }
+
+        #expect(String(attributed.characters) == source)
+        #expect(coloredRangeCount > 1)
+    }
+
+    @Test("Markdown inline code receives accent block styling")
+    func inlineCodeStyling() {
+        let attributed = AgentMarkdownInlinePolicy.attributedString("Run `claim()` now")
+        let codeRun = attributed.runs.first { run in
+            run.inlinePresentationIntent?.contains(.code) == true
+        }
+
+        #expect(codeRun?.foregroundColor != nil)
+        #expect(codeRun?.backgroundColor != nil)
     }
 
 #if DEBUG

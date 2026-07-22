@@ -14,6 +14,47 @@ nonisolated enum AgentCodeBlockPolicy {
     }
 }
 
+nonisolated enum AgentCodeHighlightPolicy {
+    static func languageName(for markdownLanguage: String?) -> String? {
+        guard let markdownLanguage else { return nil }
+        let normalized = markdownLanguage.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch normalized {
+        case "js", "jsx", "mjs", "cjs", "javascript": return "javaScript"
+        case "ts", "tsx", "mts", "cts", "typescript": return "typeScript"
+        case "cpp", "c++", "cplusplus": return "cPlusPlus"
+        case "cs", "c#", "csharp": return "cSharp"
+        case "objc", "objective-c", "objectivec": return "objectiveC"
+        case "graphql", "gql": return "graphQL"
+        case "postgres", "postgresql": return "postgreSQL"
+        case "proto", "protobuf": return "protocolBuffers"
+        case "sh", "zsh": return "bash"
+        case "md": return "markdown"
+        case "text", "txt": return "plaintext"
+        case "yml": return "yaml"
+        default: return normalized.isEmpty ? nil : normalized
+        }
+    }
+}
+
+enum AgentMarkdownInlinePolicy {
+    static func attributedString(_ content: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace,
+            failurePolicy: .returnPartiallyParsedIfPossible
+        )
+        var attributed = (try? AttributedString(markdown: content, options: options))
+            ?? AttributedString(content)
+        let codeRanges = attributed.runs.compactMap { run in
+            run.inlinePresentationIntent?.contains(.code) == true ? run.range : nil
+        }
+        for range in codeRanges {
+            attributed[range].foregroundColor = AtelierTheme.accent
+            attributed[range].backgroundColor = AtelierTheme.accent.opacity(0.12)
+        }
+        return attributed
+    }
+}
+
 nonisolated enum MermaidResponsePresentationPolicy {
     enum DisplayState: Equatable, Sendable {
         case loading
@@ -33,12 +74,19 @@ nonisolated enum MermaidResponsePresentationPolicy {
 
 struct AgentMarkdownView: View {
     let source: String
+    let bodyFontSize: CGFloat
+
+    init(source: String, bodyFontSize: CGFloat = AtelierTypography.body) {
+        self.source = source
+        self.bodyFontSize = bodyFontSize
+    }
 
     var body: some View {
         let blocks = AgentMarkdownBlock.parse(source)
-        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(blocks.indices, id: \.self) { index in
                 blockView(blocks[index])
+                    .padding(.top, blockTopSpacing(for: blocks[index], at: index))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -48,32 +96,40 @@ struct AgentMarkdownView: View {
     private func blockView(_ block: AgentMarkdownBlock) -> some View {
         switch block {
         case .heading(let level, let content):
-            inlineText(content)
-                .atelierFont(size: headingSize(level), weight: .semibold)
-                .padding(.top, level <= 2 ? AtelierMetrics.spaceXS : 0)
-                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
+            heading(level: level, content: content)
         case .paragraph(let content):
             inlineText(content)
-                .atelierFont(size: AtelierTypography.body)
+                .atelierFont(size: bodyFontSize)
                 .lineSpacing(AtelierMetrics.spaceXS)
                 .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
         case .unorderedItem(let content):
-            listRow(marker: "-", content: content)
+            listRow(marker: .bullet, content: content)
                 .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
         case .orderedItem(let number, let content):
-            listRow(marker: "\(number).", content: content)
+            listRow(marker: .number(number), content: content)
+                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
+        case .taskItem(let isCompleted, let content):
+            listRow(marker: .task(isCompleted), content: content)
                 .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
         case .quote(let content):
-            inlineText(content)
-                .atelierFont(size: AtelierTypography.body)
-                .foregroundStyle(.secondary)
-                .padding(.leading, AtelierMetrics.spaceM)
-                .overlay(alignment: .leading) {
-                    Rectangle()
-                        .fill(AtelierTheme.accent.opacity(0.72))
-                        .frame(width: AtelierTheme.strokeFocus)
-                }
-                .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
+            HStack(alignment: .top, spacing: AtelierMetrics.spaceM) {
+                RoundedRectangle(cornerRadius: AtelierTheme.strokeFocus)
+                    .fill(AtelierTheme.accent.opacity(0.78))
+                    .frame(width: AtelierTheme.strokeFocus)
+                    .accessibilityHidden(true)
+                inlineText(content)
+                    .atelierFont(size: bodyFontSize, weight: .medium, design: .serif)
+                    .lineSpacing(AtelierMetrics.spaceXS)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(AtelierMetrics.spaceM)
+            .background(AtelierTheme.raised.opacity(0.42))
+            .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
+                    .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeHairline)
+            }
+            .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
         case .code(let language, let content):
             codeBlock(language: language, content: content)
         case .mermaid(let source):
@@ -83,14 +139,52 @@ struct AgentMarkdownView: View {
         case .table(let headers, let rows):
             table(headers: headers, rows: rows)
         case .divider:
-            Divider()
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(AtelierTheme.accent.opacity(0.72))
+                    .frame(width: AtelierMetrics.space2XL, height: AtelierTheme.strokeFocus)
+                Rectangle()
+                    .fill(AtelierTheme.border)
+                    .frame(height: AtelierTheme.strokeHairline)
+            }
+            .frame(maxWidth: AtelierMetrics.transcriptMaxWidth)
         }
+    }
+
+    private func heading(level: Int, content: String) -> some View {
+        VStack(alignment: .leading, spacing: level <= 2 ? AtelierMetrics.spaceS : 0) {
+            inlineText(content)
+                .atelierFont(size: headingSize(level), weight: headingWeight(level))
+                .tracking(level == 1 ? -0.5 : -0.2)
+                .foregroundStyle(level >= 4 ? .secondary : .primary)
+                .accessibilityAddTraits(.isHeader)
+
+            if level <= 2 {
+                HStack(spacing: 0) {
+                    Rectangle()
+                        .fill(AtelierTheme.accent.opacity(level == 1 ? 0.9 : 0.62))
+                        .frame(
+                            width: level == 1 ? AtelierMetrics.space2XL : AtelierMetrics.spaceL,
+                            height: AtelierTheme.strokeFocus
+                        )
+                    Rectangle()
+                        .fill(AtelierTheme.border)
+                        .frame(height: AtelierTheme.strokeHairline)
+                }
+                .accessibilityHidden(true)
+            }
+        }
+        .frame(maxWidth: AtelierMetrics.transcriptMaxWidth, alignment: .leading)
     }
 
     private func codeBlock(language: String?, content: String) -> some View {
         let bounded = AgentCodeBlockPolicy.displayedContent(content)
         return VStack(alignment: .leading, spacing: 0) {
-            HStack {
+            HStack(spacing: AtelierMetrics.spaceS) {
+                Image(systemName: "chevron.left.forwardslash.chevron.right")
+                    .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+                    .foregroundStyle(AtelierTheme.accent)
+                    .accessibilityHidden(true)
                 Text(language?.uppercased() ?? "CODE")
                     .atelierFont(
                         size: AtelierTypography.micro,
@@ -112,11 +206,11 @@ struct AgentMarkdownView: View {
             .background(AtelierTheme.raised)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(bounded)
-                    .atelierFont(size: AtelierTypography.label, design: .monospaced)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(AtelierMetrics.spaceS)
+                MarkdownHighlightedCodeText(
+                    content: bounded,
+                    languageName: AgentCodeHighlightPolicy.languageName(for: language)
+                )
+                .padding(AtelierMetrics.spaceS)
             }
             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.panel)
         }
@@ -144,7 +238,12 @@ struct AgentMarkdownView: View {
         Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
             GridRow {
                 ForEach(headers.indices, id: \.self) { index in
-                    tableCell(headers[index], isHeader: true, isFlexible: isFlexible)
+                    tableCell(
+                        headers[index],
+                        isHeader: true,
+                        rowIndex: nil,
+                        isFlexible: isFlexible
+                    )
                 }
             }
             ForEach(rows.indices, id: \.self) { rowIndex in
@@ -155,7 +254,12 @@ struct AgentMarkdownView: View {
                         let value = rows[rowIndex].indices.contains(columnIndex)
                             ? rows[rowIndex][columnIndex]
                             : ""
-                        tableCell(value, isHeader: false, isFlexible: isFlexible)
+                        tableCell(
+                            value,
+                            isHeader: false,
+                            rowIndex: rowIndex,
+                            isFlexible: isFlexible
+                        )
                     }
                 }
             }
@@ -167,12 +271,21 @@ struct AgentMarkdownView: View {
         .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
     }
 
+    @ViewBuilder
     private func tableCell(
         _ value: String,
         isHeader: Bool,
+        rowIndex: Int?,
         isFlexible: Bool
     ) -> some View {
-        inlineText(value)
+        let fill = if isHeader {
+            AtelierTheme.accent.opacity(0.08)
+        } else if rowIndex?.isMultiple(of: 2) == false {
+            AtelierTheme.raised.opacity(0.22)
+        } else {
+            Color.clear
+        }
+        let cell = inlineText(value)
             .atelierFont(
                 size: AtelierTypography.label,
                 weight: isHeader ? .semibold : .regular
@@ -180,12 +293,16 @@ struct AgentMarkdownView: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, AtelierMetrics.spaceM)
             .padding(.vertical, AtelierMetrics.spaceS)
-            .frame(
-                minWidth: isFlexible ? 0 : 112,
-                maxWidth: isFlexible ? .infinity : 240,
-                alignment: .leading
-            )
-            .background(isHeader ? AtelierTheme.raised : Color.clear)
+
+        if isFlexible {
+            cell
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(fill)
+        } else {
+            cell
+                .frame(width: 240, alignment: .leading)
+                .background(fill)
+        }
     }
 
     private func copyToPasteboard(_ value: String) {
@@ -193,36 +310,121 @@ struct AgentMarkdownView: View {
         NSPasteboard.general.setString(value, forType: .string)
     }
 
-    private func listRow(marker: String, content: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceS) {
-            Text(marker)
-                .atelierFont(size: AtelierTypography.body, design: .monospaced)
-                .foregroundStyle(.secondary)
-                .frame(minWidth: AtelierMetrics.spaceL, alignment: .trailing)
+    private func listRow(marker: MarkdownListMarker, content: String) -> some View {
+        HStack(alignment: .top, spacing: AtelierMetrics.spaceM) {
+            listMarker(marker)
+                .frame(width: AtelierMetrics.spaceL, height: bodyFontSize + AtelierMetrics.spaceXS)
             inlineText(content)
-                .atelierFont(size: AtelierTypography.body)
+                .atelierFont(size: bodyFontSize)
                 .lineSpacing(AtelierMetrics.spaceXS)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private func listMarker(_ marker: MarkdownListMarker) -> some View {
+        switch marker {
+        case .bullet:
+            Circle()
+                .fill(AtelierTheme.accent.opacity(0.82))
+                .frame(width: 5, height: 5)
+                .padding(.top, bodyFontSize * 0.46)
+                .accessibilityHidden(true)
+        case .number(let number):
+            Text("\(number).")
+                .atelierFont(size: AtelierTypography.label, weight: .semibold, design: .monospaced)
+                .foregroundStyle(AtelierTheme.accent)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        case .task(let isCompleted):
+            Image(systemName: isCompleted ? "checkmark.square.fill" : "square")
+                .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
+                .foregroundStyle(isCompleted ? AtelierTheme.accent : .secondary)
+                .accessibilityLabel(isCompleted ? "Completed" : "Not completed")
         }
     }
 
     private func inlineText(_ content: String) -> Text {
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace,
-            failurePolicy: .returnPartiallyParsedIfPossible
-        )
-        let attributed = (try? AttributedString(markdown: content, options: options))
-            ?? AttributedString(content)
-        return Text(attributed)
+        Text(AgentMarkdownInlinePolicy.attributedString(content))
     }
 
     private func headingSize(_ level: Int) -> CGFloat {
         switch level {
-        case 1: AtelierTypography.display
-        case 2: AtelierTypography.headline
-        case 3: AtelierTypography.uiSize
-        default: AtelierTypography.body
+        case 1: max(AtelierTypography.display, bodyFontSize * 1.8)
+        case 2: max(AtelierTypography.title, bodyFontSize * 1.45)
+        case 3: max(AtelierTypography.headline, bodyFontSize * 1.2)
+        default: max(AtelierTypography.uiSize, bodyFontSize)
         }
     }
+
+    private func headingWeight(_ level: Int) -> Font.Weight {
+        level <= 2 ? .bold : .semibold
+    }
+
+    private func blockTopSpacing(for block: AgentMarkdownBlock, at index: Int) -> CGFloat {
+        guard index > 0 else { return 0 }
+        return switch block {
+        case .heading(let level, _):
+            level <= 2 ? AtelierMetrics.space2XL : AtelierMetrics.spaceXL
+        case .code, .mermaid, .invalidMermaid, .table, .quote, .divider:
+            AtelierMetrics.spaceL
+        case .paragraph:
+            AtelierMetrics.spaceM
+        case .unorderedItem, .orderedItem, .taskItem:
+            AtelierMetrics.spaceS
+        }
+    }
+}
+
+private struct MarkdownHighlightedCodeText: View {
+    private struct Request: Hashable {
+        let content: String
+        let languageName: String?
+        let usesDarkAppearance: Bool
+    }
+
+    private static let highlightService = SyntaxHighlightService()
+
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var highlightedContent: AttributedString?
+
+    let content: String
+    let languageName: String?
+
+    var body: some View {
+        Text(highlightedContent ?? AttributedString(content))
+            .atelierFont(size: AtelierTypography.label, design: .monospaced)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: true, vertical: false)
+            .task(id: request) {
+                highlightedContent = nil
+                do {
+                    let result = try await Self.highlightService.highlightPreservingWhitespace(
+                        content,
+                        languageName: languageName,
+                        usesDarkAppearance: request.usesDarkAppearance
+                    )
+                    guard !Task.isCancelled else { return }
+                    highlightedContent = result
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    highlightedContent = nil
+                }
+            }
+    }
+
+    private var request: Request {
+        Request(
+            content: content,
+            languageName: languageName,
+            usesDarkAppearance: colorScheme == .dark
+        )
+    }
+}
+
+private enum MarkdownListMarker {
+    case bullet
+    case number(Int)
+    case task(Bool)
 }
 
 struct MermaidResponseCard: View {
@@ -398,6 +600,7 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
     case paragraph(String)
     case unorderedItem(String)
     case orderedItem(number: Int, content: String)
+    case taskItem(isCompleted: Bool, content: String)
     case quote(String)
     case code(language: String?, content: String)
     case mermaid(String)
@@ -502,6 +705,16 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
                 continue
             }
 
+            if let task = taskItem(from: trimmed) {
+                flushParagraph()
+                blocks.append(.taskItem(
+                    isCompleted: task.isCompleted,
+                    content: task.content
+                ))
+                lineIndex += 1
+                continue
+            }
+
             if let content = prefixedContent(in: trimmed, prefixes: ["- ", "* ", "+ "]) {
                 flushParagraph()
                 blocks.append(.unorderedItem(content))
@@ -572,6 +785,16 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
             return nil
         }
         return (number, String(line[line.index(after: contentStart)...]))
+    }
+
+    private static func taskItem(from line: String) -> (isCompleted: Bool, content: String)? {
+        let markers = [
+            ("- [ ] ", false), ("* [ ] ", false), ("+ [ ] ", false),
+            ("- [x] ", true), ("* [x] ", true), ("+ [x] ", true),
+            ("- [X] ", true), ("* [X] ", true), ("+ [X] ", true)
+        ]
+        guard let marker = markers.first(where: { line.hasPrefix($0.0) }) else { return nil }
+        return (marker.1, String(line.dropFirst(marker.0.count)))
     }
 
     private static func prefixedContent(in line: String, prefixes: [String]) -> String? {

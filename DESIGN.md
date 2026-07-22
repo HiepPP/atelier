@@ -607,8 +607,22 @@ Persistence boundaries:
 - Render Markdown through the native Atelier Markdown surface. Render HTML from its original file
   URL in a non-persistent WebKit surface. Allow relative resources from the containing directory
   and run the page's scripts so interactive local previews render correctly.
+- Render Markdown file-preview body text at `editorSize` so Source and Preview share the same
+  base text size.
+- Treat Markdown as an editorial document. Keep prose on a readable measure and give heading
+  levels distinct scale, weight, spacing, and restrained accent rules.
+- Render unordered, ordered, and task lists, block quotes, code blocks, tables, and dividers as
+  distinct native components. Keep the palette quiet and reserve terracotta for semantic accents.
+- Render fenced code with cached syntax-token colors when a language is known. Preserve source
+  whitespace and fall back to readable monospaced text when highlighting is unavailable.
+- Render inline code as a compact monospaced accent block within prose. Keep surrounding text
+  wrapping naturally.
+- Keep wrapped table rows self-sizing. Wide tables may scroll horizontally without overlapping
+  cell content or flattening the document hierarchy.
 - Put the Source/Preview toggle in the trailing editor action group. Keep find and word-wrap
   commands scoped to Source mode.
+- Use `Cmd-E` to toggle Source and Preview for the active `.md` or `.html` file. Keep its existing
+  Use Selection for Find behavior for other text files.
 - With a non-empty editor selection, `Cmd-Shift-C` inserts
   `@<workspace-relative-path>:<first-line>~<last-line> ` into the most recently selected terminal
   and switches to that terminal. Keep exactly one trailing space. Disable the command when no
@@ -713,7 +727,7 @@ The five background features, all read-only and cancellable:
 | `Cmd-Option-F` | Find and replace in active text file |
 | `Cmd-G` | Next file-search match |
 | `Cmd-Shift-G` | Previous file-search match |
-| `Cmd-E` | Use editor selection for file search |
+| `Cmd-E` | Toggle Source and Preview for the active Markdown or HTML file |
 | `Cmd-Shift-C` | Insert selected editor line reference into terminal |
 | `Cmd-W` | Close active closable center tab |
 | `Ctrl--` | Back |

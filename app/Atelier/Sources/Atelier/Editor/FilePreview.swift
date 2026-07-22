@@ -46,7 +46,10 @@ struct FileRenderedPreview: View {
             case .markdown:
                 if isActive {
                     ScrollView {
-                        AgentMarkdownView(source: source)
+                        AgentMarkdownView(
+                            source: source,
+                            bodyFontSize: AtelierTypography.editorSize
+                        )
                             .padding(AtelierMetrics.spaceXL)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }

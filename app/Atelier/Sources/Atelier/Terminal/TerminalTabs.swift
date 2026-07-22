@@ -1006,6 +1006,7 @@ private struct InsertSelectionReferenceKey: FocusedValueKey {
 
 extension FocusedValues {
     @Entry var activeEditor: EditorSession?
+    @Entry var renderedFilePreview: Binding<Bool>?
 
     var renameActiveTab: (() -> Void)? {
         get { self[RenameActiveTabKey.self] }
@@ -1027,6 +1028,7 @@ struct AtelierTabCommands: Commands {
     @FocusedValue(\.activeEditor) private var activeEditor
     @FocusedValue(\.insertSelectionReference) private var insertSelectionReference
     @FocusedValue(\.renameActiveTab) private var renameActiveTab
+    @FocusedValue(\.renderedFilePreview) private var renderedFilePreview
     @FocusedValue(\.toggleWordWrap) private var toggleWordWrap
 
     var body: some Commands {
@@ -1063,11 +1065,15 @@ struct AtelierTabCommands: Commands {
             .keyboardShortcut("g", modifiers: [.command, .shift])
             .disabled(!canFindInFile)
 
-            Button("Use Selection for Find") {
-                activeEditor?.performFindAction(.setSearchString)
+            Button(commandETitle) {
+                if let renderedFilePreview {
+                    renderedFilePreview.wrappedValue.toggle()
+                } else {
+                    activeEditor?.performFindAction(.setSearchString)
+                }
             }
             .keyboardShortcut("e", modifiers: .command)
-            .disabled(!canFindInFile)
+            .disabled(renderedFilePreview == nil && !canFindInFile)
         }
 
         CommandGroup(after: .toolbar) {
@@ -1087,6 +1093,11 @@ struct AtelierTabCommands: Commands {
 
     private var canFindInFile: Bool {
         activeEditor?.canFindInFile == true
+    }
+
+    private var commandETitle: String {
+        guard let renderedFilePreview else { return "Use Selection for Find" }
+        return renderedFilePreview.wrappedValue ? "Show Source" : "Show Preview"
     }
 }
 
@@ -1301,19 +1312,10 @@ struct TerminalTabs: View {
 
                     if let editor = model.selectedEditor {
                         if FilePreviewPolicy.kind(for: editor.document.url) != nil,
-                           let selectedID = model.selectedID {
-                            let showsPreview = showsRenderedPreview(
-                                tabID: selectedID,
-                                fileURL: editor.document.url
-                            )
+                           let renderedFilePreviewBinding {
+                            let showsPreview = renderedFilePreviewBinding.wrappedValue
                             Button {
-                                if showsPreview {
-                                    renderedPreviewTabIDs.remove(selectedID)
-                                    renderedSourceTabIDs.insert(selectedID)
-                                } else {
-                                    renderedSourceTabIDs.remove(selectedID)
-                                    renderedPreviewTabIDs.insert(selectedID)
-                                }
+                                renderedFilePreviewBinding.wrappedValue = !showsPreview
                             } label: {
                                 Image(
                                     systemName: showsPreview
@@ -1450,6 +1452,7 @@ struct TerminalTabs: View {
         }
         .focusedSceneValue(\.activeEditor, activeEditorForCommands)
         .focusedSceneValue(\.insertSelectionReference, insertSelectionReferenceAction)
+        .focusedSceneValue(\.renderedFilePreview, renderedFilePreviewBinding)
         .focusedSceneValue(\.renameActiveTab) {
             guard let selectedID = model.selectedID else { return }
             beginRename(selectedID)
@@ -1495,6 +1498,28 @@ struct TerminalTabs: View {
         if renderedSourceTabIDs.contains(tabID) { return false }
         if renderedPreviewTabIDs.contains(tabID) { return true }
         return FilePreviewPolicy.showsPreviewByDefault(for: fileURL)
+    }
+
+    private var renderedFilePreviewBinding: Binding<Bool>? {
+        guard isWorkspaceActive,
+              let selectedID = model.selectedID,
+              let editor = model.selectedEditor,
+              FilePreviewPolicy.kind(for: editor.document.url) != nil else { return nil }
+        let fileURL = editor.document.url
+        return Binding(
+            get: {
+                showsRenderedPreview(tabID: selectedID, fileURL: fileURL)
+            },
+            set: { showsPreview in
+                if showsPreview {
+                    renderedSourceTabIDs.remove(selectedID)
+                    renderedPreviewTabIDs.insert(selectedID)
+                } else {
+                    renderedPreviewTabIDs.remove(selectedID)
+                    renderedSourceTabIDs.insert(selectedID)
+                }
+            }
+        )
     }
 
     private var activeEditorForCommands: EditorSession? {
