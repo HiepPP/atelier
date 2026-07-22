@@ -310,6 +310,9 @@ final class GitWorkspaceModel {
                 let result = try await service.snapshot(workspacePath: workspacePath)
                 guard !Task.isCancelled, refreshID == requestID else { return }
                 if snapshot != result {
+                    MaterialFileIconStore.shared.prewarmGitPaths(
+                        result.status.changes.map(\.path)
+                    )
                     snapshot = result
                 }
                 errorMessage = nil
@@ -355,6 +358,7 @@ final class GitWorkspaceModel {
                 let status = try await service.status(workspacePath: workspacePath)
                 guard !Task.isCancelled, statusRefreshID == requestID else { return }
                 if snapshot.status != status {
+                    MaterialFileIconStore.shared.prewarmGitPaths(status.changes.map(\.path))
                     snapshot = GitSnapshot(
                         status: status,
                         branch: snapshot.branch,
@@ -1369,9 +1373,18 @@ private struct GitChangeFolderRow: View {
                         .atelierFont(size: AtelierTypography.micro, weight: .semibold)
                         .frame(width: AtelierMetrics.spaceM)
 
-                    Image(systemName: "folder.fill")
-                        .atelierFont(size: AtelierTypography.uiSize)
-                        .foregroundStyle(AtelierTheme.accent)
+                    Image(
+                        nsImage: MaterialFileIconStore.shared.cachedFolderImage(
+                            forPath: node.path,
+                            isExpanded: isExpanded
+                        )
+                    )
+                        .resizable()
+                        .scaledToFit()
+                        .frame(
+                            width: AtelierTypography.uiSize,
+                            height: AtelierTypography.uiSize
+                        )
                         .accessibilityHidden(true)
 
                     Text(node.name)
@@ -1438,23 +1451,22 @@ private struct GitChangeFileIcon: View {
     let path: String
 
     var body: some View {
-        Image(systemName: systemImage)
-            .atelierFont(size: AtelierTypography.uiSize)
-            .foregroundStyle(.secondary)
+        Image(nsImage: image)
+            .resizable()
+            .scaledToFit()
             .frame(width: AtelierMetrics.spaceL)
+            .frame(height: AtelierTypography.uiSize)
             .accessibilityHidden(true)
     }
 
-    private var systemImage: String {
-        switch URL(fileURLWithPath: path).pathExtension.lowercased() {
-        case "swift": "swift"
-        case "sh", "zsh", "bash": "terminal"
-        case "json", "plist", "yaml", "yml": "curlybraces.square"
-        case "md", "mdx", "markdown": "text.alignleft"
-        case "sqlite", "db": "cylinder"
-        case "tsv", "csv": "tablecells"
-        default: "doc"
+    private var image: NSImage {
+        if path.hasSuffix("/") {
+            return MaterialFileIconStore.shared.cachedFolderImage(
+                forPath: path,
+                isExpanded: false
+            )
         }
+        return MaterialFileIconStore.shared.cachedFileImage(forPath: path)
     }
 }
 

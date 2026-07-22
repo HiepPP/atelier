@@ -18,6 +18,8 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     private var revision = 0
     private weak var outlineView: NSOutlineView?
     private var loadTasks: [URL: Task<Void, Never>] = [:]
+    private var fileIconImages: [URL: NSImage] = [:]
+    private var folderIconImages: [URL: MaterialFolderImages] = [:]
     private var contextMenuTarget: URL?
     private var contextMenuItem: FileTreeNode?
     private var diagnosticRootPath: String
@@ -126,6 +128,8 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         self.onOpen = onOpen
         if root.url != rootURL {
             cancelLoads()
+            fileIconImages.removeAll(keepingCapacity: true)
+            folderIconImages.removeAll(keepingCapacity: true)
             RuntimeFileTreeMetricsStore.shared.unregister(rootPath: diagnosticRootPath)
             root = FileTreeNode(url: rootURL, isDirectory: true)
             diagnosticRootPath = rootURL.standardizedFileURL.path
@@ -200,7 +204,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         cell.textField?.font = font
         cell.textField?.textColor = AppKitThemeAdapter.fileTreeForeground
         cell.imageView?.image = icon(for: node)
-        cell.imageView?.contentTintColor = iconColor(for: node)
+        cell.imageView?.contentTintColor = nil
         cell.setSymbolicLink(node.isSymbolicLink)
         let isIgnored = FileTreeGitIgnorePresentation.isIgnored(
             node.url,
@@ -219,6 +223,14 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     func outlineViewItemWillExpand(_ notification: Notification) {
         guard let node = notification.userInfo?["NSObject"] as? FileTreeNode else { return }
         load(node)
+    }
+
+    func outlineViewItemDidExpand(_ notification: Notification) {
+        refreshIcon(for: notification)
+    }
+
+    func outlineViewItemDidCollapse(_ notification: Notification) {
+        refreshIcon(for: notification)
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -415,6 +427,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             do {
                 let entries = try await service.children(of: url)
                 guard !Task.isCancelled, node.url == url else { return }
+                prewarmIcons(for: entries)
                 let changed = node.apply(entries)
                 if isRootLoad {
                     RuntimeFileTreeMetricsStore.shared.loaded(
@@ -532,31 +545,45 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     }
 
     private func icon(for node: FileTreeNode) -> NSImage? {
-        let symbol: String
         if node.isDirectory || node.symbolicLinkTargetIsDirectory {
-            symbol = "folder"
-        } else {
-            switch node.url.pathExtension.lowercased() {
-            case "swift": symbol = "swift"
-            case "sh", "zsh", "bash": symbol = "terminal"
-            case "json", "plist", "yaml", "yml": symbol = "curlybraces.square"
-            case "md", "markdown": symbol = "text.alignleft"
-            default: symbol = "doc"
+            let images = folderIconImages[node.url]
+            let isExpanded = outlineView?.isItemExpanded(node) == true
+            if let images {
+                return isExpanded ? images.expanded : images.closed
             }
+            return MaterialFileIconStore.shared.cachedFolderImage(
+                forPath: "",
+                isExpanded: isExpanded
+            )
         }
-        if let cached = Self.iconCache[symbol] { return cached }
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-        image?.isTemplate = true
-        Self.iconCache[symbol] = image
-        return image
+        return fileIconImages[node.url]
+            ?? MaterialFileIconStore.shared.cachedFileImage(forPath: "")
     }
 
-    private static var iconCache: [String: NSImage?] = [:]
+    private func prewarmIcons(for entries: [FileTreeEntry]) {
+        let maximumIconCount = 16_384
+        if fileIconImages.count + folderIconImages.count + entries.count > maximumIconCount {
+            fileIconImages.removeAll(keepingCapacity: true)
+            folderIconImages.removeAll(keepingCapacity: true)
+        }
+        let store = MaterialFileIconStore.shared
+        for entry in entries {
+            if entry.isDirectory || entry.symbolicLinkTargetIsDirectory {
+                folderIconImages[entry.url] = store.prewarmFolder(path: entry.url.path)
+            } else {
+                fileIconImages[entry.url] = store.prewarmFile(path: entry.url.path)
+            }
+        }
+    }
 
-    private func iconColor(for node: FileTreeNode) -> NSColor {
-        node.isDirectory || node.symbolicLinkTargetIsDirectory
-            ? AppKitThemeAdapter.accent
-            : AppKitThemeAdapter.secondary
+    private func refreshIcon(for notification: Notification) {
+        guard let outlineView,
+              let node = notification.userInfo?["NSObject"] as? FileTreeNode else { return }
+        let row = outlineView.row(forItem: node)
+        guard row >= 0,
+              let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                as? FileTreeCellView else { return }
+        cell.imageView?.image = icon(for: node)
     }
 }
 

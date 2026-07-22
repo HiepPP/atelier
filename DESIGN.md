@@ -292,6 +292,18 @@ Motion rules:
 ### Iconography
 
 - Use SF Symbols for interface actions and status.
+- Use the pinned Material Icon Theme v5.37.0 SVG set for file and folder identity in
+  Explorer and Git change trees.
+- Resolve file icons through one shared manifest-backed resolver. Match an exact file name first,
+  then the longest compound extension, then shorter extensions, then the default file icon.
+- Resolve folder icons by exact folder name and expansion state, with the default closed or open
+  folder icon as fallback.
+- Keep Material icon colors intact. Do not tint file or folder identity icons with accent or Git
+  status colors.
+- Prewarm and cache Material images before row configuration or SwiftUI body evaluation. Never
+  decode SVG data in draw, layout, cell configuration, or per-row view paths.
+- Keep Git state in the existing trailing semantic status slot. Material file icons never replace
+  the `M`, `A`, `D`, `R`, `C`, `U`, conflict, or fallback status labels.
 - Use one stable symbol for each typed action.
 - Pair text with icons when the action is not obvious.
 - Do not add decorative duplicate icons.

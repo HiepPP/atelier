@@ -22,7 +22,8 @@ let package = Package(
                 "Luminare"
             ],
             resources: [
-                .copy("Resources/Mermaid")
+                .copy("Resources/Mermaid"),
+                .copy("Resources/MaterialIconTheme")
             ],
             swiftSettings: [
                 .defaultIsolation(MainActor.self),
