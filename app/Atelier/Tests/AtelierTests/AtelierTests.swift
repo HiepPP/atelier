@@ -219,8 +219,20 @@ struct AtelierTests {
             let label = try #require((cell as? NSTableCellView)?.textField)
             #expect(!label.isEditable)
             #expect(!label.isSelectable)
+            #expect(cell.toolTip == nil)
             #expect(!outlineView.rect(ofRow: row).intersection(outlineView.visibleRect).isEmpty)
             alphaByName[node.name] = cell.alphaValue
+
+            var toolTipRect = outlineView.rect(ofRow: row)
+            let toolTip = controller.outlineView(
+                outlineView,
+                toolTipFor: NSCell(textCell: ""),
+                rect: &toolTipRect,
+                tableColumn: outlineView.tableColumns.first,
+                item: node,
+                mouseLocation: .zero
+            )
+            #expect(toolTip == (node.name == "tmp" ? "Ignored by Git" : ""))
         }
         #expect(alphaByName["tmp"] == 0.5)
         #expect(alphaByName["Vendor"] == 1)

@@ -212,8 +212,25 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             ignoredPaths: ignoredPaths
         )
         cell.alphaValue = isIgnored ? 0.5 : 1
-        cell.toolTip = isIgnored ? "Ignored by Git" : nil
+        cell.toolTip = nil
         cell.setAccessibilityHelp(isIgnored ? "Ignored by Git" : nil)
+    }
+
+    func outlineView(
+        _ outlineView: NSOutlineView,
+        toolTipFor cell: NSCell,
+        rect: NSRectPointer,
+        tableColumn: NSTableColumn?,
+        item: Any,
+        mouseLocation: NSPoint
+    ) -> String {
+        guard let node = item as? FileTreeNode,
+              FileTreeGitIgnorePresentation.isIgnored(
+                  node.url,
+                  rootURL: root.url,
+                  ignoredPaths: ignoredPaths
+              ) else { return "" }
+        return "Ignored by Git"
     }
 
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
