@@ -614,7 +614,8 @@ Persistence boundaries:
 - Render unordered, ordered, and task lists, block quotes, code blocks, tables, and dividers as
   distinct native components. Keep the palette quiet and reserve terracotta for semantic accents.
 - Render fenced code with cached syntax-token colors when a language is known. Preserve source
-  whitespace and fall back to readable monospaced text when highlighting is unavailable.
+  whitespace, wrap long lines to the available preview width, and fall back to readable
+  monospaced text when highlighting is unavailable. Do not horizontally scroll code blocks.
 - Render inline code as a compact monospaced accent block within prose. Keep surrounding text
   wrapping naturally.
 - Keep wrapped table rows self-sizing. Wide tables may scroll horizontally without overlapping

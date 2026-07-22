@@ -205,14 +205,12 @@ struct AgentMarkdownView: View {
             .frame(height: AtelierMetrics.fieldHeight)
             .background(AtelierTheme.raised)
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                MarkdownHighlightedCodeText(
-                    content: bounded,
-                    languageName: AgentCodeHighlightPolicy.languageName(for: language)
-                )
-                .padding(AtelierMetrics.spaceS)
-            }
-            .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.panel)
+            MarkdownHighlightedCodeText(
+                content: bounded,
+                languageName: AgentCodeHighlightPolicy.languageName(for: language)
+            )
+            .padding(AtelierMetrics.spaceS)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .atelierCard()
     }
@@ -394,7 +392,8 @@ private struct MarkdownHighlightedCodeText: View {
         Text(highlightedContent ?? AttributedString(content))
             .atelierFont(size: AtelierTypography.label, design: .monospaced)
             .textSelection(.enabled)
-            .fixedSize(horizontal: true, vertical: false)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .task(id: request) {
                 highlightedContent = nil
                 do {
