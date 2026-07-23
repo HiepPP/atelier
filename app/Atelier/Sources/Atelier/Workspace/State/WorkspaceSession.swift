@@ -67,12 +67,14 @@ final class WorkspaceSession {
         )
     }
 
-    func start() {
+    func start(agentResponsesActive: Bool = true) {
         guard !isStarted else { return }
         isStarted = true
         gitModel.refresh()
         watchtower.setRoot(rootURL.path)
-        agentResponses.start()
+        if agentResponsesActive {
+            agentResponses.start()
+        }
         gemmaSidecar.start()
 
         let watcher = FileWatcher(path: rootURL.path) { [weak self] invalidation in
@@ -90,6 +92,11 @@ final class WorkspaceSession {
         fileWatcher = watcher
         watcher.start()
         AppLogger.workspace.info("Started workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
+    }
+
+    func activateAgentResponses() {
+        guard isStarted else { return }
+        agentResponses.start()
     }
 
     func stop() {

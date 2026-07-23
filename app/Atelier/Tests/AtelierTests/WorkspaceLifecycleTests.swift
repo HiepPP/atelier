@@ -156,11 +156,15 @@ struct WorkspaceLifecycleTests {
         #expect(second.terminalTabs.terminalCount == 1)
         #expect(first.isStarted)
         #expect(second.isStarted)
+        #expect(first.agentResponses.isMonitoring)
+        #expect(second.agentResponses.isMonitoring)
 
         model.selectWorkspace(id: first.state.id)
         #expect(model.workspace === first)
         #expect(first.terminalTabs.terminalCount == 2)
         #expect(second.isStarted)
+        #expect(first.agentResponses.isMonitoring)
+        #expect(second.agentResponses.isMonitoring)
     }
 
     @Test("Number shortcuts select the matching ordered workspace")

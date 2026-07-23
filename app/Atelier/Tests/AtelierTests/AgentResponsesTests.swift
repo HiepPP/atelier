@@ -137,6 +137,89 @@ struct AgentResponsesTests {
         #expect(Array(third.prefix(2)).map(\.id) == first.map(\.id))
     }
 
+    @Test("Monitor restores only the newest 100 final responses")
+    func monitorRestoreLimit() async throws {
+        let root = temporaryDirectory("restore-limit")
+        let transcriptRoot = root.appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptRoot, withIntermediateDirectories: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+
+        var lines = [
+            """
+            {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"restored","cwd":"\(workspace.path)"}}
+            """
+        ]
+        for index in 0..<120 {
+            let minute = index / 60
+            let second = index % 60
+            lines.append(
+                """
+                {"timestamp":"2026-07-17T08:\(String(format: "%02d", minute)):\(String(format: "%02d", second)).000Z","type":"response_item","payload":{"id":"response-\(index)","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Response \(index)"}]}}
+                """
+            )
+        }
+        try lines.joined(separator: "\n").write(
+            to: transcriptRoot.appendingPathComponent("restored.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            roots: [transcriptRoot]
+        )
+        let restored = await monitor.loadResponses()
+
+        #expect(restored.count == 100)
+        #expect(restored.first?.markdown == "Response 20")
+        #expect(restored.last?.markdown == "Response 119")
+    }
+
+    @Test("Monitor parses only a bounded set of recent transcript files")
+    func boundedTranscriptDiscovery() async throws {
+        let root = temporaryDirectory("bounded-discovery")
+        let transcriptRoot = root.appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptRoot, withIntermediateDirectories: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        var expectedParsedBytes = 0
+
+        for index in 0..<4 {
+            let dayRoot = transcriptRoot.appendingPathComponent(
+                "2026-07-\(String(format: "%02d", index + 1))",
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(at: dayRoot, withIntermediateDirectories: true)
+            let transcript = """
+            {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"session-\(index)","cwd":"\(workspace.path)"}}
+            {"timestamp":"2026-07-17T08:00:0\(index).000Z","type":"response_item","payload":{"id":"response-\(index)","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Response \(index)"}]}}
+            """
+            let url = dayRoot.appendingPathComponent("session-\(index).jsonl")
+            try transcript.write(to: url, atomically: true, encoding: .utf8)
+            let modificationDate = Date(timeIntervalSince1970: TimeInterval(index + 1))
+            for path in [url.path, dayRoot.path] {
+                try FileManager.default.setAttributes(
+                    [.modificationDate: modificationDate],
+                    ofItemAtPath: path
+                )
+            }
+            if index >= 2 {
+                expectedParsedBytes += transcript.utf8.count
+            }
+        }
+
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            roots: [transcriptRoot],
+            transcriptLimitPerRoot: 2
+        )
+        let restored = await monitor.loadResponses()
+
+        #expect(restored.map(\.markdown) == ["Response 2", "Response 3"])
+        #expect(await monitor.parsedByteCount == expectedParsedBytes)
+    }
+
     @Test("Monitor parses only appended transcript bytes")
     func incrementalTranscriptMonitor() async throws {
         let root = temporaryDirectory("incremental-monitor")
@@ -213,6 +296,44 @@ struct AgentResponsesTests {
                 unreadCount: 1
             )
         ])
+    }
+
+    @Test("Relaunch restores existing responses as read, then tracks new responses as unread")
+    func relaunchRestoreReadState() async {
+        let restored = response(
+            id: "restored",
+            provider: .codex,
+            sessionID: "session",
+            time: 1,
+            markdown: "Restored"
+        )
+        let live = response(
+            id: "live",
+            provider: .codex,
+            sessionID: "session",
+            time: 2,
+            markdown: "Live"
+        )
+        let source = SequencedAgentResponseSource([
+            [restored],
+            [restored, live]
+        ])
+        let relaunchedModel = AgentResponsesModel(source: source)
+
+        relaunchedModel.start()
+        for _ in 0..<100 {
+            if !relaunchedModel.responses.isEmpty { break }
+            await Task.yield()
+        }
+
+        #expect(relaunchedModel.responses == [restored])
+        #expect(relaunchedModel.unreadCount == 0)
+
+        await relaunchedModel.refresh()
+
+        #expect(relaunchedModel.responses == [restored, live])
+        #expect(relaunchedModel.unreadCount == 1)
+        relaunchedModel.stop()
     }
 
     @Test("Session selection stays stable and read state is scoped to visible responses")
@@ -695,8 +816,10 @@ struct AgentResponsesTests {
             agentResponses: responses
         )
 
-        session.start()
+        session.start(agentResponsesActive: false)
         session.openAgentSidecar()
+        #expect(!responses.isMonitoring)
+        session.activateAgentResponses()
         #expect(responses.isMonitoring)
         #expect(session.isAgentSidecarPresented)
         #expect(session.terminalTabs.terminalCount == 1)

@@ -11,6 +11,9 @@ final class AppModel {
     private(set) var selectedWorkspaceID: String? {
         didSet {
             guard selectedWorkspaceID != oldValue else { return }
+            if let selectedWorkspaceID {
+                sessionsByID[selectedWorkspaceID]?.activateAgentResponses()
+            }
             windowController.setActiveWorkspace(id: selectedWorkspaceID)
         }
     }
@@ -238,7 +241,7 @@ final class AppModel {
             onSessionChange: { [weak self] in self?.scheduleSessionPersist() }
         )
         sessionsByID[state.id] = session
-        session.start()
+        session.start(agentResponsesActive: state.id == selectedWorkspaceID)
     }
 
     private func restore(

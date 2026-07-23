@@ -741,6 +741,12 @@ The five background features, all read-only and cancellable:
 - Open the response overlay at the full center-content width below the tab strip.
 - Provide one header control that toggles between full width and a trailing half-width mode.
 - Opening the overlay from the Response action always restores full-width mode.
+- Restore at most 100 newest final responses for the current workspace at startup.
+- Treat restored responses as read, then count only newly monitored responses as unread.
+- Start transcript restore only when a workspace first becomes active. Keep live monitoring
+  running after activation, including while another workspace is selected.
+- Bound startup discovery to the 100 newest transcript files per source root and 16 MiB of
+  uncached transcript data per refresh.
 - Keep status, navigation, refresh, copy, and close actions keyboard accessible.
 
 ### Settings

@@ -353,8 +353,50 @@ nonisolated enum AgentTranscriptParser {
     }
 }
 
+private nonisolated final class AgentTranscriptRestoreGate: @unchecked Sendable {
+    static let shared = AgentTranscriptRestoreGate()
+
+    private let lock = NSLock()
+    private var isHeld = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if isHeld {
+                waiters.append(continuation)
+                lock.unlock()
+            } else {
+                isHeld = true
+                lock.unlock()
+                continuation.resume()
+            }
+        }
+    }
+
+    func release() {
+        lock.lock()
+        if waiters.isEmpty {
+            isHeld = false
+            lock.unlock()
+            return
+        }
+        let waiter = waiters.removeFirst()
+        lock.unlock()
+        waiter.resume()
+    }
+}
+
 nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     private static let maximumTranscriptBytes = 16 * 1024 * 1024
+
+    private struct TranscriptEntry {
+        let url: URL
+        let modificationDate: Date
+        let isDirectory: Bool
+        let isRegularFile: Bool
+        let fileSize: Int
+    }
 
     private struct CachedTranscript {
         let modificationDate: Date
@@ -368,18 +410,29 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     private let modifiedAfter: Date
     private let roots: [URL]
     private let watchRoots: [URL]
+    private let responseLimit: Int
+    private let transcriptLimitPerRoot: Int
+    private let uncachedBytesLimit: Int
+    private var directoryLimitPerRoot: Int { transcriptLimitPerRoot * 4 }
     private var discoveredURLs: [URL] = []
     private var cache: [URL: CachedTranscript] = [:]
     private var nextDiscoveryDate = Date.distantPast
+    private var hasCompletedInitialLoad = false
     private(set) var parsedByteCount = 0
 
     init(
         workspacePath: String,
-        modifiedAfter: Date = Date(),
-        roots: [URL]? = nil
+        modifiedAfter: Date = .distantPast,
+        roots: [URL]? = nil,
+        responseLimit: Int = 100,
+        transcriptLimitPerRoot: Int = 100,
+        uncachedBytesLimit: Int = 16 * 1024 * 1024
     ) {
         self.workspacePath = workspacePath
         self.modifiedAfter = modifiedAfter
+        self.responseLimit = max(1, responseLimit)
+        self.transcriptLimitPerRoot = max(1, transcriptLimitPerRoot)
+        self.uncachedBytesLimit = max(1, uncachedBytesLimit)
         if let roots {
             self.roots = roots
             self.watchRoots = roots
@@ -419,6 +472,18 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     }
 
     func loadResponses() async -> [AgentResponse] {
+        guard !hasCompletedInitialLoad else {
+            return loadResponsesWithoutInitialGate()
+        }
+
+        await AgentTranscriptRestoreGate.shared.acquire()
+        let responses = loadResponsesWithoutInitialGate()
+        hasCompletedInitialLoad = true
+        AgentTranscriptRestoreGate.shared.release()
+        return responses
+    }
+
+    private func loadResponsesWithoutInitialGate() -> [AgentResponse] {
         if Date() >= nextDiscoveryDate {
             discoveredURLs = transcriptURLs()
             nextDiscoveryDate = Date().addingTimeInterval(2)
@@ -427,6 +492,7 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
         }
 
         var responses: [AgentResponse] = []
+        var remainingUncachedBytes = uncachedBytesLimit
 
         for url in discoveredURLs {
             guard !isCurrentTaskCancelled else { return [] }
@@ -457,9 +523,14 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
             let previous = cache[url]
             let canReadAppend = previous?.fileID == fileID && size > (previous?.size ?? size)
             let offset = canReadAppend ? previous?.size ?? 0 : 0
+            let uncachedBytes = size - offset
+            guard uncachedBytes <= remainingUncachedBytes else {
+                continue
+            }
             guard let data = readData(from: url, offset: offset) else {
                 continue
             }
+            remainingUncachedBytes -= data.count
             parsedByteCount &+= data.count
             let initialState = canReadAppend
                 ? previous?.parserState ?? AgentTranscriptParser.State()
@@ -476,6 +547,9 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
             parsed.sort {
                 $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp
             }
+            if parsed.count > responseLimit {
+                parsed.removeFirst(parsed.count - responseLimit)
+            }
             cache[url] = CachedTranscript(
                 modificationDate: modificationDate,
                 size: offset + data.count,
@@ -490,9 +564,10 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
         for response in responses {
             unique[response.id] = response
         }
-        return unique.values.sorted {
+        let sorted = unique.values.sorted {
             $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp
         }
+        return Array(sorted.suffix(responseLimit))
     }
 
     private func readData(from url: URL, offset: Int) -> Data? {
@@ -514,33 +589,85 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     }
 
     private func transcriptURLs() -> [URL] {
-        var urls: [URL] = []
+        var candidates: [TranscriptEntry] = []
         let keys: Set<URLResourceKey> = [
             .contentModificationDateKey,
             .fileSizeKey,
+            .isDirectoryKey,
             .isRegularFileKey
         ]
 
         for root in roots where FileManager.default.fileExists(atPath: root.path) {
-            guard let enumerator = FileManager.default.enumerator(
-                at: root,
-                includingPropertiesForKeys: Array(keys),
-                options: [.skipsHiddenFiles]
-            ) else { continue }
+            var rootCandidates: [TranscriptEntry] = []
+            var visitedDirectoryCount = 0
+            collectRecentTranscriptEntries(
+                in: root,
+                keys: keys,
+                entries: &rootCandidates,
+                visitedDirectoryCount: &visitedDirectoryCount
+            )
+            candidates.append(contentsOf: rootCandidates)
+        }
+        return candidates.sorted(by: Self.isNewerEntry).map(\.url)
+    }
 
-            for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-                guard let values = try? url.resourceValues(forKeys: keys),
-                      values.isRegularFile == true,
-                      let date = values.contentModificationDate,
-                      date >= modifiedAfter,
-                      let size = values.fileSize,
-                      size <= Self.maximumTranscriptBytes else {
-                    continue
-                }
-                urls.append(url)
+    private func collectRecentTranscriptEntries(
+        in directory: URL,
+        keys: Set<URLResourceKey>,
+        entries: inout [TranscriptEntry],
+        visitedDirectoryCount: inout Int
+    ) {
+        guard entries.count < transcriptLimitPerRoot,
+              visitedDirectoryCount < directoryLimitPerRoot,
+              !isCurrentTaskCancelled else {
+            return
+        }
+        visitedDirectoryCount += 1
+
+        guard let children = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let childEntries = children.compactMap { url -> TranscriptEntry? in
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  let modificationDate = values.contentModificationDate else {
+                return nil
+            }
+            return TranscriptEntry(
+                url: url,
+                modificationDate: modificationDate,
+                isDirectory: values.isDirectory == true,
+                isRegularFile: values.isRegularFile == true,
+                fileSize: values.fileSize ?? 0
+            )
+        }.sorted(by: Self.isNewerEntry)
+
+        for entry in childEntries where entries.count < transcriptLimitPerRoot {
+            if entry.isDirectory {
+                collectRecentTranscriptEntries(
+                    in: entry.url,
+                    keys: keys,
+                    entries: &entries,
+                    visitedDirectoryCount: &visitedDirectoryCount
+                )
+            } else if entry.isRegularFile,
+                      entry.url.pathExtension == "jsonl",
+                      entry.modificationDate >= modifiedAfter,
+                      entry.fileSize <= Self.maximumTranscriptBytes {
+                entries.append(entry)
             }
         }
-        return urls.sorted { $0.path < $1.path }
+    }
+
+    private static func isNewerEntry(
+        _ lhs: TranscriptEntry,
+        _ rhs: TranscriptEntry
+    ) -> Bool {
+        if lhs.modificationDate == rhs.modificationDate {
+            return lhs.url.path > rhs.url.path
+        }
+        return lhs.modificationDate > rhs.modificationDate
     }
 }
 
@@ -674,7 +801,7 @@ final class AgentResponsesModel {
         guard monitorTask == nil else { return }
         isMonitoring = true
         monitorTask = Task { [weak self] in
-            await self?.refresh(showProgress: false)
+            await self?.refresh(showProgress: false, markLoadedResponsesRead: true)
             guard !Task.isCancelled else { return }
             await self?.startWatching()
         }
@@ -694,7 +821,7 @@ final class AgentResponsesModel {
     private func handleWatcherEvent() {
         guard isMonitoring else { return }
         Task { [weak self] in
-            await self?.refresh(showProgress: false)
+            await self?.refresh(showProgress: false, markLoadedResponsesRead: false)
         }
         // Transcript discovery inside the source is throttled; a trailing
         // refresh picks up files created during the throttle window when no
@@ -703,7 +830,7 @@ final class AgentResponsesModel {
         trailingRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(3))
             guard !Task.isCancelled else { return }
-            await self?.refresh(showProgress: false)
+            await self?.refresh(showProgress: false, markLoadedResponsesRead: false)
         }
     }
 
@@ -718,10 +845,13 @@ final class AgentResponsesModel {
     }
 
     func refresh() async {
-        await refresh(showProgress: true)
+        await refresh(showProgress: true, markLoadedResponsesRead: false)
     }
 
-    private func refresh(showProgress: Bool) async {
+    private func refresh(
+        showProgress: Bool,
+        markLoadedResponsesRead: Bool
+    ) async {
         guard !isRefreshInFlight else { return }
         isRefreshInFlight = true
         if showProgress { isRefreshing = true }
@@ -732,6 +862,9 @@ final class AgentResponsesModel {
 
         let loaded = await source.loadResponses()
         guard !Task.isCancelled else { return }
+        if markLoadedResponsesRead {
+            readResponseIDs.formUnion(loaded.map(\.readIdentity))
+        }
         let newResponses = loaded.filter { responseIDs.insert($0.readIdentity).inserted }
         guard !newResponses.isEmpty else { return }
         responses.append(contentsOf: newResponses)
