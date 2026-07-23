@@ -41,6 +41,21 @@ enum AgentMarkdownInlinePolicy {
     private static var cache: [String: AttributedString] = [:]
     private static var cacheOrder: [String] = []
 
+    /// Whole-cell / whole-span inline code only. Used to draw one continuous accent
+    /// chip so soft-wrapped paths do not zebra per line fragment.
+    static func pureCodeContent(_ markdown: String) -> String? {
+        let trimmed = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2,
+              trimmed.first == "`",
+              trimmed.last == "`" else {
+            return nil
+        }
+        let inner = String(trimmed.dropFirst().dropLast())
+        // Reject multi-span or empty payloads; nested fences belong to block parsing.
+        guard !inner.isEmpty, !inner.contains("`") else { return nil }
+        return inner
+    }
+
     static func attributedString(_ content: String) -> AttributedString {
         if let cached = cache[content] {
             return cached
@@ -56,6 +71,8 @@ enum AgentMarkdownInlinePolicy {
         }
         for range in codeRanges {
             attributed[range].foregroundColor = AtelierTheme.accent
+            // Short mixed-prose chips stay filled. Pure soft-wrapped code in tables
+            // uses `pureCodeContent` + a View-level chip so fills do not zebra.
             attributed[range].backgroundColor = AtelierTheme.accent.opacity(0.12)
         }
         storeCached(content, attributed)
@@ -590,21 +607,20 @@ struct AgentMarkdownView: View, Equatable {
         rows: [[String]],
         isFlexible: Bool
     ) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-            GridRow {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 0) {
                 ForEach(headers.indices, id: \.self) { index in
                     tableCell(
                         headers[index],
                         isHeader: true,
-                        rowIndex: nil,
                         isFlexible: isFlexible
                     )
                 }
             }
+            .background(AtelierTheme.accent.opacity(0.08))
             ForEach(rows.indices, id: \.self) { rowIndex in
                 Divider()
-                    .gridCellColumns(headers.count)
-                GridRow {
+                HStack(spacing: 0) {
                     ForEach(headers.indices, id: \.self) { columnIndex in
                         let value = rows[rowIndex].indices.contains(columnIndex)
                             ? rows[rowIndex][columnIndex]
@@ -612,11 +628,15 @@ struct AgentMarkdownView: View, Equatable {
                         tableCell(
                             value,
                             isHeader: false,
-                            rowIndex: rowIndex,
                             isFlexible: isFlexible
                         )
                     }
                 }
+                .background(
+                    rowIndex.isMultiple(of: 2)
+                        ? Color.clear
+                        : AtelierTheme.raised.opacity(0.22)
+                )
             }
         }
         .overlay {
@@ -630,33 +650,45 @@ struct AgentMarkdownView: View, Equatable {
     private func tableCell(
         _ value: String,
         isHeader: Bool,
-        rowIndex: Int?,
         isFlexible: Bool
     ) -> some View {
-        let fill = if isHeader {
-            AtelierTheme.accent.opacity(0.08)
-        } else if rowIndex?.isMultiple(of: 2) == false {
-            AtelierTheme.raised.opacity(0.22)
-        } else {
-            Color.clear
+        // Pure `code` cells use one View-level chip so soft-wrapped paths keep a
+        // continuous fill. AttributedString.backgroundColor paints per line and
+        // zebra-stripes multi-line skill paths in Markdown preview tables.
+        let cell = Group {
+            if let code = AgentMarkdownInlinePolicy.pureCodeContent(value) {
+                Text(code)
+                    .atelierFont(
+                        size: AtelierTypography.label,
+                        weight: isHeader ? .semibold : .regular,
+                        design: .monospaced
+                    )
+                    .foregroundStyle(AtelierTheme.accent)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, AtelierMetrics.spaceXS)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(AtelierTheme.accent.opacity(0.12))
+                    )
+            } else {
+                Text(AgentMarkdownInlinePolicy.attributedString(value))
+                    .atelierFont(
+                        size: AtelierTypography.label,
+                        weight: isHeader ? .semibold : .regular
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        let cell = Text(AgentMarkdownInlinePolicy.attributedString(value))
-            .atelierFont(
-                size: AtelierTypography.label,
-                weight: isHeader ? .semibold : .regular
-            )
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, AtelierMetrics.spaceM)
-            .padding(.vertical, AtelierMetrics.spaceS)
+        .padding(.horizontal, AtelierMetrics.spaceM)
+        .padding(.vertical, AtelierMetrics.spaceS)
 
         if isFlexible {
             cell
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(fill)
         } else {
             cell
                 .frame(width: 240, alignment: .leading)
-                .background(fill)
         }
     }
 

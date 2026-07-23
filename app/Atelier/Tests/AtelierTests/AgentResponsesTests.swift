@@ -586,6 +586,19 @@ struct AgentResponsesTests {
         #expect(codeRun?.backgroundColor != nil)
     }
 
+    @Test("Pure inline code cells extract continuous chip content")
+    func pureInlineCodeContent() {
+        #expect(
+            AgentMarkdownInlinePolicy.pureCodeContent(
+                "`.claude/skills/gitnexus/gitnexus-exploring/SKILL.md`"
+            ) == ".claude/skills/gitnexus/gitnexus-exploring/SKILL.md"
+        )
+        #expect(AgentMarkdownInlinePolicy.pureCodeContent("plain path") == nil)
+        #expect(AgentMarkdownInlinePolicy.pureCodeContent("see `mixed` text") == nil)
+        #expect(AgentMarkdownInlinePolicy.pureCodeContent("``") == nil)
+        #expect(AgentMarkdownInlinePolicy.pureCodeContent("`a` and `b`") == nil)
+    }
+
 #if DEBUG
     @Test("Memory fixture matches captured response shape")
     func responseMemoryFixtureShape() {

@@ -647,6 +647,9 @@ Persistence boundaries:
   monospaced text when highlighting is unavailable. Do not horizontally scroll code blocks.
 - Render inline code as a compact monospaced accent block within prose. Keep surrounding text
   wrapping naturally.
+- Pure inline-code table cells (`path` only) use one continuous monospaced accent chip so
+  soft-wrapped paths fill as a single shape. Do not paint per-line fragment backgrounds that
+  zebra-stripe multi-line skill paths in Markdown preview tables.
 - Keep wrapped table rows self-sizing. Wide tables may scroll horizontally without overlapping
   cell content or flattening the document hierarchy.
 - Put the Source/Preview toggle in the trailing editor action group. Keep find and word-wrap
