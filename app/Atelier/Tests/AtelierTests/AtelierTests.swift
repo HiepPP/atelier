@@ -254,6 +254,59 @@ struct AtelierTests {
         #expect(alphaByName["Vendor"] == 1)
         #expect(alphaByName["app"] == 1)
         #expect(alphaByName["README.md"] == 1)
+
+        let folderRow = try #require(
+            (0..<outlineView.numberOfRows).first {
+                (outlineView.item(atRow: $0) as? FileTreeNode)?.name == "app"
+            }
+        )
+        let folder = try #require(outlineView.item(atRow: folderRow))
+        let folderRowFrame = outlineView.rect(ofRow: folderRow)
+        let clickLocation = outlineView.convert(
+            NSPoint(x: folderRowFrame.maxX - 2, y: folderRowFrame.midY),
+            to: nil
+        )
+        let expandEvent = try #require(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: clickLocation,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1
+        ))
+        outlineView.mouseDown(with: expandEvent)
+        #expect(outlineView.isItemExpanded(folder))
+
+        let doubleClickEvent = try #require(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: clickLocation,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 2,
+            clickCount: 2,
+            pressure: 1
+        ))
+        outlineView.mouseDown(with: doubleClickEvent)
+        #expect(!outlineView.isItemExpanded(folder))
+
+        let thirdClickEvent = try #require(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: clickLocation,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 3,
+            clickCount: 1,
+            pressure: 1
+        ))
+        outlineView.mouseDown(with: thirdClickEvent)
+        #expect(outlineView.isItemExpanded(folder))
     }
 
     @Test("Inactive Git sidebar does not mount its native text editor")

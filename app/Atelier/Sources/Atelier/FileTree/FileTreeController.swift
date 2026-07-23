@@ -263,9 +263,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     }
 
     @objc private func handlePreview(_ sender: NSOutlineView) {
-        let row = sender.clickedRow >= 0 ? sender.clickedRow : sender.selectedRow
-        guard row >= 0,
-              let node = sender.item(atRow: row) as? FileTreeNode else { return }
+        guard let node = interactionNode(in: sender) else { return }
         if NSApp.currentEvent?.modifierFlags.contains(.command) == true,
            let relativePath = FileTreePathPolicy.relativePath(of: node.url, within: root.url),
            onPasteRelativePath(FileTreePathPolicy.terminalReference(for: relativePath)) {
@@ -279,10 +277,17 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     }
 
     @objc private func handleOpen(_ sender: NSOutlineView) {
-        guard sender.clickedRow >= 0,
-              let node = sender.item(atRow: sender.clickedRow) as? FileTreeNode,
-              !node.isDirectory else { return }
+        guard let node = interactionNode(in: sender), !node.isDirectory else { return }
         onOpen(node.url)
+    }
+
+    private func interactionNode(in outlineView: NSOutlineView) -> FileTreeNode? {
+        if let node = (outlineView as? FileTreeOutlineView)?.mouseDownItem as? FileTreeNode {
+            return node
+        }
+        let row = outlineView.clickedRow >= 0 ? outlineView.clickedRow : outlineView.selectedRow
+        guard row >= 0 else { return nil }
+        return outlineView.item(atRow: row) as? FileTreeNode
     }
 
     @objc private func createFileFromMenu(_ sender: NSMenuItem) {
@@ -686,6 +691,25 @@ private final class FileTreeCellView: NSTableCellView {
 
 private final class FileTreeOutlineView: NSOutlineView {
     var menuProvider: ((Int) -> NSMenu?)?
+    private(set) var mouseDownItem: Any?
+
+    override func mouseDown(with event: NSEvent) {
+        let location = convert(event.locationInWindow, from: nil)
+        let row = row(at: location)
+        mouseDownItem = row >= 0 ? item(atRow: row) : nil
+        defer { mouseDownItem = nil }
+
+        guard row >= 0 else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        window?.makeFirstResponder(self)
+        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        let isDirectory = (mouseDownItem as? FileTreeNode)?.isDirectory == true
+        let clickAction = isDirectory || event.clickCount == 1 ? action : doubleAction
+        _ = sendAction(clickAction, to: target)
+    }
 
     override func resetCursorRects() {
         super.resetCursorRects()

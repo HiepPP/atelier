@@ -498,6 +498,7 @@ Persistence boundaries:
 - Do not expand directory symlinks from Explorer.
 - Keep Git-ignored files and folders visible, but render their row content at reduced opacity.
 - Expose the ignored state through row help text so it is not conveyed by color alone.
+- Dispatch Explorer primary clicks on mouse-down so file previews and folder toggles start immediately.
 - Explorer single-click opens one replaceable preview.
 - Explorer double-click opens or promotes a permanent tab.
 - Command-clicking a file or folder inserts its workspace-relative path into the selected terminal.
