@@ -45,11 +45,7 @@ struct FileRenderedPreview: View {
         case .text(let source):
             switch kind {
             case .markdown:
-                if isActive {
-                    MarkdownFileDocumentView(source: source)
-                } else {
-                    Color.clear
-                }
+                MarkdownFileDocumentView(source: source)
             case .html:
                 HTMLFilePreview(
                     sourceVersion: source,

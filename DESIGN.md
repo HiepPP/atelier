@@ -611,6 +611,8 @@ Persistence boundaries:
 - Offer Source and Preview modes for `.md` and `.html` text files. Open both Markdown and HTML in
   Preview mode by default. Keep the native editor mounted while Preview is visible, and keep
   explicit per-tab mode changes session-only.
+- Keep each rendered preview mounted while its tab remains open. Preserve preview scroll, outline,
+  and page state across tab switches and Source/Preview switches.
 - Render Markdown through the native Atelier Markdown surface. Render HTML from its original file
   URL in a non-persistent WebKit surface. Allow relative resources from the containing directory
   and run the page's scripts so interactive local previews render correctly.
