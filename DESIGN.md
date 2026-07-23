@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Status | Current implementation baseline |
-| Updated | 2026-07-21 |
+| Updated | 2026-07-23 |
 | Baseline commit | `02ebe5b` |
 | Platform | macOS 26+ |
 | UI stack | SwiftUI, AppKit, Luminare |
@@ -97,7 +97,7 @@ Rules:
 | Workspace sidebar | 240 | 340 | 560 |
 | Center | 420 | 660 | Flexible |
 | Inspector | 260 | 360 | 640 |
-| Agent response overlay | 360 | 360 | 360 |
+| Agent response overlay | 50% of center | 100% of center | 100% of center |
 | Explorer legacy range | 220 | 280 | 400 |
 | Source Control legacy range | 320 | 380 | 540 |
 
@@ -527,7 +527,8 @@ Persistence boundaries:
 - Place the close control at the left edge of every closable tab.
 - Show close only on the selected or hovered tab.
 - Preserve drag reorder, rename, context menu, and word-wrap behavior.
-- Keep terminal response and editor actions in one trailing group after the scroller.
+- Keep Response and editor actions in one trailing group after the scroller.
+- Keep the Response action visible for every selected center-tab kind.
 - Keep New Terminal as the final far-right action. Its position never changes with tab selection.
 - Give the trailing action group `spaceXS` horizontal insets and `spaceXS` spacing between controls.
 - Reopen Closed Tab restores permanent file tabs only.
@@ -735,8 +736,11 @@ The five background features, all read-only and cancellable:
 - Use a readable transcript width capped at 680 points.
 - Keep user and assistant hierarchy clear without chat-bubble decoration everywhere.
 - Use cards for tool activity and structured results.
-- Present terminal responses as a trailing overlay sidecar at every window width. It never becomes a split peer or consumes terminal layout width.
-- Keep the response overlay fixed at 360 points. Sidebar and inspector visibility must not change its width.
+- Present agent responses above the complete center work surface at every window width. The
+  overlay never becomes a split peer or consumes terminal, editor, diff, or Gemma layout space.
+- Open the response overlay at the full center-content width below the tab strip.
+- Provide one header control that toggles between full width and a trailing half-width mode.
+- Opening the overlay from the Response action always restores full-width mode.
 - Keep status, navigation, refresh, copy, and close actions keyboard accessible.
 
 ### Settings

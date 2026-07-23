@@ -22,6 +22,8 @@ nonisolated enum AgentResponseNavigationPolicy {
 struct AgentResponsesView: View {
     @Bindable var model: AgentResponsesModel
     let onClose: () -> Void
+    let isFullWidth: Bool
+    let onToggleWidth: () -> Void
     let textSelectionEnabled: Bool
     let profileScrollCycles: Int
 
@@ -31,11 +33,15 @@ struct AgentResponsesView: View {
     init(
         model: AgentResponsesModel,
         onClose: @escaping () -> Void,
+        isFullWidth: Bool = true,
+        onToggleWidth: @escaping () -> Void = {},
         textSelectionEnabled: Bool = AgentResponseSelectionPolicy.defaultEnabled,
         profileScrollCycles: Int = 0
     ) {
         self.model = model
         self.onClose = onClose
+        self.isFullWidth = isFullWidth
+        self.onToggleWidth = onToggleWidth
         self.textSelectionEnabled = textSelectionEnabled
         self.profileScrollCycles = max(0, profileScrollCycles)
     }
@@ -48,7 +54,7 @@ struct AgentResponsesView: View {
         }
         .background(AtelierTheme.editor)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Agent response sidecar")
+        .accessibilityLabel("Agent responses")
         .onAppear(perform: selectLatestResponse)
         .onChange(of: model.selectedSession) {
             selectLatestResponse()
@@ -96,18 +102,8 @@ struct AgentResponsesView: View {
             .accessibilityLabel("Next agent response")
             .help("Next Response")
 
-            Button {
-                Task { await model.refresh() }
-            } label: {
-                ZStack {
-                    Image(systemName: "arrow.clockwise")
-                        .opacity(model.isRefreshing ? 0 : 1)
-                    if model.isRefreshing {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
-                .frame(width: 24, height: 24)
+            Button(action: refreshResponses) {
+                refreshButtonLabel
             }
             .buttonStyle(.glass)
             .atelierPointerCursor()
@@ -116,13 +112,34 @@ struct AgentResponsesView: View {
             .accessibilityValue(model.isRefreshing ? "Loading" : "Ready")
             .help("Refresh agent responses")
 
+            Button(action: onToggleWidth) {
+                Image(
+                    systemName: isFullWidth
+                        ? "arrow.down.right.and.arrow.up.left"
+                        : "arrow.up.left.and.arrow.down.right"
+                )
+                .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.glass)
+            .atelierPointerCursor()
+            .accessibilityLabel(
+                isFullWidth
+                    ? "Minimize agent responses to half width"
+                    : "Expand agent responses to full width"
+            )
+            .help(
+                isFullWidth
+                    ? "Minimize to Half Width"
+                    : "Expand to Full Width"
+            )
+
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.glass)
             .atelierPointerCursor()
-            .accessibilityLabel("Close agent response sidecar")
+            .accessibilityLabel("Close agent responses")
             .help("Close Agent Responses")
         }
         .padding(.horizontal, AtelierMetrics.spaceM)
@@ -135,6 +152,18 @@ struct AgentResponsesView: View {
                 .opacity(transcriptScrolled ? 1 : 0)
                 .animation(.easeInOut(duration: 0.15), value: transcriptScrolled)
         }
+    }
+
+    private var refreshButtonLabel: some View {
+        ZStack {
+            Image(systemName: "arrow.clockwise")
+                .opacity(model.isRefreshing ? 0 : 1)
+            if model.isRefreshing {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+        .frame(width: 24, height: 24)
     }
 
     private var sessionPicker: some View {
@@ -177,7 +206,7 @@ struct AgentResponsesView: View {
         }
         .menuStyle(.borderlessButton)
         .atelierPointerCursor()
-        .fixedSize()
+        .layoutPriority(1)
         .accessibilityLabel("Agent session picker")
         .accessibilityValue(
             selectedSummary.map { sessionAccessibilityLabel($0) } ?? "No session selected"
@@ -402,6 +431,10 @@ struct AgentResponsesView: View {
     private func showNextResponse() {
         guard let nextResponseIndex else { return }
         selectedResponseID = model.selectedResponses[nextResponseIndex].readIdentity
+    }
+
+    private func refreshResponses() {
+        Task { await model.refresh() }
     }
 
     private func selectLatestResponse() {

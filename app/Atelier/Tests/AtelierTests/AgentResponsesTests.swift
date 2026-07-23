@@ -640,9 +640,17 @@ struct AgentResponsesTests {
         #expect(AgentResponseNavigationPolicy.nextIndex(currentIndex: nil, count: 0) == nil)
     }
 
-    @Test("Agent sidecar overlay keeps a fixed width")
+    @Test("Agent response overlay supports full and half widths")
     func agentSidecarLayoutPolicy() {
-        #expect(AgentSidecarLayoutPolicy.width == 360)
+        #expect(
+            AgentSidecarLayoutPolicy.width(availableWidth: 720, mode: .full) == 720
+        )
+        #expect(
+            AgentSidecarLayoutPolicy.width(availableWidth: 720, mode: .half) == 360
+        )
+        #expect(
+            AgentSidecarLayoutPolicy.width(availableWidth: -20, mode: .full) == 0
+        )
     }
 
     @Test("Response model exposes loading state during refresh")

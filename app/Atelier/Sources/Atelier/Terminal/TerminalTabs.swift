@@ -40,7 +40,18 @@ nonisolated enum TerminalClosePolicy {
 }
 
 nonisolated enum AgentSidecarLayoutPolicy {
-    static let width: CGFloat = 360
+    static func width(
+        availableWidth: CGFloat,
+        mode: AgentResponseOverlayMode
+    ) -> CGFloat {
+        let fullWidth = max(0, availableWidth)
+        return mode == .full ? fullWidth : fullWidth / 2
+    }
+}
+
+nonisolated enum AgentResponseOverlayMode: Equatable, Sendable {
+    case full
+    case half
 }
 
 final class TerminalSession: Identifiable {
@@ -1136,6 +1147,7 @@ struct TerminalTabs: View {
     @State private var hoveredTabID: UUID?
     @State private var renderedPreviewTabIDs: Set<UUID> = []
     @State private var renderedSourceTabIDs: Set<UUID> = []
+    @State private var agentResponseOverlayMode: AgentResponseOverlayMode = .full
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1283,48 +1295,40 @@ struct TerminalTabs: View {
                 .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.chrome)
 
                 HStack(spacing: AtelierMetrics.spaceXS) {
-                    if model.isTerminalSelected {
-                        Button {
-                            if isAgentSidecarPresented {
-                                onCloseAgentSidecar()
-                            } else {
-                                onOpenAgentSidecar()
+                    Button(action: toggleAgentResponseOverlay) {
+                        HStack(spacing: AtelierMetrics.spaceXS) {
+                            Image(systemName: "text.bubble")
+                            Text("Response")
+                            if agentResponses.unreadCount > 0 {
+                                Circle()
+                                    .fill(AtelierTheme.accent)
+                                    .frame(width: 6, height: 6)
                             }
-                        } label: {
-                            HStack(spacing: AtelierMetrics.spaceXS) {
-                                Image(systemName: "text.bubble")
-                                Text("Response")
-                                if agentResponses.unreadCount > 0 {
-                                    Circle()
-                                        .fill(AtelierTheme.accent)
-                                        .frame(width: 6, height: 6)
-                                }
-                            }
-                            .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                            .padding(.horizontal, AtelierMetrics.spaceS)
-                            .frame(height: AtelierMetrics.controlHeight)
-                            .contentShape(
-                                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                            )
                         }
-                        .buttonStyle(.plain)
-                        .atelierPointerCursor()
-                        .foregroundStyle(
-                            isAgentSidecarPresented ? AtelierTheme.accent : Color.primary
-                        )
-                        .atelierGlassControl(isSelected: isAgentSidecarPresented)
-                        .accessibilityLabel(
-                            isAgentSidecarPresented
-                                ? "Close agent response sidecar"
-                                : "Open agent response sidecar"
-                        )
-                        .accessibilityValue("\(agentResponses.unreadCount) unread")
-                        .help(
-                            isAgentSidecarPresented
-                                ? "Close Agent Responses"
-                                : "Open Agent Responses"
+                        .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+                        .padding(.horizontal, AtelierMetrics.spaceS)
+                        .frame(height: AtelierMetrics.controlHeight)
+                        .contentShape(
+                            RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
                         )
                     }
+                    .buttonStyle(.plain)
+                    .atelierPointerCursor()
+                    .foregroundStyle(
+                        isAgentSidecarPresented ? AtelierTheme.accent : Color.primary
+                    )
+                    .atelierGlassControl(isSelected: isAgentSidecarPresented)
+                    .accessibilityLabel(
+                        isAgentSidecarPresented
+                            ? "Close agent response overlay"
+                            : "Open agent response overlay"
+                    )
+                    .accessibilityValue("\(agentResponses.unreadCount) unread")
+                    .help(
+                        isAgentSidecarPresented
+                            ? "Close Agent Responses"
+                            : "Open Agent Responses"
+                    )
 
                     if let editor = model.selectedEditor {
                         if FilePreviewPolicy.kind(for: editor.document.url) != nil,
@@ -1400,14 +1404,13 @@ struct TerminalTabs: View {
                             selectedID: model.selectedID,
                             tabID: tab.id
                         )
-                        TerminalAgentSidecar(
-                            session: session,
-                            tabID: tab.id,
-                            agentResponses: agentResponses,
-                            isPresented: isAgentSidecarPresented,
-                            isActive: isActive,
-                            onClose: onCloseAgentSidecar
+                        TerminalView(
+                            controller: session.controller,
+                            scale: zoom.contentScale,
+                            isActive: isActive
                         )
+                        .id(tab.id)
+                        .background(AtelierTheme.editor)
                         .dropDestination(for: WatchtowerCommandDrop.self) { drops, _ in
                             guard let drop = drops.first else { return false }
                             return model.runCommand(drop.command)
@@ -1466,6 +1469,21 @@ struct TerminalTabs: View {
                         systemImage: "rectangle.stack",
                         title: "No Open Tabs",
                         message: "Open a file or add a terminal tab."
+                    )
+                }
+            }
+            .overlay(alignment: .trailing) {
+                if isAgentSidecarPresented {
+                    AgentResponseOverlay(
+                        model: agentResponses,
+                        mode: agentResponseOverlayMode,
+                        onToggleMode: toggleAgentResponseOverlayMode,
+                        onClose: onCloseAgentSidecar
+                    )
+                    .transition(
+                        reduceMotion
+                            ? .identity
+                            : .move(edge: .trailing).combined(with: .opacity)
                     )
                 }
             }
@@ -1585,6 +1603,21 @@ struct TerminalTabs: View {
         return tab.title
     }
 
+    private func toggleAgentResponseOverlay() {
+        if isAgentSidecarPresented {
+            onCloseAgentSidecar()
+        } else {
+            agentResponseOverlayMode = .full
+            onOpenAgentSidecar()
+        }
+    }
+
+    private func toggleAgentResponseOverlayMode() {
+        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+            agentResponseOverlayMode = agentResponseOverlayMode == .full ? .half : .full
+        }
+    }
+
     private func tabBackground(_ tab: CenterTab) -> Color {
         if draggedTabID == tab.id {
             return AtelierTheme.controlFill(for: .pressed)
@@ -1624,47 +1657,36 @@ struct TerminalTabs: View {
     }
 }
 
-private struct TerminalAgentSidecar: View {
-    let session: TerminalSession
-    let tabID: UUID
-    @Bindable var agentResponses: AgentResponsesModel
-    let isPresented: Bool
-    let isActive: Bool
+private struct AgentResponseOverlay: View {
+    @Bindable var model: AgentResponsesModel
+    let mode: AgentResponseOverlayMode
+    let onToggleMode: () -> Void
     let onClose: () -> Void
 
     @Environment(AtelierZoomModel.self) private var zoom
 
     var body: some View {
-        terminal
-            .overlay(alignment: .trailing) {
-                if isPresented {
-                    sidecar
-                        .frame(width: AgentSidecarLayoutPolicy.width)
-                        .atelierOverlayPanel(edge: .trailing)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
+        GeometryReader { proxy in
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                AgentResponsesView(
+                    model: model,
+                    onClose: onClose,
+                    isFullWidth: mode == .full,
+                    onToggleWidth: onToggleMode
+                )
+                .frame(
+                    width: AgentSidecarLayoutPolicy.width(
+                        availableWidth: proxy.size.width,
+                        mode: mode
+                    )
+                )
+                .frame(maxHeight: .infinity)
+                .environment(\.atelierZoomScale, zoom.contentScale)
+                .atelierOverlayPanel(edge: .trailing)
+                .onExitCommand(perform: onClose)
             }
-            .id(tabID)
-            .background(AtelierTheme.editor)
-    }
-
-    private var terminal: some View {
-        TerminalView(
-            controller: session.controller,
-            scale: zoom.contentScale,
-            isActive: isActive
-        )
-        .background(AtelierTheme.editor)
-    }
-
-    private var sidecar: some View {
-        AgentResponsesView(
-            model: agentResponses,
-            onClose: onClose
-        )
-        .frame(maxHeight: .infinity)
-        .environment(\.atelierZoomScale, zoom.contentScale)
-        .onExitCommand(perform: onClose)
+        }
     }
 }
 
