@@ -37,9 +37,23 @@ nonisolated enum AgentCodeHighlightPolicy {
 }
 
 enum AgentMarkdownInlinePolicy {
+    private enum ContentKind: Hashable {
+        case markdown
+        case plain
+    }
+
+    private struct CacheKey: Hashable {
+        let content: String
+        let kind: ContentKind
+        let showsColorSwatches: Bool
+    }
+
     private static let cacheLimit = 512
-    private static var cache: [String: AttributedString] = [:]
-    private static var cacheOrder: [String] = []
+    private static let colorTokenExpression = try? NSRegularExpression(
+        pattern: "(?<![0-9A-Za-z])#(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{3})(?![0-9A-Za-z])"
+    )
+    private static var cache: [CacheKey: AttributedString] = [:]
+    private static var cacheOrder: [CacheKey] = []
 
     /// Whole-cell / whole-span inline code only. Used to draw one continuous accent
     /// chip so soft-wrapped paths do not zebra per line fragment.
@@ -56,30 +70,129 @@ enum AgentMarkdownInlinePolicy {
         return inner
     }
 
-    static func attributedString(_ content: String) -> AttributedString {
-        if let cached = cache[content] {
+    static func attributedString(
+        _ content: String,
+        showsColorSwatches: Bool = false
+    ) -> AttributedString {
+        cachedAttributedString(
+            content,
+            kind: .markdown,
+            showsColorSwatches: showsColorSwatches
+        )
+    }
+
+    static func plainAttributedString(
+        _ content: String,
+        showsColorSwatches: Bool
+    ) -> AttributedString {
+        cachedAttributedString(
+            content,
+            kind: .plain,
+            showsColorSwatches: showsColorSwatches
+        )
+    }
+
+    static func addingColorSwatches(to attributed: AttributedString) -> AttributedString {
+        guard let colorTokenExpression else { return attributed }
+        var decorated = attributed
+        let rendered = String(decorated.characters)
+        let fullRange = NSRange(rendered.startIndex..<rendered.endIndex, in: rendered)
+        let matches = colorTokenExpression.matches(in: rendered, range: fullRange)
+
+        for match in matches.reversed() {
+            guard let stringRange = Range(match.range, in: rendered),
+                  let insertionIndex = AttributedString.Index(
+                      stringRange.lowerBound,
+                      within: decorated
+                  ),
+                  let color = color(for: String(rendered[stringRange])) else {
+                continue
+            }
+            var swatch = AttributedString("\u{25A0}")
+            swatch.foregroundColor = color
+            swatch.font = .system(size: AtelierTypography.editorSize)
+            decorated.insert(swatch, at: insertionIndex)
+        }
+        return decorated
+    }
+
+    private static func cachedAttributedString(
+        _ content: String,
+        kind: ContentKind,
+        showsColorSwatches: Bool
+    ) -> AttributedString {
+        let key = CacheKey(
+            content: content,
+            kind: kind,
+            showsColorSwatches: showsColorSwatches
+        )
+        if let cached = cache[key] {
             return cached
         }
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace,
-            failurePolicy: .returnPartiallyParsedIfPossible
-        )
-        var attributed = (try? AttributedString(markdown: content, options: options))
-            ?? AttributedString(content)
-        let codeRanges = attributed.runs.compactMap { run in
-            run.inlinePresentationIntent?.contains(.code) == true ? run.range : nil
+
+        var attributed: AttributedString
+        switch kind {
+        case .markdown:
+            let options = AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace,
+                failurePolicy: .returnPartiallyParsedIfPossible
+            )
+            attributed = (try? AttributedString(markdown: content, options: options))
+                ?? AttributedString(content)
+            let codeRanges = attributed.runs.compactMap { run in
+                run.inlinePresentationIntent?.contains(.code) == true ? run.range : nil
+            }
+            for range in codeRanges {
+                attributed[range].foregroundColor = AtelierTheme.accent
+                // Short mixed-prose chips stay filled. Pure soft-wrapped code in tables
+                // uses `pureCodeContent` + a View-level chip so fills do not zebra.
+                attributed[range].backgroundColor = AtelierTheme.accent.opacity(0.12)
+            }
+        case .plain:
+            attributed = AttributedString(content)
         }
-        for range in codeRanges {
-            attributed[range].foregroundColor = AtelierTheme.accent
-            // Short mixed-prose chips stay filled. Pure soft-wrapped code in tables
-            // uses `pureCodeContent` + a View-level chip so fills do not zebra.
-            attributed[range].backgroundColor = AtelierTheme.accent.opacity(0.12)
+
+        if showsColorSwatches {
+            attributed = addingColorSwatches(to: attributed)
         }
-        storeCached(content, attributed)
+        storeCached(key, attributed)
         return attributed
     }
 
-    private static func storeCached(_ key: String, _ value: AttributedString) {
+    private static func color(for token: String) -> Color? {
+        guard token.first == "#" else { return nil }
+        let hex = token.dropFirst()
+        let expanded: String
+        switch hex.count {
+        case 3:
+            expanded = doubled(hex) + "FF"
+        case 4:
+            expanded = doubled(hex)
+        case 6:
+            expanded = String(hex) + "FF"
+        case 8:
+            expanded = String(hex)
+        default:
+            return nil
+        }
+        guard let rgba = UInt32(expanded, radix: 16) else { return nil }
+        return Color(
+            .sRGB,
+            red: Double((rgba >> 24) & 0xFF) / 255,
+            green: Double((rgba >> 16) & 0xFF) / 255,
+            blue: Double((rgba >> 8) & 0xFF) / 255,
+            opacity: Double(rgba & 0xFF) / 255
+        )
+    }
+
+    private static func doubled(_ hex: Substring) -> String {
+        hex.reduce(into: "") { result, digit in
+            result.append(digit)
+            result.append(digit)
+        }
+    }
+
+    private static func storeCached(_ key: CacheKey, _ value: AttributedString) {
         if cache[key] == nil {
             cacheOrder.append(key)
         }
@@ -352,7 +465,10 @@ struct ParsedMarkdownDocument: Equatable {
     private static func makeInlineRuns(for blocks: [AgentMarkdownBlock]) -> [AttributedString?] {
         blocks.map { block in
             guard let text = AgentMarkdownBlock.inlineSource(for: block) else { return nil }
-            return AgentMarkdownInlinePolicy.attributedString(text)
+            return AgentMarkdownInlinePolicy.attributedString(
+                text,
+                showsColorSwatches: true
+            )
         }
     }
 }
@@ -581,7 +697,8 @@ struct AgentMarkdownView: View, Equatable {
 
             MarkdownHighlightedCodeText(
                 content: bounded,
-                languageName: AgentCodeHighlightPolicy.languageName(for: language)
+                languageName: AgentCodeHighlightPolicy.languageName(for: language),
+                showsColorSwatches: presentation == .document
             )
             .padding(AtelierMetrics.spaceS)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -657,7 +774,12 @@ struct AgentMarkdownView: View, Equatable {
         // zebra-stripes multi-line skill paths in Markdown preview tables.
         let cell = Group {
             if let code = AgentMarkdownInlinePolicy.pureCodeContent(value) {
-                Text(code)
+                Text(
+                    AgentMarkdownInlinePolicy.plainAttributedString(
+                        code,
+                        showsColorSwatches: presentation == .document
+                    )
+                )
                     .atelierFont(
                         size: AtelierTypography.label,
                         weight: isHeader ? .semibold : .regular,
@@ -672,7 +794,12 @@ struct AgentMarkdownView: View, Equatable {
                             .fill(AtelierTheme.accent.opacity(0.12))
                     )
             } else {
-                Text(AgentMarkdownInlinePolicy.attributedString(value))
+                Text(
+                    AgentMarkdownInlinePolicy.attributedString(
+                        value,
+                        showsColorSwatches: presentation == .document
+                    )
+                )
                     .atelierFont(
                         size: AtelierTypography.label,
                         weight: isHeader ? .semibold : .regular
@@ -736,7 +863,12 @@ struct AgentMarkdownView: View, Equatable {
            let precomputed = inlineRuns[index] {
             return Text(precomputed)
         }
-        return Text(AgentMarkdownInlinePolicy.attributedString(content))
+        return Text(
+            AgentMarkdownInlinePolicy.attributedString(
+                content,
+                showsColorSwatches: presentation == .document
+            )
+        )
     }
 
     private func headingSize(_ level: Int) -> CGFloat {
@@ -791,6 +923,7 @@ private struct MarkdownHighlightedCodeText: View {
         let content: String
         let languageName: String?
         let usesDarkAppearance: Bool
+        let showsColorSwatches: Bool
     }
 
     private static let highlightService = SyntaxHighlightService()
@@ -800,9 +933,16 @@ private struct MarkdownHighlightedCodeText: View {
 
     let content: String
     let languageName: String?
+    let showsColorSwatches: Bool
 
     var body: some View {
-        Text(highlightedContent ?? AttributedString(content))
+        Text(
+            highlightedContent
+                ?? AgentMarkdownInlinePolicy.plainAttributedString(
+                    content,
+                    showsColorSwatches: showsColorSwatches
+                )
+        )
             .atelierFont(size: AtelierTypography.label, design: .monospaced)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
@@ -819,7 +959,9 @@ private struct MarkdownHighlightedCodeText: View {
                         usesDarkAppearance: request.usesDarkAppearance
                     )
                     guard !Task.isCancelled else { return }
-                    highlightedContent = result
+                    highlightedContent = showsColorSwatches
+                        ? AgentMarkdownInlinePolicy.addingColorSwatches(to: result)
+                        : result
                 } catch {
                     guard !Task.isCancelled else { return }
                     highlightedContent = nil
@@ -831,7 +973,8 @@ private struct MarkdownHighlightedCodeText: View {
         Request(
             content: content,
             languageName: languageName,
-            usesDarkAppearance: colorScheme == .dark
+            usesDarkAppearance: colorScheme == .dark,
+            showsColorSwatches: showsColorSwatches
         )
     }
 }

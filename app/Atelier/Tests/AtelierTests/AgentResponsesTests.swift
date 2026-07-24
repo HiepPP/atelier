@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import Atelier
 
@@ -705,6 +706,42 @@ struct AgentResponsesTests {
 
         #expect(codeRun?.foregroundColor != nil)
         #expect(codeRun?.backgroundColor != nil)
+    }
+
+    @Test("Markdown file previews decorate CSS hex colors with matching swatches")
+    func markdownColorTokenSwatches() {
+        let source = "Colors #abc #abcd #E7E3DD #11223380, not #12345, #E7E3DD0, or #abcxyz"
+        let plain = AgentMarkdownInlinePolicy.attributedString(source)
+        let decorated = AgentMarkdownInlinePolicy.attributedString(
+            source,
+            showsColorSwatches: true
+        )
+        let pureCode = AgentMarkdownInlinePolicy.plainAttributedString(
+            "#E7E3DD",
+            showsColorSwatches: true
+        )
+
+        #expect(String(plain.characters) == source)
+        #expect(
+            String(decorated.characters)
+                == "Colors \u{25A0}#abc \u{25A0}#abcd \u{25A0}#E7E3DD "
+                    + "\u{25A0}#11223380, not #12345, #E7E3DD0, or #abcxyz"
+        )
+        #expect(String(pureCode.characters) == "\u{25A0}#E7E3DD")
+
+        let swatchRun = pureCode.runs.first { run in
+            String(pureCode.characters[run.range]) == "\u{25A0}"
+        }
+        guard let color = swatchRun?.foregroundColor else {
+            Issue.record("Expected an sRGB color on the preview swatch")
+            return
+        }
+        #expect(swatchRun?.font == .system(size: AtelierTypography.editorSize))
+        let resolved = color.resolve(in: EnvironmentValues())
+        #expect(abs(resolved.red - (231.0 / 255.0)) < 0.001)
+        #expect(abs(resolved.green - (227.0 / 255.0)) < 0.001)
+        #expect(abs(resolved.blue - (221.0 / 255.0)) < 0.001)
+        #expect(abs(resolved.opacity - 1.0) < 0.001)
     }
 
     @Test("Pure inline code cells extract continuous chip content")

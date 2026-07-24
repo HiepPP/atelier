@@ -651,6 +651,9 @@ Persistence boundaries:
   monospaced text when highlighting is unavailable. Do not horizontally scroll code blocks.
 - Render inline code as a compact monospaced accent block within prose. Keep surrounding text
   wrapping naturally.
+- In Markdown file Preview mode, render valid CSS hex color tokens (`#RGB`, `#RGBA`, `#RRGGBB`,
+  and `#RRGGBBAA`) with an `editorSize` inline square filled by that sRGB color. Apply the swatch in
+  prose, inline code, tables, and fenced code without changing Source mode or code-block copy content.
 - Pure inline-code table cells (`path` only) use one continuous monospaced accent chip so
   soft-wrapped paths fill as a single shape. Do not paint per-line fragment backgrounds that
   zebra-stripe multi-line skill paths in Markdown preview tables.
