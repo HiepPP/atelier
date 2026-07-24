@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import MetalKit
 import SwiftUI
 import Testing
 @testable import Atelier
@@ -78,6 +79,22 @@ struct DisplaySizingTests {
         #expect(TerminalRenderingPolicy.usesMetal(displayScale: 2))
         #expect(TerminalRenderingPolicy.usesFontSmoothing(displayScale: 1))
         #expect(TerminalRenderingPolicy.usesFontSmoothing(displayScale: 2))
+    }
+
+    @Test("Inactive terminal hides its native render surface")
+    func inactiveTerminalRendering() {
+        let terminal = AtelierTerminalNativeView(frame: CGRect(x: 0, y: 0, width: 320, height: 200))
+        let metalView = MTKView(frame: terminal.bounds, device: nil)
+        metalView.enableSetNeedsDisplay = true
+        terminal.addSubview(metalView)
+
+        terminal.setRenderingActive(false)
+        #expect(terminal.isHidden)
+        #expect(!metalView.enableSetNeedsDisplay)
+
+        terminal.setRenderingActive(true)
+        #expect(!terminal.isHidden)
+        #expect(metalView.enableSetNeedsDisplay)
     }
 
     @Test("Workspace panes adapt around editor-first breakpoints")

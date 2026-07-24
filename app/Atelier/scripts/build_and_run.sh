@@ -30,6 +30,7 @@ APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 INFO_PLIST_SOURCE="$ROOT_DIR/Packaging/Info.plist"
 ICONSET_SOURCE="$ROOT_DIR/Resources/AppIcon.iconset"
+FONT_SOURCE="$ROOT_DIR/Resources/Fonts"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
@@ -120,7 +121,17 @@ if [[ ! -d "$ICONSET_SOURCE" ]]; then
   exit 1
 fi
 
-mkdir -p "$APP_MACOS" "$APP_RESOURCES"
+if [[ ! -f "$FONT_SOURCE/JetBrainsMono-Regular.ttf" ]]; then
+  echo "Bundled font not found: $FONT_SOURCE/JetBrainsMono-Regular.ttf" >&2
+  exit 1
+fi
+
+if [[ ! -f "$FONT_SOURCE/OFL.txt" ]]; then
+  echo "Bundled font license not found: $FONT_SOURCE/OFL.txt" >&2
+  exit 1
+fi
+
+mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$APP_RESOURCES/Fonts"
 iconutil -c icns "$ICONSET_SOURCE" -o "$APP_RESOURCES/AppIcon.icns"
 cp -f "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
@@ -128,6 +139,8 @@ for bundle in "${RESOURCE_BUNDLES[@]}"; do
   ditto "$BUILD_DIR/$bundle" "$APP_RESOURCES/$bundle"
 done
 
+cp -f "$FONT_SOURCE/JetBrainsMono-Regular.ttf" "$APP_RESOURCES/Fonts/"
+cp -f "$FONT_SOURCE/OFL.txt" "$APP_RESOURCES/Fonts/"
 cp -f "$INFO_PLIST_SOURCE" "$INFO_PLIST"
 
 sign_app_bundle

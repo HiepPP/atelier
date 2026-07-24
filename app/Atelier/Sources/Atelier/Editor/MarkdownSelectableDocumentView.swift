@@ -17,21 +17,33 @@ struct MarkdownCodeHighlightRequest: Equatable {
     let languageName: String?
 }
 
+struct MarkdownCodeBlockRegion: Equatable {
+    let id: String
+    let headerRange: NSRange
+    let sourceRange: NSRange
+    let source: String
+}
+
 struct MarkdownAttributedDocument {
     let attributedString: NSAttributedString
     let headings: [MarkdownAttributedHeading]
     let codeHighlights: [MarkdownCodeHighlightRequest]
+    let codeBlocks: [MarkdownCodeBlockRegion]
 
     static let empty = MarkdownAttributedDocument(
         attributedString: NSAttributedString(),
         headings: [],
-        codeHighlights: []
+        codeHighlights: [],
+        codeBlocks: []
     )
 }
 
 extension NSAttributedString.Key {
     nonisolated static let atelierInlineCode = NSAttributedString.Key(
         "app.atelier.markdown.inline-code"
+    )
+    nonisolated static let atelierBlockquoteBar = NSAttributedString.Key(
+        "app.atelier.markdown.blockquote-bar"
     )
 }
 
@@ -42,6 +54,12 @@ private enum MarkdownInlineCodeLayout {
     )
     static let outerMargin = AtelierMetrics.spaceXS
     static let horizontalReservation = padding.width + outerMargin
+}
+
+nonisolated private enum MarkdownBlockquoteLayout {
+    static let barWidth: CGFloat = 2.5
+    static let leadingInset: CGFloat = 5
+    static let indent: CGFloat = 18
 }
 
 nonisolated final class MarkdownPreviewLayoutManager: NSLayoutManager {
@@ -65,6 +83,7 @@ nonisolated final class MarkdownPreviewLayoutManager: NSLayoutManager {
             forGlyphRange: glyphsToShow,
             actualGlyphRange: nil
         )
+        let glyphCount = numberOfGlyphs
         textStorage.enumerateAttribute(
             .atelierInlineCode,
             in: characterRange
@@ -81,34 +100,69 @@ nonisolated final class MarkdownPreviewLayoutManager: NSLayoutManager {
                     glyphsToShow
                 )
                 guard visibleRange.length > 0 else { return }
+                var glyphRect = self.boundingRect(
+                    forGlyphRange: visibleRange,
+                    in: textContainer
+                )
+                // Trailing edge must not depend on how the font reports the last
+                // glyph's kerned advance in boundingRect (it varies per font). Clamp
+                // the fill to the following glyph's pen minus the reserved gap so the
+                // padding stays symmetric with the leading side for every font.
+                if NSMaxRange(visibleRange) == NSMaxRange(codeGlyphRange) {
+                    let afterIndex = NSMaxRange(codeGlyphRange)
+                    if afterIndex < glyphCount {
+                        let afterRect = self.boundingRect(
+                            forGlyphRange: NSRange(location: afterIndex, length: 1),
+                            in: textContainer
+                        )
+                        if abs(afterRect.minY - glyphRect.minY) < 1 {
+                            let cleanMaxX = afterRect.minX
+                                - self.inlineCodeHorizontalReservation
+                            glyphRect.size.width = max(0, cleanMaxX - glyphRect.minX)
+                        }
+                    }
+                }
                 let backgroundRect = self.inlineCodeBackgroundRect(
-                    for: self.boundingRect(
-                        forGlyphRange: visibleRange,
-                        in: textContainer
-                    ),
-                    at: origin,
-                    includesTrailingReservation:
-                        NSMaxRange(visibleRange) == NSMaxRange(codeGlyphRange)
+                    for: glyphRect,
+                    at: origin
                 )
                 color.setFill()
                 backgroundRect.fill()
+            }
+        }
+        textStorage.enumerateAttribute(
+            .atelierBlockquoteBar,
+            in: characterRange
+        ) { value, range, _ in
+            guard let color = value as? NSColor else { return }
+            let barGlyphRange = glyphRange(
+                forCharacterRange: range,
+                actualCharacterRange: nil
+            )
+            enumerateLineFragments(forGlyphRange: barGlyphRange) {
+                lineRect, _, _, lineGlyphRange, _ in
+                let visibleRange = NSIntersectionRange(
+                    NSIntersectionRange(barGlyphRange, lineGlyphRange),
+                    glyphsToShow
+                )
+                guard visibleRange.length > 0 else { return }
+                let barRect = NSRect(
+                    x: origin.x + MarkdownBlockquoteLayout.leadingInset,
+                    y: lineRect.minY + origin.y,
+                    width: MarkdownBlockquoteLayout.barWidth,
+                    height: lineRect.height
+                )
+                color.setFill()
+                barRect.fill()
             }
         }
     }
 
     func inlineCodeBackgroundRect(
         for rect: NSRect,
-        at origin: NSPoint,
-        includesTrailingReservation: Bool
+        at origin: NSPoint
     ) -> NSRect {
-        var contentRect = rect.offsetBy(dx: origin.x, dy: origin.y)
-        if includesTrailingReservation {
-            contentRect.size.width = max(
-                0,
-                contentRect.width - inlineCodeHorizontalReservation
-            )
-        }
-        return contentRect.insetBy(
+        rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(
             dx: -inlineCodePadding.width,
             dy: -inlineCodePadding.height
         )
@@ -130,6 +184,7 @@ enum MarkdownAttributedDocumentBuilder {
         let output = NSMutableAttributedString()
         var headings: [MarkdownAttributedHeading] = []
         var codeHighlights: [MarkdownCodeHighlightRequest] = []
+        var codeBlocks: [MarkdownCodeBlockRegion] = []
         let bodySize = AtelierFontScaling.snapped(
             AtelierTypography.editorSize * scale,
             displayScale: displayScale
@@ -137,7 +192,7 @@ enum MarkdownAttributedDocumentBuilder {
         let bodyFont = NSFont.systemFont(ofSize: bodySize)
         let codeFont = AtelierTypography.codeFont(
             size: AtelierFontScaling.snapped(
-                AtelierTypography.label * scale,
+                AtelierTypography.uiSize * scale,
                 displayScale: displayScale
             )
         )
@@ -155,19 +210,19 @@ enum MarkdownAttributedDocumentBuilder {
                 let text = inlineText(
                     content,
                     font: font,
-                    foregroundColor: level >= 4
-                        ? AppKitThemeAdapter.secondary
-                        : AppKitThemeAdapter.foreground,
+                    foregroundColor: headingColor(level: level),
                     paragraphStyle: paragraph,
                     codeFont: codeFont
                 )
-                if level <= 2 {
+                let headingRange = NSRange(location: 0, length: text.length)
+                if level == 1 {
                     text.addAttributes([
                         .underlineStyle: NSUnderlineStyle.single.rawValue,
-                        .underlineColor: AppKitThemeAdapter.accent.withAlphaComponent(
-                            level == 1 ? 0.9 : 0.62
-                        )
-                    ], range: NSRange(location: 0, length: text.length))
+                        .underlineColor: AppKitThemeAdapter.accent.withAlphaComponent(0.9)
+                    ], range: headingRange)
+                }
+                if level <= 2 {
+                    text.addAttribute(.kern, value: -0.5, range: headingRange)
                 }
                 output.append(text)
                 let headingLength = text.length
@@ -201,7 +256,7 @@ enum MarkdownAttributedDocumentBuilder {
 
             case .unorderedItem(let content):
                 appendListItem(
-                    marker: "-",
+                    marker: "\u{2022}",
                     content: content,
                     to: output,
                     bodyFont: bodyFont,
@@ -219,7 +274,7 @@ enum MarkdownAttributedDocumentBuilder {
 
             case .taskItem(let isCompleted, let content):
                 appendListItem(
-                    marker: isCompleted ? "[x]" : "[ ]",
+                    marker: isCompleted ? "\u{2611}" : "\u{2610}",
                     content: content,
                     to: output,
                     bodyFont: bodyFont,
@@ -230,44 +285,42 @@ enum MarkdownAttributedDocumentBuilder {
                 let paragraph = paragraphStyle(
                     lineSpacing: AtelierMetrics.spaceS,
                     before: AtelierMetrics.spaceL,
-                    after: AtelierMetrics.spaceS,
-                    firstLineHeadIndent: AtelierMetrics.spaceL,
-                    headIndent: AtelierMetrics.spaceL,
+                    after: AtelierMetrics.spaceL,
+                    firstLineHeadIndent: MarkdownBlockquoteLayout.indent,
+                    headIndent: MarkdownBlockquoteLayout.indent,
                     tailIndent: -AtelierMetrics.spaceL
                 )
-                let prefix = NSAttributedString(string: "> ", attributes: [
-                    .font: NSFont.systemFont(ofSize: bodySize, weight: .semibold),
-                    .foregroundColor: AppKitThemeAdapter.accent,
-                    .backgroundColor: AppKitThemeAdapter.raised,
-                    .paragraphStyle: paragraph
-                ])
-                output.append(prefix)
+                let quoteStart = output.length
                 let quote = inlineText(
                     content,
-                    font: serifFont(size: bodySize, weight: .medium),
+                    font: serifItalicFont(size: bodySize),
                     foregroundColor: AppKitThemeAdapter.secondary,
                     paragraphStyle: paragraph,
                     codeFont: codeFont
                 )
-                quote.addAttribute(
-                    .backgroundColor,
-                    value: AppKitThemeAdapter.raised,
-                    range: NSRange(location: 0, length: quote.length)
-                )
                 output.append(quote)
                 output.append(NSAttributedString(string: "\n", attributes: [
                     .font: bodyFont,
-                    .backgroundColor: AppKitThemeAdapter.raised,
                     .paragraphStyle: paragraph
                 ]))
+                output.addAttribute(
+                    .atelierBlockquoteBar,
+                    value: AppKitThemeAdapter.accent,
+                    range: NSRange(
+                        location: quoteStart,
+                        length: output.length - quoteStart
+                    )
+                )
 
             case .code(let language, let content):
                 appendCode(
+                    id: AgentMarkdownBlock.blockAnchorID(index),
                     language: language,
                     content: content,
                     to: output,
                     codeFont: codeFont,
-                    codeHighlights: &codeHighlights
+                    codeHighlights: &codeHighlights,
+                    codeBlocks: &codeBlocks
                 )
 
             case .mermaid(let source):
@@ -304,12 +357,13 @@ enum MarkdownAttributedDocumentBuilder {
                     before: AtelierMetrics.spaceL,
                     after: AtelierMetrics.spaceL
                 )
+                paragraph.alignment = .center
                 output.append(NSAttributedString(
-                    string: String(repeating: "-", count: 48) + "\n",
+                    string: "\u{2022}\u{2003}\u{2022}\u{2003}\u{2022}\n",
                     attributes: [
                         .font: NSFont.systemFont(
-                            ofSize: max(6, bodySize * 0.5),
-                            weight: .medium
+                            ofSize: max(6, bodySize * 0.55),
+                            weight: .semibold
                         ),
                         .foregroundColor: AppKitThemeAdapter.border,
                         .paragraphStyle: paragraph
@@ -321,7 +375,8 @@ enum MarkdownAttributedDocumentBuilder {
         return MarkdownAttributedDocument(
             attributedString: NSAttributedString(attributedString: output),
             headings: headings,
-            codeHighlights: codeHighlights
+            codeHighlights: codeHighlights,
+            codeBlocks: codeBlocks
         )
     }
 
@@ -363,7 +418,7 @@ enum MarkdownAttributedDocumentBuilder {
             headIndent: markerWidth
         )
         output.append(NSAttributedString(string: marker + "\t", attributes: [
-            .font: AtelierTypography.codeFont(size: bodyFont.pointSize * 0.86),
+            .font: NSFont.systemFont(ofSize: bodyFont.pointSize, weight: .semibold),
             .foregroundColor: AppKitThemeAdapter.accent,
             .paragraphStyle: paragraph
         ]))
@@ -383,55 +438,93 @@ enum MarkdownAttributedDocumentBuilder {
     }
 
     private static func appendCode(
+        id: String,
         language: String?,
         content: String,
         to output: NSMutableAttributedString,
         codeFont: NSFont,
-        codeHighlights: inout [MarkdownCodeHighlightRequest]
+        codeHighlights: inout [MarkdownCodeHighlightRequest],
+        codeBlocks: inout [MarkdownCodeBlockRegion]
     ) {
+        let table = NSTextTable()
+        table.numberOfColumns = 1
+        table.collapsesBorders = true
+        table.hidesEmptyCells = false
+        table.setContentWidth(100, type: .percentageValueType)
+
+        let headerBlock = NSTextTableBlock(
+            table: table,
+            startingRow: 0,
+            rowSpan: 1,
+            startingColumn: 0,
+            columnSpan: 1
+        )
+        configureCodeBlock(
+            headerBlock,
+            backgroundColor: AppKitThemeAdapter.raised,
+            horizontalPadding: AtelierMetrics.spaceM,
+            verticalPadding: AtelierMetrics.spaceXS
+        )
         let headerStyle = paragraphStyle(
             lineSpacing: 0,
             before: AtelierMetrics.spaceL,
             after: 0,
-            firstLineHeadIndent: AtelierMetrics.spaceM,
-            headIndent: AtelierMetrics.spaceM,
-            tailIndent: -AtelierMetrics.spaceM
+            firstLineHeadIndent: 0,
+            headIndent: 0,
+            tailIndent: -88
         )
+        headerStyle.textBlocks = [headerBlock]
+        let headerStart = output.length
         output.append(NSAttributedString(
             string: (language?.uppercased() ?? "CODE") + "\n",
             attributes: [
-                .font: NSFont.monospacedSystemFont(
-                    ofSize: AtelierTypography.micro,
-                    weight: .semibold
+                .font: AtelierTypography.codeFont(
+                    size: codeFont.pointSize
+                        * AtelierTypography.micro
+                        / AtelierTypography.uiSize
                 ),
                 .foregroundColor: AppKitThemeAdapter.secondary,
-                .backgroundColor: AppKitThemeAdapter.raised,
+                .kern: 1.5,
                 .paragraphStyle: headerStyle
             ]
         ))
 
+        let bodyBlock = NSTextTableBlock(
+            table: table,
+            startingRow: 1,
+            rowSpan: 1,
+            startingColumn: 0,
+            columnSpan: 1
+        )
+        configureCodeBlock(
+            bodyBlock,
+            backgroundColor: AppKitThemeAdapter.code,
+            horizontalPadding: AtelierMetrics.spaceM,
+            verticalPadding: AtelierMetrics.spaceS
+        )
         let codeStyle = paragraphStyle(
             lineSpacing: AtelierMetrics.spaceXS,
             before: 0,
             after: 0,
-            firstLineHeadIndent: AtelierMetrics.spaceM,
-            headIndent: AtelierMetrics.spaceM,
-            tailIndent: -AtelierMetrics.spaceM
+            firstLineHeadIndent: 0,
+            headIndent: 0,
+            tailIndent: 0
         )
+        codeStyle.textBlocks = [bodyBlock]
         let trailingCodeStyle = paragraphStyle(
             lineSpacing: AtelierMetrics.spaceXS,
             before: 0,
             after: AtelierMetrics.spaceL,
-            firstLineHeadIndent: AtelierMetrics.spaceM,
-            headIndent: AtelierMetrics.spaceM,
-            tailIndent: -AtelierMetrics.spaceM
+            firstLineHeadIndent: 0,
+            headIndent: 0,
+            tailIndent: 0
         )
+        trailingCodeStyle.textBlocks = [bodyBlock]
         let source = content.isEmpty ? " " : content
         let range = NSRange(location: output.length, length: (source as NSString).length)
         let code = NSMutableAttributedString(string: source + "\n", attributes: [
             .font: codeFont,
             .foregroundColor: AppKitThemeAdapter.foreground,
-            .backgroundColor: AppKitThemeAdapter.code,
             .paragraphStyle: codeStyle
         ])
         let lastBreak = (source as NSString).range(of: "\n", options: .backwards)
@@ -445,6 +538,17 @@ enum MarkdownAttributedDocumentBuilder {
             )
         )
         output.append(code)
+        codeBlocks.append(
+            MarkdownCodeBlockRegion(
+                id: id,
+                headerRange: NSRange(
+                    location: headerStart,
+                    length: range.location - headerStart
+                ),
+                sourceRange: range,
+                source: content
+            )
+        )
         if !content.isEmpty {
             codeHighlights.append(
                 MarkdownCodeHighlightRequest(
@@ -454,6 +558,45 @@ enum MarkdownAttributedDocumentBuilder {
                 )
             )
         }
+    }
+
+    private static func configureCodeBlock(
+        _ block: NSTextTableBlock,
+        backgroundColor: NSColor,
+        horizontalPadding: CGFloat,
+        verticalPadding: CGFloat
+    ) {
+        block.setWidth(
+            AtelierTheme.strokeHairline,
+            type: .absoluteValueType,
+            for: .border
+        )
+        block.setBorderColor(AppKitThemeAdapter.border)
+        block.setWidth(
+            horizontalPadding,
+            type: .absoluteValueType,
+            for: .padding,
+            edge: .minX
+        )
+        block.setWidth(
+            horizontalPadding,
+            type: .absoluteValueType,
+            for: .padding,
+            edge: .maxX
+        )
+        block.setWidth(
+            verticalPadding,
+            type: .absoluteValueType,
+            for: .padding,
+            edge: .minY
+        )
+        block.setWidth(
+            verticalPadding,
+            type: .absoluteValueType,
+            for: .padding,
+            edge: .maxY
+        )
+        block.backgroundColor = backgroundColor
     }
 
     private static func appendMermaid(
@@ -519,6 +662,7 @@ enum MarkdownAttributedDocumentBuilder {
         table.hidesEmptyCells = false
         table.setContentWidth(100, type: .percentageValueType)
         let allRows = [headers] + rows
+        let columnPercentages = tableColumnPercentages(headers: headers, rows: rows)
         let spacerStyle = paragraphStyle(
             lineSpacing: 0,
             before: AtelierMetrics.spaceL,
@@ -538,23 +682,57 @@ enum MarkdownAttributedDocumentBuilder {
                     startingColumn: columnIndex,
                     columnSpan: 1
                 )
+                block.setBorderColor(AppKitThemeAdapter.border)
                 block.setWidth(
                     AtelierTheme.strokeHairline,
                     type: .absoluteValueType,
-                    for: .border
+                    for: .border,
+                    edge: .maxY
                 )
-                block.setBorderColor(AppKitThemeAdapter.border)
+                if rowIndex == 0 {
+                    block.setWidth(
+                        AtelierTheme.strokeHairline,
+                        type: .absoluteValueType,
+                        for: .border,
+                        edge: .minY
+                    )
+                }
+                block.setContentWidth(
+                    columnPercentages[columnIndex],
+                    type: .percentageValueType
+                )
+                block.setWidth(
+                    AtelierMetrics.spaceM,
+                    type: .absoluteValueType,
+                    for: .padding,
+                    edge: .minX
+                )
+                block.setWidth(
+                    AtelierMetrics.spaceM,
+                    type: .absoluteValueType,
+                    for: .padding,
+                    edge: .maxX
+                )
                 block.setWidth(
                     AtelierMetrics.spaceS,
                     type: .absoluteValueType,
-                    for: .padding
+                    for: .padding,
+                    edge: .minY
+                )
+                block.setWidth(
+                    AtelierMetrics.spaceS,
+                    type: .absoluteValueType,
+                    for: .padding,
+                    edge: .maxY
                 )
                 if rowIndex == 0 {
                     block.backgroundColor = AppKitThemeAdapter.accent.withAlphaComponent(
-                        usesDarkAppearance ? 0.16 : 0.08
+                        usesDarkAppearance ? 0.18 : 0.09
                     )
                 } else if rowIndex.isMultiple(of: 2) {
-                    block.backgroundColor = AppKitThemeAdapter.raised.withAlphaComponent(0.28)
+                    block.backgroundColor = AppKitThemeAdapter.raised.withAlphaComponent(
+                        usesDarkAppearance ? 0.34 : 0.42
+                    )
                 }
 
                 let paragraph = paragraphStyle(
@@ -581,6 +759,43 @@ enum MarkdownAttributedDocumentBuilder {
                 ]))
             }
         }
+    }
+
+    static func tableColumnPercentages(
+        headers: [String],
+        rows: [[String]]
+    ) -> [CGFloat] {
+        guard !headers.isEmpty else { return [] }
+        let sample = rows.prefix(128)
+        let scores = headers.indices.map { columnIndex -> CGFloat in
+            let values = [headers[columnIndex]] + sample.map { row in
+                row.indices.contains(columnIndex) ? row[columnIndex] : ""
+            }
+            let longest = values.reduce(1) { current, value in
+                let lineLength = value.split(
+                    separator: "\n",
+                    omittingEmptySubsequences: false
+                ).reduce(0) { max($0, min(80, $1.count)) }
+                return max(current, lineLength)
+            }
+            return sqrt(CGFloat(longest) + 4)
+        }
+        let scoreTotal = scores.reduce(0, +)
+        let equalShare = 100 / CGFloat(headers.count)
+        let minimumShare = min(14, equalShare * 0.72)
+        let maximumShare = max(equalShare, min(48, equalShare * 2.4))
+        let blended = scores.map { score in
+            let weightedShare = scoreTotal > 0 ? score / scoreTotal * 100 : equalShare
+            return min(
+                maximumShare,
+                max(minimumShare, equalShare * 0.3 + weightedShare * 0.7)
+            )
+        }
+        let blendedTotal = blended.reduce(0, +)
+        guard blendedTotal > 0 else {
+            return Array(repeating: equalShare, count: headers.count)
+        }
+        return blended.map { $0 / blendedTotal * 100 }
     }
 
     private static func inlineText(
@@ -760,7 +975,7 @@ enum MarkdownAttributedDocumentBuilder {
         case 3: max(AtelierTypography.headline, bodySize * 1.18)
         default: max(AtelierTypography.uiSize, bodySize)
         }
-        let weight: NSFont.Weight = level <= 2 ? .semibold : .medium
+        let weight: NSFont.Weight = level <= 3 ? .semibold : .medium
         return level <= 2
             ? serifFont(size: size, weight: weight)
             : NSFont.systemFont(ofSize: size, weight: weight)
@@ -772,8 +987,42 @@ enum MarkdownAttributedDocumentBuilder {
         return NSFont(descriptor: descriptor, size: size) ?? base
     }
 
+    private static func serifItalicFont(size: CGFloat) -> NSFont {
+        let base = NSFont.systemFont(ofSize: size)
+        guard let serif = base.fontDescriptor.withDesign(.serif) else { return base }
+        let italic = serif.withSymbolicTraits(.italic)
+        return NSFont(descriptor: italic, size: size)
+            ?? NSFont(descriptor: serif, size: size)
+            ?? base
+    }
+
+    private static func headingColor(level: Int) -> NSColor {
+        switch level {
+        case 1, 2: AppKitThemeAdapter.foreground
+        case 3: AppKitThemeAdapter.accent
+        default: AppKitThemeAdapter.secondary
+        }
+    }
+
     private static func headingTopSpacing(level: Int) -> CGFloat {
         level <= 2 ? AtelierMetrics.space2XL + AtelierMetrics.spaceS : AtelierMetrics.spaceXL
+    }
+}
+
+private struct MarkdownCodeCopyControl: View {
+    let source: String
+
+    var body: some View {
+        Button {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(source, forType: .string)
+        } label: {
+            Label("Copy", systemImage: "doc.on.doc")
+        }
+        .buttonStyle(AtelierGhostButtonStyle())
+        .accessibilityLabel("Copy code")
+        .help("Copy code")
     }
 }
 
@@ -896,6 +1145,8 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
         private var renderedDisplayScale: CGFloat = 0
         private var renderedDarkAppearance: Bool?
         private var headings: [MarkdownAttributedHeading] = []
+        private var codeBlocks: [MarkdownCodeBlockRegion] = []
+        private var codeCopyControls: [String: NSHostingView<MarkdownCodeCopyControl>] = [:]
         private var appliedJumpRequest: MarkdownPreviewJumpRequest?
         private var lastReportedOutlineID: String?
         private var onSelectedOutlineChange: (String?) -> Void = { _ in }
@@ -915,6 +1166,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                 MainActor.assumeIsolated {
                     self?.updateTextInsets()
                     self?.syncActiveHeading()
+                    self?.syncVisibleCodeCopyControls()
                 }
             }
         }
@@ -967,6 +1219,11 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             highlightGeneration += 1
             highlightTask?.cancel()
             highlightTask = nil
+            for control in codeCopyControls.values {
+                control.removeFromSuperview()
+            }
+            codeCopyControls.removeAll(keepingCapacity: false)
+            codeBlocks = []
             if let boundsObserver {
                 NotificationCenter.default.removeObserver(boundsObserver)
             }
@@ -1012,6 +1269,20 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             let origin = scrollView.contentView.bounds.origin
             let selection = textView.selectedRange()
             headings = document.headings
+            codeBlocks = document.codeBlocks
+            let validCodeBlockIDs = Set(codeBlocks.map(\.id))
+            let staleCodeBlockIDs = codeCopyControls.keys.filter {
+                !validCodeBlockIDs.contains($0)
+            }
+            for id in staleCodeBlockIDs {
+                codeCopyControls[id]?.removeFromSuperview()
+                codeCopyControls[id] = nil
+            }
+            for block in codeBlocks {
+                codeCopyControls[block.id]?.rootView = MarkdownCodeCopyControl(
+                    source: block.source
+                )
+            }
             textStorage.setAttributedString(document.attributedString)
             let length = textStorage.length
             if selection.location <= length {
@@ -1034,6 +1305,90 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             )
             scrollView.reflectScrolledClipView(scrollView.contentView)
             syncActiveHeading()
+            syncVisibleCodeCopyControls()
+        }
+
+        private func syncVisibleCodeCopyControls() {
+            guard let scrollView,
+                  let textView,
+                  let textContainer = textView.textContainer,
+                  let layoutManager = textView.layoutManager,
+                  !codeBlocks.isEmpty else {
+                for control in codeCopyControls.values {
+                    control.removeFromSuperview()
+                }
+                codeCopyControls.removeAll(keepingCapacity: true)
+                return
+            }
+            let textOrigin = textView.textContainerOrigin
+            let visibleRect = scrollView.contentView.bounds.offsetBy(
+                dx: -textOrigin.x,
+                dy: -textOrigin.y
+            )
+            let visibleGlyphRange = layoutManager.glyphRange(
+                forBoundingRect: visibleRect,
+                in: textContainer
+            )
+            let visibleCharacterRange = layoutManager.characterRange(
+                forGlyphRange: visibleGlyphRange,
+                actualGlyphRange: nil
+            )
+            let visibleBlocks = codeBlocks.filter {
+                NSIntersectionRange($0.headerRange, visibleCharacterRange).length > 0
+            }
+            let visibleIDs = Set(visibleBlocks.map(\.id))
+            let hiddenCodeBlockIDs = codeCopyControls.keys.filter {
+                !visibleIDs.contains($0)
+            }
+            for id in hiddenCodeBlockIDs {
+                codeCopyControls[id]?.removeFromSuperview()
+                codeCopyControls[id] = nil
+            }
+
+            for block in visibleBlocks {
+                let control: NSHostingView<MarkdownCodeCopyControl>
+                if let existing = codeCopyControls[block.id] {
+                    control = existing
+                } else {
+                    let created = NSHostingView(
+                        rootView: MarkdownCodeCopyControl(source: block.source)
+                    )
+                    scrollView.addSubview(
+                        created,
+                        positioned: .above,
+                        relativeTo: scrollView.contentView
+                    )
+                    codeCopyControls[block.id] = created
+                    control = created
+                }
+                let glyphRange = layoutManager.glyphRange(
+                    forCharacterRange: block.headerRange,
+                    actualCharacterRange: nil
+                )
+                let headerRect = layoutManager.boundingRect(
+                    forGlyphRange: glyphRange,
+                    in: textContainer
+                )
+                let size = control.fittingSize
+                let origin = textView.convert(
+                    NSPoint(
+                        x: textView.bounds.maxX
+                            - textView.textContainerInset.width
+                            - AtelierMetrics.spaceS
+                            - size.width,
+                        y: textOrigin.y
+                            + headerRect.midY
+                            - size.height / 2
+                    ),
+                    to: scrollView
+                )
+                control.frame = NSRect(
+                    x: max(scrollView.contentView.frame.minX, origin.x),
+                    y: origin.y,
+                    width: size.width,
+                    height: size.height
+                ).integral
+            }
         }
 
         private func scheduleHighlights(

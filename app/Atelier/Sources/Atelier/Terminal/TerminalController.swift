@@ -1,4 +1,5 @@
 import AppKit
+import MetalKit
 import SwiftTerm
 
 enum TerminalRenderingPolicy {
@@ -178,6 +179,7 @@ final class TerminalController {
     }
 
     func setActive(_ isActive: Bool) {
+        terminal.setRenderingActive(isActive)
         guard self.isActive != isActive else { return }
         self.isActive = isActive
         if isActive {
@@ -239,6 +241,22 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
     private var preciseScrollRemainder: CGFloat = 0
     private var keyDownMonitor: Any?
     private var scrollWheelMonitor: Any?
+    private var renderingIsActive = false
+
+    func setRenderingActive(_ isActive: Bool) {
+        let shouldHide = !isActive
+        let renderingChanged = renderingIsActive != isActive
+        let visibilityChanged = isHidden != shouldHide
+        guard renderingChanged || visibilityChanged else { return }
+        renderingIsActive = isActive
+        isHidden = shouldHide
+        updateRendererForDisplay()
+        guard isActive else { return }
+        setNeedsDisplay(bounds)
+        for subview in subviews {
+            subview.setNeedsDisplay(subview.bounds)
+        }
+    }
 
     func hideScrollIndicator() {
         for case let scroller as NSScroller in subviews {
@@ -409,17 +427,32 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
     }
 
     private func updateRendererForDisplay() {
-        guard let window else { return }
+        guard let window else {
+            updateMetalDisplayScheduling()
+            return
+        }
         let shouldUseMetal = TerminalRenderingPolicy.usesMetal(
             displayScale: window.backingScaleFactor
         )
-        guard isUsingMetalRenderer != shouldUseMetal else { return }
-        do {
-            try setUseMetal(shouldUseMetal)
-        } catch {
-            AppLogger.terminal.warning(
-                "Terminal renderer update failed: \(error.localizedDescription, privacy: .public)"
-            )
+        if isUsingMetalRenderer != shouldUseMetal {
+            do {
+                try setUseMetal(shouldUseMetal)
+            } catch {
+                AppLogger.terminal.warning(
+                    "Terminal renderer update failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+        updateMetalDisplayScheduling()
+    }
+
+    private func updateMetalDisplayScheduling() {
+        for case let metalView as MTKView in subviews {
+            guard metalView.enableSetNeedsDisplay != renderingIsActive else { continue }
+            metalView.enableSetNeedsDisplay = renderingIsActive
+            if renderingIsActive {
+                metalView.setNeedsDisplay(metalView.bounds)
+            }
         }
     }
 

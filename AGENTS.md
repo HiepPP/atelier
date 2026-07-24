@@ -14,6 +14,12 @@ Atelier is a macOS 26+ SwiftUI application built with Swift 6.2 and Swift Packag
 
 Generated directories such as `.build/` and `dist/` must remain untracked.
 
+## Language
+
+- Khi trả lời bằng tiếng Việt, luôn viết tiếng Việt có dấu đầy đủ (dấu thanh và chữ có dấu).
+- Viết tiếng Việt không dấu là lỗi, không chấp nhận, kể cả ở chế độ ngắn gọn hay tiết kiệm token.
+- Quy tắc "chỉ ASCII" chỉ áp dụng cho dấu câu và ký hiệu (gạch ngang, ngoặc kép, dấu ba chấm, bullet), không áp dụng cho chữ cái tiếng Việt.
+
 ## Required SwiftUI Skill
 
 Before writing, editing, reviewing, or refactoring code in this repository, always invoke and follow `$swiftui-expert-skill` from `.agents/skills/swiftui-expert-skill/SKILL.md`.
@@ -423,7 +429,7 @@ Pull requests should include a short problem statement, implementation summary, 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **atelier** (7798 symbols, 48403 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **atelier** (8851 symbols, 54674 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

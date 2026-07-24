@@ -604,6 +604,9 @@ Persistence boundaries:
 - Inset the native terminal view by `spaceM` horizontally and `spaceS` vertically. Fill the
   inset area with the editor surface color.
 - Hide the terminal scroll indicator. Keep mouse and trackpad scrolling available.
+- Keep inactive native terminals and their Metal surfaces mounted but hidden from AppKit rendering.
+  Suspend Metal display invalidation while inactive. Preserve process and scrollback, then invalidate
+  the native surface once when it becomes active again.
 - Use native AppKit text and terminal views through narrow representable bridges.
 - Use the native AppKit find bar for editable and read-only text files.
 - Open file search with `Cmd-F`. Search incrementally and highlight visible matches without dimming
@@ -624,7 +627,9 @@ Persistence boundaries:
   paragraphs, lists, quotes, code, tables, and Mermaid fallback content. Preserve native `Cmd-C`.
 - Render Markdown file-preview body text at `editorSize` so Source and Preview share the same
   base text size. Center a `documentMaxWidth` text container, use roomier line and section spacing,
-  and render H1/H2 with the editorial serif face.
+  and render H1/H2 with the editorial serif face. Give H1 a restrained accent underline and tighter
+  display tracking; set H2 apart by serif scale, weight, and top spacing without an underline; render
+  H3 as a system semibold accent eyebrow and H4+ in secondary label color.
 - Treat Markdown as an editorial document. Keep prose on a readable measure and give heading
   levels distinct scale, weight, spacing, and restrained accent rules.
 - When a Markdown file has two or more headings, show a quiet trailing "On This Page" outline in
@@ -647,14 +652,32 @@ Persistence boundaries:
   the document or replace the mounted text view.
 - Render unordered, ordered, and task lists, block quotes, code blocks, tables, and dividers as
   distinct attributed regions inside the single native document. Keep the palette quiet and
-  reserve terracotta for semantic accents.
+  reserve terracotta for semantic accents. Mark unordered items with an accent bullet glyph, ordered
+  items with their number, and task items with an unchecked or checked box glyph. Render a divider as
+  a centered three-dot ornament in the border color, not a full row of dashes.
+- Render a block quote as an editorial pull-quote: an accent left rule drawn once down the quote's
+  full height in the leading gutter, serif italic text in secondary label color, and a readable
+  indent. Do not prefix the quote with a literal `>` marker or paint a per-line background that
+  breaks on soft wrap.
 - Render fenced code with cached syntax-token colors when a language is known. Preserve source
   whitespace, wrap long lines to the available preview width, and fall back to readable
   monospaced text when highlighting is unavailable. Do not horizontally scroll code blocks.
+- Present each fenced-code region as one native code card inside the same text storage. Use a quiet
+  language header, a distinct code body, consistent inner padding, and a hairline border. Keep the
+  header and code selectable with the surrounding document.
+- Show one trailing Copy button over each visible code-card header. Anchor it to the header's TextKit
+  range without inserting an attachment or creating another rendered Markdown tree. Copy the original
+  fenced source only. Keep the button keyboard accessible, expose the "Copy code" accessibility label,
+  and use the link pointer cursor.
+- Materialize code-card controls only for visible code blocks. Diff their stable IDs before updating
+  the overlay, and never parse Markdown or rebuild the attributed document during scrolling.
 - Render inline code as a compact monospaced accent block within prose. Expand the existing accent
   fill around the text for clear inner spacing on every side. Draw that fill once, do not add an
   outline, and reserve outside spacing so it never overlaps surrounding prose. Keep surrounding
   text wrapping naturally.
+- Use JetBrains Mono Regular for fenced code, inline code, code-card language labels, and code-only
+  table cells. Ship the font and its license inside the application bundle so installed-app rendering
+  does not depend on user fonts. Retain the system monospaced fallback.
 - In Markdown file Preview mode, render valid CSS hex color tokens (`#RGB`, `#RGBA`, `#RRGGBB`,
   and `#RRGGBBAA`) with an `editorSize` inline square filled by that sRGB color. Apply the swatch in
   prose, inline code, tables, and fenced code without changing Source mode or code-block copy content.
@@ -663,6 +686,9 @@ Persistence boundaries:
   zebra-stripe multi-line skill paths in Markdown preview tables.
 - Keep wrapped table rows self-sizing inside the native text container. Wide tables wrap their
   cells without overlapping content or splitting selection into another scroll surface.
+- Size Markdown table columns from bounded, deterministic content weights computed during document
+  construction. Keep the header visually distinct, use quiet horizontal rules and subtle zebra rows,
+  avoid heavy vertical boxing, and never recalculate column weights from the scroll or draw paths.
 - Put the Source/Preview toggle in the trailing editor action group. Keep find and word-wrap
   commands scoped to Source mode.
 - Use `Cmd-E` to toggle Source and Preview for the active `.md` or `.html` file. Keep its existing

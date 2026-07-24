@@ -628,7 +628,7 @@ struct AgentResponsesTests {
                 == "Title"
         )
         #expect(text.contains("Paragraph with inline."))
-        #expect(text.contains("-\tItem"))
+        #expect(text.contains("\u{2022}\tItem"))
         #expect(text.contains("let value = 1"))
         #expect(text.contains("Name"))
         #expect(text.contains("Alpha"))
@@ -674,6 +674,74 @@ struct AgentResponsesTests {
             rendered.codeHighlights.map(\.source)
                 == ["AtelierApp\n`-- ContentView\n    |-- Workspace rail"]
         )
+    }
+
+    @Test("Markdown fenced code renders one native card with exact copy metadata")
+    func markdownNativeCodeCardMetadata() {
+        let source = """
+        ```swift
+          let value = 1
+        ```
+        """
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: source),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let text = rendered.attributedString.string as NSString
+        let region = rendered.codeBlocks.first
+        guard let region else {
+            Issue.record("Expected one code card region")
+            return
+        }
+
+        #expect(rendered.codeBlocks.count == 1)
+        #expect(region.id == AgentMarkdownBlock.blockAnchorID(0))
+        #expect(region.source == "  let value = 1")
+        #expect(text.substring(with: region.headerRange) == "SWIFT\n")
+        #expect(text.substring(with: region.sourceRange) == region.source)
+
+        let headerStyle = rendered.attributedString.attribute(
+            .paragraphStyle,
+            at: region.headerRange.location,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        let sourceStyle = rendered.attributedString.attribute(
+            .paragraphStyle,
+            at: region.sourceRange.location,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        let headerBlock = headerStyle?.textBlocks.first as? NSTextTableBlock
+        let sourceBlock = sourceStyle?.textBlocks.first as? NSTextTableBlock
+        #expect(headerBlock != nil)
+        #expect(sourceBlock != nil)
+        #expect(headerBlock?.table === sourceBlock?.table)
+
+        let codeFont = rendered.attributedString.attribute(
+            .font,
+            at: region.sourceRange.location,
+            effectiveRange: nil
+        ) as? NSFont
+        #expect(codeFont?.familyName == AtelierTypography.codeFontFamily)
+        #expect(codeFont?.pointSize == AtelierTypography.uiSize)
+    }
+
+    @Test("Markdown tables allocate bounded widths from sampled content")
+    func markdownTableColumnPercentages() {
+        let widths = MarkdownAttributedDocumentBuilder.tableColumnPercentages(
+            headers: ["Name", "Description", "State"],
+            rows: [
+                ["A", "A much longer explanation that should receive more width", "On"],
+                ["B", "Short", "Off"]
+            ]
+        )
+
+        #expect(widths.count == 3)
+        #expect(abs(widths.reduce(0, +) - 100) < 0.001)
+        #expect(widths[1] > widths[0])
+        #expect(widths[1] > widths[2])
+        #expect(widths.allSatisfy { $0 >= 10 && $0 <= 50 })
     }
 
     @Test("Markdown table layout keeps every wrapped cell line")
@@ -969,12 +1037,6 @@ struct AgentResponsesTests {
             forGlyphRange: codeGlyphRange,
             in: textContainer
         )
-        let backgroundBounds = layoutManager.inlineCodeBackgroundRect(
-            for: codeLayoutBounds,
-            at: .zero,
-            includesTrailingReservation: true
-        )
-
         #expect(
             (storage.attribute(.kern, at: 0, effectiveRange: nil) as? NSNumber)?
                 .doubleValue == 12
@@ -1021,10 +1083,7 @@ struct AgentResponsesTests {
         NSGraphicsContext.restoreGraphicsState()
 
         var redBounds = NSRect.null
-        let expectedBackgroundMinX = drawOrigin.x + backgroundBounds.minX
-        let expectedBackgroundMaxX = drawOrigin.x + backgroundBounds.maxX
-        var leftTextMaxX: CGFloat?
-        var rightTextMinX: CGFloat?
+        var codeInk = NSRect.null
         for y in 0..<bitmap.pixelsHigh {
             for x in 0..<bitmap.pixelsWide {
                 guard let color = bitmap.colorAt(x: x, y: y)?
@@ -1038,26 +1097,48 @@ struct AgentResponsesTests {
                     redBounds = redBounds.union(
                         NSRect(x: x, y: y, width: 1, height: 1)
                     )
+                } else if color.redComponent < 0.25,
+                          color.greenComponent < 0.25,
+                          color.blueComponent < 0.25,
+                          color.alphaComponent > 0.8 {
+                    codeInk = codeInk.union(
+                        NSRect(x: x, y: y, width: 1, height: 1)
+                    )
+                }
+            }
+        }
+        guard !redBounds.isNull, !codeInk.isNull else {
+            Issue.record("Expected a rendered inline-code background and ink")
+            return
+        }
+        var leftTextMaxX: CGFloat?
+        var rightTextMinX: CGFloat?
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                guard let color = bitmap.colorAt(x: x, y: y)?
+                    .usingColorSpace(.sRGB) else {
+                    continue
                 }
                 if color.blueComponent > 0.7,
                    color.redComponent < 0.3,
                    color.greenComponent < 0.5,
                    color.alphaComponent > 0.5 {
                     let pixelX = CGFloat(x)
-                    if pixelX < expectedBackgroundMinX {
+                    if pixelX < redBounds.minX {
                         leftTextMaxX = max(leftTextMaxX ?? pixelX, pixelX)
-                    } else if pixelX > expectedBackgroundMaxX {
+                    } else if pixelX > redBounds.maxX {
                         rightTextMinX = min(rightTextMinX ?? pixelX, pixelX)
                     }
                 }
             }
         }
-        guard !redBounds.isNull else {
-            Issue.record("Expected a rendered inline-code background")
-            return
-        }
-        #expect(redBounds.minX <= drawOrigin.x + backgroundBounds.minX + 1)
-        #expect(redBounds.maxX >= drawOrigin.x + backgroundBounds.maxX - 1)
+        // Inner padding must read as equal on both sides regardless of how the
+        // code font reports the last glyph's kerned advance.
+        let leftPad = codeInk.minX - redBounds.minX
+        let rightPad = redBounds.maxX - codeInk.maxX
+        #expect(abs(leftPad - rightPad) <= 2)
+        #expect(leftPad >= 4)
+        #expect(rightPad >= 4)
         #expect(redBounds.height >= codeLayoutBounds.height + 6)
         #expect(leftTextMaxX != nil)
         #expect(rightTextMinX != nil)
