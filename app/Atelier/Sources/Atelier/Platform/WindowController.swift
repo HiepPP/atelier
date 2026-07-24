@@ -25,6 +25,16 @@ nonisolated enum WorkspaceTitlebarInteractionPolicy {
             && locationY >= contentLayoutMaxY
             && !hitsInteractiveControl
     }
+
+    static func shouldApplyDeferredZoomFallback(
+        initialIsZoomed: Bool,
+        currentIsZoomed: Bool,
+        initialFrame: CGRect,
+        currentFrame: CGRect
+    ) -> Bool {
+        initialIsZoomed == currentIsZoomed
+            && initialFrame == currentFrame
+    }
 }
 
 @MainActor
@@ -163,8 +173,20 @@ final class WindowController {
             hitsInteractiveControl: Self.isInteractiveTitlebarView(hitView)
         ) else { return event }
 
-        window.zoom(nil)
-        return nil
+        let initialIsZoomed = window.isZoomed
+        let initialFrame = window.frame
+        Task { @MainActor [weak self, weak window] in
+            await Task.yield()
+            guard let self, let window, workspaceWindow === window else { return }
+            guard WorkspaceTitlebarInteractionPolicy.shouldApplyDeferredZoomFallback(
+                initialIsZoomed: initialIsZoomed,
+                currentIsZoomed: window.isZoomed,
+                initialFrame: initialFrame,
+                currentFrame: window.frame
+            ) else { return }
+            window.zoom(nil)
+        }
+        return event
     }
 
     private static func hitView(at location: NSPoint, in window: NSWindow) -> NSView? {

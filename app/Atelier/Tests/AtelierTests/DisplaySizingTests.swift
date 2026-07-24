@@ -635,4 +635,29 @@ struct DisplaySizingTests {
             hitsInteractiveControl: true
         ))
     }
+
+    @Test("Titlebar zoom fallback runs only when AppKit did not handle the double click")
+    func titlebarZoomFallback() {
+        let initialFrame = CGRect(x: 100, y: 100, width: 900, height: 600)
+        let zoomedFrame = CGRect(x: 0, y: 0, width: 1440, height: 900)
+
+        #expect(WorkspaceTitlebarInteractionPolicy.shouldApplyDeferredZoomFallback(
+            initialIsZoomed: false,
+            currentIsZoomed: false,
+            initialFrame: initialFrame,
+            currentFrame: initialFrame
+        ))
+        #expect(!WorkspaceTitlebarInteractionPolicy.shouldApplyDeferredZoomFallback(
+            initialIsZoomed: false,
+            currentIsZoomed: true,
+            initialFrame: initialFrame,
+            currentFrame: zoomedFrame
+        ))
+        #expect(!WorkspaceTitlebarInteractionPolicy.shouldApplyDeferredZoomFallback(
+            initialIsZoomed: false,
+            currentIsZoomed: false,
+            initialFrame: initialFrame,
+            currentFrame: zoomedFrame
+        ))
+    }
 }
