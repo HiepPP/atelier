@@ -36,6 +36,11 @@ enum FileLayoutPolicy {
     }
 }
 
+nonisolated struct FileViewerRevealRequest: Equatable, Sendable {
+    let line: Int
+    let generation: Int
+}
+
 struct FileViewer: NSViewRepresentable {
     @Environment(\.atelierZoomScale) private var scale
     @Environment(\.displayScale) private var displayScale
@@ -47,6 +52,7 @@ struct FileViewer: NSViewRepresentable {
     let isActive: Bool
     let isWordWrapEnabled: Bool
     let surfaceOwner: EditorSession?
+    let revealRequest: FileViewerRevealRequest?
     let onEdit: () -> Void
 
     init(
@@ -56,6 +62,7 @@ struct FileViewer: NSViewRepresentable {
         isActive: Bool = true,
         isWordWrapEnabled: Bool = true,
         surfaceOwner: EditorSession? = nil,
+        revealRequest: FileViewerRevealRequest? = nil,
         onEdit: @escaping () -> Void = {}
     ) {
         self.content = content
@@ -64,6 +71,7 @@ struct FileViewer: NSViewRepresentable {
         self.isActive = isActive
         self.isWordWrapEnabled = isWordWrapEnabled
         self.surfaceOwner = surfaceOwner
+        self.revealRequest = revealRequest
         self.onEdit = onEdit
     }
 
@@ -168,6 +176,7 @@ struct FileViewer: NSViewRepresentable {
             isActive: isActive,
             isWordWrapEnabled: isWordWrapEnabled,
             surfaceOwner: surfaceOwner,
+            revealRequest: revealRequest,
             onEdit: onEdit
         )
     }
@@ -204,6 +213,7 @@ struct FileViewer: NSViewRepresentable {
         private var usesDarkAppearance = false
         private var isActive = false
         private var renderedWordWrapEnabled: Bool?
+        private var appliedRevealRequest: FileViewerRevealRequest?
         private var highlightGeneration = 0
         private var highlightTask: Task<Void, Never>?
         private var saveGeneration = 0
@@ -292,6 +302,7 @@ struct FileViewer: NSViewRepresentable {
             isActive: Bool,
             isWordWrapEnabled: Bool,
             surfaceOwner: EditorSession?,
+            revealRequest: FileViewerRevealRequest?,
             onEdit: @escaping () -> Void
         ) {
             let contentChanged = renderedContent != content
@@ -347,6 +358,12 @@ struct FileViewer: NSViewRepresentable {
                 renderedContent = content
                 renderedLanguage = language?.rawValue
                 render(content: content, language: language)
+            }
+            if appliedRevealRequest != revealRequest {
+                appliedRevealRequest = revealRequest
+                if let revealRequest {
+                    reveal(line: revealRequest.line, column: 1)
+                }
             }
         }
 

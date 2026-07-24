@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 import WebKit
-@_spi(Advanced) import SwiftUIIntrospect
 
 nonisolated enum FilePreviewKind: Equatable, Sendable {
     case markdown
@@ -66,19 +65,24 @@ struct FileRenderedPreview: View {
     }
 }
 
-private struct MarkdownFileDocumentView: View {
-    let source: String
+struct MarkdownFileTabView: View {
+    let file: EditorSession
+    let isActive: Bool
+    let showsPreview: Bool
+    let onEdit: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Cheap empty seed: never parse inside `State(initialValue:)` because parent
-    /// body re-evaluation re-runs view init even when state storage is preserved.
     @State private var document: ParsedMarkdownDocument = .empty
     @State private var selectedOutlineID: String?
     @State private var containerWidth: CGFloat = 0
-    /// Class store: heading Y updates do not invalidate the document tree.
-    @State private var headingOffsets = MarkdownHeadingOffsetStore()
-    @State private var documentScrollSurface = MarkdownDocumentScrollSurface()
-    @State private var outlineJumpTask: Task<Void, Never>?
+    @State private var sourceHeadingLines: [String: Int] = [:]
+    @State private var jumpGeneration = 0
+    @State private var previewJumpRequest: MarkdownPreviewJumpRequest?
+    @State private var sourceRevealRequest: FileViewerRevealRequest?
+
+    private var source: String {
+        guard case .text(let source) = file.content else { return "" }
+        return source
+    }
 
     private var showsOutline: Bool {
         MarkdownFileDocumentPolicy.showsOutline(
@@ -88,20 +92,42 @@ private struct MarkdownFileDocumentView: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            HStack(spacing: 0) {
-                documentScroll
-                if showsOutline {
-                    MarkdownDocumentOutline(
-                        entries: document.outline,
-                        selectedID: selectedOutlineID
-                    ) { entry in
-                        jumpToOutlineEntry(entry, proxy: proxy)
-                    }
-                }
+        HStack(spacing: 0) {
+            ZStack {
+                FileViewer(
+                    content: file.content,
+                    fileURL: file.document.url,
+                    isActive: isActive && !showsPreview,
+                    isWordWrapEnabled: file.isWordWrapEnabled,
+                    surfaceOwner: file,
+                    revealRequest: sourceRevealRequest,
+                    onEdit: onEdit
+                )
+                .opacity(showsPreview ? 0 : 1)
+                .allowsHitTesting(!showsPreview)
+                .accessibilityHidden(showsPreview)
+                .zIndex(0)
+
+                MarkdownSelectableDocumentView(
+                    document: document,
+                    isActive: isActive && showsPreview,
+                    jumpRequest: previewJumpRequest,
+                    selectedOutlineID: $selectedOutlineID
+                )
+                .opacity(showsPreview ? 1 : 0)
+                .allowsHitTesting(showsPreview)
+                .accessibilityHidden(!showsPreview)
+                .zIndex(1)
+            }
+
+            if showsOutline {
+                MarkdownDocumentOutline(
+                    entries: document.outline,
+                    selectedID: selectedOutlineID,
+                    onSelect: jumpToOutlineEntry
+                )
             }
         }
-        .environment(\.markdownHeadingOffsetStore, headingOffsets)
         .background {
             GeometryReader { geometry in
                 Color.clear
@@ -119,135 +145,143 @@ private struct MarkdownFileDocumentView: View {
         }
         .onChange(of: source, initial: true) { _, newSource in
             guard document.source != newSource else { return }
-            outlineJumpTask?.cancel()
-            outlineJumpTask = nil
             document = ParsedMarkdownDocument(source: newSource)
-            headingOffsets.reset()
+            sourceHeadingLines = MarkdownSourceOutlinePolicy.lineNumberByOutlineID(
+                source: newSource,
+                entries: document.outline
+            )
+            if !document.outline.contains(where: { $0.id == selectedOutlineID }) {
+                selectedOutlineID = document.outline.first?.id
+            }
+        }
+    }
+
+    private func jumpToOutlineEntry(_ entry: MarkdownOutlineEntry) {
+        selectedOutlineID = entry.id
+        jumpGeneration += 1
+        previewJumpRequest = MarkdownPreviewJumpRequest(
+            outlineID: entry.id,
+            generation: jumpGeneration
+        )
+        if let line = sourceHeadingLines[entry.id] {
+            sourceRevealRequest = FileViewerRevealRequest(
+                line: line,
+                generation: jumpGeneration
+            )
+        }
+    }
+}
+
+private struct MarkdownFileDocumentView: View {
+    let source: String
+
+    @State private var document: ParsedMarkdownDocument = .empty
+    @State private var selectedOutlineID: String?
+    @State private var containerWidth: CGFloat = 0
+    @State private var jumpGeneration = 0
+    @State private var jumpRequest: MarkdownPreviewJumpRequest?
+
+    private var showsOutline: Bool {
+        MarkdownFileDocumentPolicy.showsOutline(
+            headingCount: document.outline.count,
+            containerWidth: containerWidth
+        )
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            MarkdownSelectableDocumentView(
+                document: document,
+                isActive: true,
+                jumpRequest: jumpRequest,
+                selectedOutlineID: $selectedOutlineID
+            )
+            if showsOutline {
+                MarkdownDocumentOutline(
+                    entries: document.outline,
+                    selectedID: selectedOutlineID,
+                    onSelect: jumpToOutlineEntry
+                )
+            }
+        }
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear {
+                        Task { @MainActor in
+                            containerWidth = geometry.size.width
+                        }
+                    }
+                    .onChange(of: geometry.size.width) { _, width in
+                        Task { @MainActor in
+                            containerWidth = width
+                        }
+                    }
+            }
+        }
+        .onChange(of: source, initial: true) { _, newSource in
+            guard document.source != newSource else { return }
+            document = ParsedMarkdownDocument(source: newSource)
             selectedOutlineID = document.outline.first?.id
         }
-        .task(id: document.source) {
-            // Catch lazy-loaded heading measurements after first layout without scroll.
-            guard !document.source.isEmpty else { return }
-            for delayMs in [32, 120, 320] {
-                try? await Task.sleep(for: .milliseconds(delayMs))
-                guard !Task.isCancelled else { return }
-                syncOutlineSelection(contentOffsetY: headingOffsets.currentContentOffsetY)
-            }
-        }
-        .onDisappear {
-            outlineJumpTask?.cancel()
-            outlineJumpTask = nil
-        }
     }
 
-    private var documentScroll: some View {
-        ScrollView {
-            HStack(spacing: 0) {
-                Spacer(minLength: AtelierMetrics.spaceL)
-                AgentMarkdownView(
-                    source: document.source,
-                    bodyFontSize: AtelierTypography.editorSize,
-                    presentation: .document,
-                    blocks: document.blocks,
-                    inlineRuns: document.inlineRuns
-                )
-                .equatable()
-                .frame(maxWidth: AtelierMetrics.documentMaxWidth, alignment: .leading)
-                .padding(.vertical, AtelierMetrics.space2XL)
-                Spacer(minLength: AtelierMetrics.spaceL)
-            }
-            .padding(.horizontal, AtelierMetrics.spaceXL)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .coordinateSpace(name: MarkdownDocumentCoordinateSpace.name)
-        }
-        .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.editor)
-        .introspect(.scrollView, on: .macOS(.v26)) { scrollView in
-            documentScrollSurface.scrollView = scrollView
-        }
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            // Coarser than heading store quantize: fewer selection passes while scrolling.
-            MarkdownOutlineSyncPolicy.quantizeOffset(geometry.contentOffset.y / 4) * 4
-        } action: { oldOffset, newOffset in
-            guard oldOffset != newOffset else { return }
-            syncOutlineSelection(contentOffsetY: newOffset)
-        }
-    }
-
-    private func jumpToOutlineEntry(_ entry: MarkdownOutlineEntry, proxy: ScrollViewProxy) {
+    private func jumpToOutlineEntry(_ entry: MarkdownOutlineEntry) {
         selectedOutlineID = entry.id
-        // Suppress passive selection rewrites while the jump settles.
-        headingOffsets.setSuppressSyncUntil(Date().addingTimeInterval(0.55))
-        outlineJumpTask?.cancel()
-
-        let animated = !reduceMotion
-        let duration = TimeInterval(AtelierMotionTokens.standard)
-
-        // Fast path: heading already measured — drive NSScrollView directly.
-        if let y = headingOffsets.offset(for: entry.id),
-           documentScrollSurface.scrollToContentY(y, animated: animated, duration: duration) {
-            headingOffsets.setContentOffset(y)
-            return
-        }
-
-        // Slow path: LazyVStack may not have built the target yet.
-        // 1) Jump near a measured predecessor to force materialization.
-        // 2) Retry SwiftUI scrollTo + AppKit settle.
-        let priorID = MarkdownOutlineSyncPolicy.nearestMeasuredID(
-            targetID: entry.id,
-            entries: document.outline,
-            offsets: headingOffsets.snapshotOffsets()
+        jumpGeneration += 1
+        jumpRequest = MarkdownPreviewJumpRequest(
+            outlineID: entry.id,
+            generation: jumpGeneration
         )
-
-        outlineJumpTask = Task { @MainActor in
-            if let priorID, priorID != entry.id {
-                var seed = Transaction()
-                seed.disablesAnimations = true
-                withTransaction(seed) {
-                    proxy.scrollTo(priorID, anchor: .top)
-                }
-                try? await Task.sleep(for: .milliseconds(24))
-                guard !Task.isCancelled else { return }
-            }
-
-            for (attempt, delayMs) in [0, 24, 72, 160, 320].enumerated() {
-                guard !Task.isCancelled else { return }
-                if delayMs > 0 {
-                    try? await Task.sleep(for: .milliseconds(delayMs))
-                    guard !Task.isCancelled else { return }
-                }
-
-                if let y = headingOffsets.offset(for: entry.id),
-                   documentScrollSurface.scrollToContentY(
-                    y,
-                    animated: animated && attempt == 0,
-                    duration: duration
-                   ) {
-                    headingOffsets.setContentOffset(y)
-                    return
-                }
-
-                if animated, attempt == 0 {
-                    withAnimation(.easeOut(duration: duration)) {
-                        proxy.scrollTo(entry.id, anchor: .top)
-                    }
-                } else {
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) {
-                        proxy.scrollTo(entry.id, anchor: .top)
-                    }
-                }
-            }
-        }
     }
+}
 
-    private func syncOutlineSelection(contentOffsetY: CGFloat) {
-        guard !headingOffsets.isSyncSuppressed else { return }
-        headingOffsets.setContentOffset(contentOffsetY)
-        let active = headingOffsets.activeOutlineID(entries: document.outline)
-        if selectedOutlineID != active {
-            selectedOutlineID = active
+nonisolated enum MarkdownSourceOutlinePolicy {
+    static func lineNumberByOutlineID(
+        source: String,
+        entries: [MarkdownOutlineEntry]
+    ) -> [String: Int] {
+        guard !entries.isEmpty else { return [:] }
+        let lines = source.split(
+            separator: "\n",
+            omittingEmptySubsequences: false
+        ).map(String.init)
+        var result: [String: Int] = [:]
+        var entryIndex = 0
+        var fence: (character: Character, length: Int)?
+
+        for (lineIndex, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let activeFence = fence {
+                let markerLength = trimmed.prefix {
+                    $0 == activeFence.character
+                }.count
+                if markerLength >= activeFence.length,
+                   trimmed.allSatisfy({ $0 == activeFence.character }) {
+                    fence = nil
+                }
+                continue
+            }
+
+            if let marker = trimmed.first,
+               marker == "`" || marker == "~" {
+                let markerLength = trimmed.prefix { $0 == marker }.count
+                if markerLength >= 3 {
+                    fence = (marker, markerLength)
+                    continue
+                }
+            }
+
+            let level = trimmed.prefix { $0 == "#" }.count
+            guard (1...6).contains(level),
+                  trimmed.dropFirst(level).first == " " else { continue }
+            let title = trimmed.dropFirst(level + 1)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, entryIndex < entries.count else { continue }
+            result[entries[entryIndex].id] = lineIndex + 1
+            entryIndex += 1
         }
+        return result
     }
 }
 

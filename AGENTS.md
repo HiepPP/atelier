@@ -58,6 +58,15 @@ Use four-space indentation and standard Swift API naming. Types use `UpperCamelC
 
 Use `rg` for plain-text repository search: literal strings, symbol names, file globs, quick greps. Use GitNexus for code intelligence: impact analysis before edits, caller/callee context, execution-flow tracing, safe renames, and pre-commit change detection. Pick the tool by purpose; do not use GitNexus as a text grep, and do not use `rg` to reason about the call graph.
 
+## Simple First Implementation Principle
+
+- Start with the simplest architecture that directly provides the required behavior.
+- Prefer one native surface and one state owner over several synchronized wrappers or view trees.
+- Use platform primitives with built-in behavior before adding framework workarounds.
+- Improve performance through simpler structure first: fewer views, state mutations, invalidations, allocations, and layout passes.
+- Add abstraction, retries, caching, or parallel work only after a measured requirement proves the simple path insufficient.
+- Simple does not mean incomplete. Preserve required styling, accessibility, interaction state, and verification.
+
 ## Interaction Rules
 
 ### Pointer Cursor on Every Clickable (Hard Rule)

@@ -613,39 +613,40 @@ Persistence boundaries:
 - Offer Source and Preview modes for `.md` and `.html` text files. Open both Markdown and HTML in
   Preview mode by default. Keep the native editor mounted while Preview is visible, and keep
   explicit per-tab mode changes session-only.
-- Keep each rendered preview mounted while its tab remains open. Preserve preview scroll, outline,
-  and page state across tab switches and Source/Preview switches.
+- Keep each rendered preview mounted while its tab remains open. Preserve preview scroll, selection,
+  outline, and page state across tab switches and Source/Preview switches.
 - Render Markdown through the native Atelier Markdown surface. Render HTML from its original file
   URL in a non-persistent WebKit surface. Allow relative resources from the containing directory
   and run the page's scripts so interactive local previews render correctly.
+- Render Markdown Preview as one read-only, selectable `NSTextView` backed by one `NSTextStorage`.
+  Keep every rendered block in that single native document so selection can cross headings,
+  paragraphs, lists, quotes, code, tables, and Mermaid fallback content. Preserve native `Cmd-C`.
 - Render Markdown file-preview body text at `editorSize` so Source and Preview share the same
-  base text size. Use the document presentation for file preview (not the agent transcript
-  presentation): center a `documentMaxWidth` prose column, use roomier line and section spacing,
-  enable text selection, and render H1/H2 with the editorial serif face.
+  base text size. Center a `documentMaxWidth` text container, use roomier line and section spacing,
+  and render H1/H2 with the editorial serif face.
 - Treat Markdown as an editorial document. Keep prose on a readable measure and give heading
   levels distinct scale, weight, spacing, and restrained accent rules.
-- When a Markdown file has two or more headings, show a quiet trailing "On This Page" outline
-  that jumps to the matching heading. Hide the outline when the center column is too narrow to
-  keep a readable measure. Keep outline state session-only.
-- Keep the outline selection in sync with the document scroll position (active section). Outline
-  rows use the pointer cursor on hover. Outline scroll chrome uses overlay auto-hiding scrollers
-  like other panels; never leave a permanent scroller gutter.
+- When a Markdown file has two or more headings, show a quiet trailing "On This Page" outline in
+  both Source and Preview modes. Hide the outline when the center column is too narrow to keep a
+  readable measure. Keep outline state session-only.
+- Outline clicks reveal the source heading line in Source mode and the rendered heading character
+  range in Preview mode. Keep Preview outline selection in sync with the native document scroll
+  position. Outline rows use the pointer cursor on hover. Outline scroll chrome uses overlay
+  auto-hiding scrollers like other panels; never leave a permanent scroller gutter.
 - While Markdown/HTML Preview is visible, keep the native editor mounted but hide it from AppKit
   hit-testing and cursor-rect participation (`isHidden`, non-selectable) so NSTextView I-beam does
   not bleed through the preview or On This Page rail.
-- Parse each Markdown source once per content change and share blocks with the outline. Prefer a
-  lazy document stack so off-screen blocks are not built eagerly. Never measure a second full
-  document tree to decide outline visibility.
-- Keep Markdown scroll hot paths cheap: precompute inline attributed runs at parse time, report
-  heading positions into a non-view-invalidating store (no PreferenceKey storms), update outline
-  selection only when the active section ID changes, and never animate outline rail scroll during
-  passive document scrolling.
-- Outline jump must reach the target section reliably: prefer AppKit content-offset scroll when the
-  heading Y is known, otherwise seed near a measured predecessor and retry until the anchor is
-  materialised. Keep the document stack lazy so freewheel scroll stays smooth; never drive the
-  outline rail's scroll position during passive document scrolling.
+- Parse each Markdown source once per content change and share its blocks and outline with Source
+  and Preview. Build one attributed native document from those blocks. Never build or measure a
+  second rendered document tree to decide outline visibility.
+- Keep Markdown scroll hot paths cheap: cache the attributed document until source, scale, or
+  appearance changes; map headings to TextKit character ranges; update outline selection only when
+  the active section ID changes; and never animate the outline rail during passive document scroll.
+- Outline jumps use source line locations or native TextKit character ranges. They must not rebuild
+  the document or replace the mounted text view.
 - Render unordered, ordered, and task lists, block quotes, code blocks, tables, and dividers as
-  distinct native components. Keep the palette quiet and reserve terracotta for semantic accents.
+  distinct attributed regions inside the single native document. Keep the palette quiet and
+  reserve terracotta for semantic accents.
 - Render fenced code with cached syntax-token colors when a language is known. Preserve source
   whitespace, wrap long lines to the available preview width, and fall back to readable
   monospaced text when highlighting is unavailable. Do not horizontally scroll code blocks.
@@ -657,8 +658,8 @@ Persistence boundaries:
 - Pure inline-code table cells (`path` only) use one continuous monospaced accent chip so
   soft-wrapped paths fill as a single shape. Do not paint per-line fragment backgrounds that
   zebra-stripe multi-line skill paths in Markdown preview tables.
-- Keep wrapped table rows self-sizing. Wide tables may scroll horizontally without overlapping
-  cell content or flattening the document hierarchy.
+- Keep wrapped table rows self-sizing inside the native text container. Wide tables wrap their
+  cells without overlapping content or splitting selection into another scroll surface.
 - Put the Source/Preview toggle in the trailing editor action group. Keep find and word-wrap
   commands scoped to Source mode.
 - Use `Cmd-E` to toggle Source and Preview for the active `.md` or `.html` file. Keep its existing

@@ -569,6 +569,74 @@ struct AgentResponsesTests {
         ])
     }
 
+    @Test("Markdown source outline maps headings outside fenced code")
+    func markdownSourceOutlineLines() {
+        let source = """
+        # One
+
+        ```md
+        # Hidden
+        ```
+
+        ## Two
+        """
+        let document = ParsedMarkdownDocument(source: source)
+        let lines = MarkdownSourceOutlinePolicy.lineNumberByOutlineID(
+            source: source,
+            entries: document.outline
+        )
+
+        #expect(document.outline.map(\.title) == ["One", "Two"])
+        #expect(lines[document.outline[0].id] == 1)
+        #expect(lines[document.outline[1].id] == 7)
+    }
+
+    @Test("Markdown preview builds one continuous attributed document")
+    func markdownContinuousAttributedDocument() {
+        let source = """
+        # Title
+
+        Paragraph with `inline`.
+
+        - Item
+
+        ```swift
+        let value = 1
+        ```
+
+        | Name | Value |
+        | --- | --- |
+        | Alpha | Beta |
+
+        ```mermaid
+        graph TD
+        A --> B
+        ```
+        """
+        let document = ParsedMarkdownDocument(source: source)
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: document,
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let text = rendered.attributedString.string
+
+        #expect(rendered.headings.count == 1)
+        #expect(
+            (text as NSString).substring(with: rendered.headings[0].range)
+                == "Title"
+        )
+        #expect(text.contains("Paragraph with inline."))
+        #expect(text.contains("-\tItem"))
+        #expect(text.contains("let value = 1"))
+        #expect(text.contains("Name"))
+        #expect(text.contains("Alpha"))
+        #expect(text.contains("MERMAID - SOURCE FALLBACK"))
+        #expect(text.contains("graph TD"))
+        #expect(rendered.codeHighlights.map(\.source) == ["let value = 1"])
+    }
+
     @Test("Markdown outline selection follows document scroll offsets")
     func markdownOutlineScrollSync() {
         let entries = [

@@ -1733,6 +1733,13 @@ private struct FileTabView: View {
     var body: some View {
         if case .image(let data) = file.content {
             ImageViewer(data: data, name: file.document.displayName)
+        } else if FilePreviewPolicy.kind(for: file.document.url) == .markdown {
+            MarkdownFileTabView(
+                file: file,
+                isActive: isActive,
+                showsPreview: showsPreview,
+                onEdit: onEdit
+            )
         } else if let previewKind = FilePreviewPolicy.kind(for: file.document.url) {
             ZStack {
                 FileViewer(
