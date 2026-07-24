@@ -29,8 +29,98 @@ struct MarkdownAttributedDocument {
     )
 }
 
+extension NSAttributedString.Key {
+    nonisolated static let atelierInlineCode = NSAttributedString.Key(
+        "app.atelier.markdown.inline-code"
+    )
+}
+
+private enum MarkdownInlineCodeLayout {
+    static let padding = NSSize(
+        width: AtelierMetrics.spaceS,
+        height: AtelierMetrics.spaceXS
+    )
+    static let outerMargin = AtelierMetrics.spaceXS
+    static let horizontalReservation = padding.width + outerMargin
+}
+
+nonisolated final class MarkdownPreviewLayoutManager: NSLayoutManager {
+    private let inlineCodePadding: NSSize
+    private let inlineCodeHorizontalReservation: CGFloat
+
+    init(inlineCodePadding: NSSize, inlineCodeHorizontalReservation: CGFloat) {
+        self.inlineCodePadding = inlineCodePadding
+        self.inlineCodeHorizontalReservation = inlineCodeHorizontalReservation
+        super.init()
+    }
+
+    required init?(coder: NSCoder) {
+        return nil
+    }
+
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+        guard let textStorage else { return }
+        let characterRange = characterRange(
+            forGlyphRange: glyphsToShow,
+            actualGlyphRange: nil
+        )
+        textStorage.enumerateAttribute(
+            .atelierInlineCode,
+            in: characterRange
+        ) { value, range, _ in
+            guard let color = value as? NSColor else { return }
+            let codeGlyphRange = glyphRange(
+                forCharacterRange: range,
+                actualCharacterRange: nil
+            )
+            enumerateLineFragments(forGlyphRange: codeGlyphRange) {
+                _, _, textContainer, lineGlyphRange, _ in
+                let visibleRange = NSIntersectionRange(
+                    NSIntersectionRange(codeGlyphRange, lineGlyphRange),
+                    glyphsToShow
+                )
+                guard visibleRange.length > 0 else { return }
+                let backgroundRect = self.inlineCodeBackgroundRect(
+                    for: self.boundingRect(
+                        forGlyphRange: visibleRange,
+                        in: textContainer
+                    ),
+                    at: origin,
+                    includesTrailingReservation:
+                        NSMaxRange(visibleRange) == NSMaxRange(codeGlyphRange)
+                )
+                color.setFill()
+                backgroundRect.fill()
+            }
+        }
+    }
+
+    func inlineCodeBackgroundRect(
+        for rect: NSRect,
+        at origin: NSPoint,
+        includesTrailingReservation: Bool
+    ) -> NSRect {
+        var contentRect = rect.offsetBy(dx: origin.x, dy: origin.y)
+        if includesTrailingReservation {
+            contentRect.size.width = max(
+                0,
+                contentRect.width - inlineCodeHorizontalReservation
+            )
+        }
+        return contentRect.insetBy(
+            dx: -inlineCodePadding.width,
+            dy: -inlineCodePadding.height
+        )
+    }
+}
+
 @MainActor
 enum MarkdownAttributedDocumentBuilder {
+    private static let colorSwatchExpression = try? NSRegularExpression(
+        pattern: "\u{25A0}(#(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{3}))"
+    )
+
     static func build(
         document: ParsedMarkdownDocument,
         scale: CGFloat,
@@ -323,6 +413,14 @@ enum MarkdownAttributedDocumentBuilder {
         let codeStyle = paragraphStyle(
             lineSpacing: AtelierMetrics.spaceXS,
             before: 0,
+            after: 0,
+            firstLineHeadIndent: AtelierMetrics.spaceM,
+            headIndent: AtelierMetrics.spaceM,
+            tailIndent: -AtelierMetrics.spaceM
+        )
+        let trailingCodeStyle = paragraphStyle(
+            lineSpacing: AtelierMetrics.spaceXS,
+            before: 0,
             after: AtelierMetrics.spaceL,
             firstLineHeadIndent: AtelierMetrics.spaceM,
             headIndent: AtelierMetrics.spaceM,
@@ -330,17 +428,23 @@ enum MarkdownAttributedDocumentBuilder {
         )
         let source = content.isEmpty ? " " : content
         let range = NSRange(location: output.length, length: (source as NSString).length)
-        output.append(NSAttributedString(string: source, attributes: [
+        let code = NSMutableAttributedString(string: source + "\n", attributes: [
             .font: codeFont,
             .foregroundColor: AppKitThemeAdapter.foreground,
             .backgroundColor: AppKitThemeAdapter.code,
             .paragraphStyle: codeStyle
-        ]))
-        output.append(NSAttributedString(string: "\n", attributes: [
-            .font: codeFont,
-            .backgroundColor: AppKitThemeAdapter.code,
-            .paragraphStyle: codeStyle
-        ]))
+        ])
+        let lastBreak = (source as NSString).range(of: "\n", options: .backwards)
+        let lastLineStart = lastBreak.location == NSNotFound ? 0 : NSMaxRange(lastBreak)
+        code.addAttribute(
+            .paragraphStyle,
+            value: trailingCodeStyle,
+            range: NSRange(
+                location: lastLineStart,
+                length: code.length - lastLineStart
+            )
+        )
+        output.append(code)
         if !content.isEmpty {
             codeHighlights.append(
                 MarkdownCodeHighlightRequest(
@@ -494,6 +598,28 @@ enum MarkdownAttributedDocumentBuilder {
         let fullRange = NSRange(location: 0, length: output.length)
         guard fullRange.length > 0 else { return output }
 
+        let nativeString = output.string as NSString
+        var swatchColors: [(range: NSRange, color: NSColor)] = []
+        let matches = colorSwatchExpression?.matches(
+            in: output.string,
+            range: fullRange
+        ) ?? []
+        for match in matches {
+            let tokenRange = match.range(at: 1)
+            guard tokenRange.location != NSNotFound,
+                  let color = nativeColor(
+                    for: nativeString.substring(with: tokenRange)
+                  ) else {
+                continue
+            }
+            swatchColors.append(
+                (
+                    NSRange(location: match.range.location, length: 1),
+                    color
+                )
+            )
+        }
+
         fillMissingAttribute(.font, value: font, in: output, range: fullRange)
         fillMissingAttribute(
             .foregroundColor,
@@ -512,11 +638,29 @@ enum MarkdownAttributedDocumentBuilder {
         }
         for (intent, range) in intentRuns {
             if intent & 4 != 0 {
+                let backgroundColor = AppKitThemeAdapter.accent.withAlphaComponent(0.12)
+                output.removeAttribute(.backgroundColor, range: range)
                 output.addAttributes([
                     .font: codeFont,
                     .foregroundColor: AppKitThemeAdapter.accent,
-                    .backgroundColor: AppKitThemeAdapter.accent.withAlphaComponent(0.12)
+                    .atelierInlineCode: backgroundColor
                 ], range: range)
+                if range.location > 0 {
+                    output.addAttribute(
+                        .kern,
+                        value: MarkdownInlineCodeLayout.horizontalReservation,
+                        range: nativeString.rangeOfComposedCharacterSequence(
+                            at: range.location - 1
+                        )
+                    )
+                }
+                output.addAttribute(
+                    .kern,
+                    value: MarkdownInlineCodeLayout.horizontalReservation,
+                    range: nativeString.rangeOfComposedCharacterSequence(
+                        at: NSMaxRange(range) - 1
+                    )
+                )
                 continue
             }
             var traits: NSFontDescriptor.SymbolicTraits = []
@@ -532,7 +676,45 @@ enum MarkdownAttributedDocumentBuilder {
                 }
             }
         }
+        for swatch in swatchColors {
+            output.addAttribute(
+                .foregroundColor,
+                value: swatch.color,
+                range: swatch.range
+            )
+        }
         return output
+    }
+
+    private static func nativeColor(for token: String) -> NSColor? {
+        guard token.first == "#" else { return nil }
+        let hex = token.dropFirst()
+        let expanded: String
+        switch hex.count {
+        case 3:
+            expanded = hex.reduce(into: "") { result, digit in
+                result.append(digit)
+                result.append(digit)
+            } + "FF"
+        case 4:
+            expanded = hex.reduce(into: "") { result, digit in
+                result.append(digit)
+                result.append(digit)
+            }
+        case 6:
+            expanded = String(hex) + "FF"
+        case 8:
+            expanded = String(hex)
+        default:
+            return nil
+        }
+        guard let rgba = UInt32(expanded, radix: 16) else { return nil }
+        return NSColor(
+            srgbRed: CGFloat((rgba >> 24) & 0xFF) / 255,
+            green: CGFloat((rgba >> 16) & 0xFF) / 255,
+            blue: CGFloat((rgba >> 8) & 0xFF) / 255,
+            alpha: CGFloat(rgba & 0xFF) / 255
+        )
     }
 
     private static func fillMissingAttribute(
@@ -621,7 +803,11 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
         scrollView.contentView.postsBoundsChangedNotifications = true
 
         let textStorage = NSTextStorage()
-        let layoutManager = NSLayoutManager()
+        let layoutManager = MarkdownPreviewLayoutManager(
+            inlineCodePadding: MarkdownInlineCodeLayout.padding,
+            inlineCodeHorizontalReservation:
+                MarkdownInlineCodeLayout.horizontalReservation
+        )
         layoutManager.allowsNonContiguousLayout = true
         textStorage.addLayoutManager(layoutManager)
         let textContainer = NSTextContainer(

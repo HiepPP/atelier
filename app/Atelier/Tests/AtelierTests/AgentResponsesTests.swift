@@ -637,6 +637,118 @@ struct AgentResponsesTests {
         #expect(rendered.codeHighlights.map(\.source) == ["let value = 1"])
     }
 
+    @Test("Markdown fenced code adds block spacing only after its final line")
+    func markdownCodeBlockLineSpacing() {
+        let source = """
+        ```text
+        AtelierApp
+        `-- ContentView
+            |-- Workspace rail
+        ```
+        """
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: source),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let text = rendered.attributedString.string as NSString
+
+        func style(for line: String) -> NSParagraphStyle? {
+            let location = text.range(of: line).location
+            guard location != NSNotFound else { return nil }
+            return rendered.attributedString.attribute(
+                .paragraphStyle,
+                at: location,
+                effectiveRange: nil
+            ) as? NSParagraphStyle
+        }
+
+        #expect(style(for: "AtelierApp")?.paragraphSpacing == 0)
+        #expect(style(for: "`-- ContentView")?.paragraphSpacing == 0)
+        #expect(
+            style(for: "    |-- Workspace rail")?.paragraphSpacing
+                == AtelierMetrics.spaceL
+        )
+        #expect(
+            rendered.codeHighlights.map(\.source)
+                == ["AtelierApp\n`-- ContentView\n    |-- Workspace rail"]
+        )
+    }
+
+    @Test("Markdown table layout keeps every wrapped cell line")
+    func markdownTableLayoutKeepsWrappedCellLines() {
+        let source = """
+        | State | Visual treatment | Interaction | Accessibility value |
+        |---|---|---|---|
+        | Active | Semibold name, brighter neutral shortcut, flat selection band | Selecting again keeps current session | `Selected, available` |
+        | Inactive | Primary name, secondary shortcut, clear fill | Selects existing live session | `Available` |
+        | Loading | Secondary name and shortcut, native progress indicator | Disabled until restore finishes | `Loading` |
+        | Unavailable | Primary name, secondary shortcut, `questionmark.folder` accessory | Selects item and presents recovery context | `Unavailable` |
+        | Error | Primary name, secondary shortcut, semantic error accessory | Selects item and presents error context | `Error` |
+        | Disabled | Clear fill at disabled opacity | No action | `Disabled` |
+        """
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: source),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+
+        let storage = NSTextStorage(attributedString: rendered.attributedString)
+        let layoutManager = NSLayoutManager()
+        storage.addLayoutManager(layoutManager)
+        let textContainer = NSTextContainer(
+            containerSize: NSSize(
+                width: 720,
+                height: CGFloat.greatestFiniteMagnitude
+            )
+        )
+        textContainer.lineFragmentPadding = 0
+        layoutManager.addTextContainer(textContainer)
+        layoutManager.ensureLayout(for: textContainer)
+
+        var cellBounds: [NSRect] = []
+        var maximumLineCount = 0
+        rendered.attributedString.enumerateAttribute(
+            .paragraphStyle,
+            in: NSRange(location: 0, length: rendered.attributedString.length)
+        ) { value, range, _ in
+            guard let style = value as? NSParagraphStyle,
+                  let block = style.textBlocks.first as? NSTextTableBlock else { return }
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: range,
+                actualCharacterRange: nil
+            )
+            var lineCount = 0
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { _, _, _, _, _ in
+                lineCount += 1
+            }
+            maximumLineCount = max(maximumLineCount, lineCount)
+
+            let contentRect = layoutManager.boundingRect(
+                forGlyphRange: glyphRange,
+                in: textContainer
+            )
+            let blockRect = layoutManager.boundsRect(
+                for: block,
+                glyphRange: glyphRange
+            )
+            #expect(blockRect.minY <= contentRect.minY)
+            #expect(blockRect.maxY >= contentRect.maxY)
+            cellBounds.append(blockRect)
+        }
+
+        #expect(cellBounds.count == 28)
+        #expect(maximumLineCount >= 4)
+        for rowStart in stride(from: 0, to: cellBounds.count, by: 4) {
+            let rowBounds = cellBounds[rowStart..<(rowStart + 4)]
+            guard let first = rowBounds.first else { continue }
+            #expect(rowBounds.allSatisfy { $0.minY == first.minY })
+            #expect(rowBounds.allSatisfy { $0.maxY == first.maxY })
+        }
+    }
+
     @Test("Markdown outline selection follows document scroll offsets")
     func markdownOutlineScrollSync() {
         let entries = [
@@ -776,6 +888,185 @@ struct AgentResponsesTests {
         #expect(codeRun?.backgroundColor != nil)
     }
 
+    @Test("Native Markdown inline code draws one fill with outside margin")
+    func nativeMarkdownInlineCodePadding() {
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(
+                source: "A`code`B"
+            ),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let renderedText = rendered.attributedString.string as NSString
+        let codeRange = renderedText.range(of: "code")
+        #expect(codeRange.location != NSNotFound)
+        guard codeRange.location != NSNotFound else { return }
+
+        #expect(rendered.attributedString.string == "AcodeB\n")
+        #expect(
+            rendered.attributedString.attribute(
+                .backgroundColor,
+                at: codeRange.location,
+                effectiveRange: nil
+            ) == nil
+        )
+        #expect(
+            rendered.attributedString.attribute(
+                .atelierInlineCode,
+                at: codeRange.location,
+                effectiveRange: nil
+            ) != nil
+        )
+
+        let mutable = NSMutableAttributedString(
+            attributedString: rendered.attributedString
+        )
+        mutable.addAttribute(
+            .atelierInlineCode,
+            value: NSColor(
+                srgbRed: 1,
+                green: 0,
+                blue: 0,
+                alpha: 1
+            ),
+            range: codeRange
+        )
+        mutable.addAttribute(
+            .foregroundColor,
+            value: NSColor.black,
+            range: codeRange
+        )
+        mutable.addAttribute(
+            .foregroundColor,
+            value: NSColor.blue,
+            range: NSRange(location: 0, length: 1)
+        )
+        mutable.addAttribute(
+            .foregroundColor,
+            value: NSColor.blue,
+            range: NSRange(location: NSMaxRange(codeRange), length: 1)
+        )
+        let storage = NSTextStorage(attributedString: mutable)
+        let layoutManager = MarkdownPreviewLayoutManager(
+            inlineCodePadding: NSSize(width: 8, height: 4),
+            inlineCodeHorizontalReservation: 12
+        )
+        storage.addLayoutManager(layoutManager)
+        let textContainer = NSTextContainer(
+            containerSize: NSSize(width: 160, height: 60)
+        )
+        textContainer.lineFragmentPadding = 0
+        layoutManager.addTextContainer(textContainer)
+        layoutManager.ensureLayout(for: textContainer)
+
+        let codeGlyphRange = layoutManager.glyphRange(
+            forCharacterRange: codeRange,
+            actualCharacterRange: nil
+        )
+        let fullGlyphRange = layoutManager.glyphRange(for: textContainer)
+        let codeLayoutBounds = layoutManager.boundingRect(
+            forGlyphRange: codeGlyphRange,
+            in: textContainer
+        )
+        let backgroundBounds = layoutManager.inlineCodeBackgroundRect(
+            for: codeLayoutBounds,
+            at: .zero,
+            includesTrailingReservation: true
+        )
+
+        #expect(
+            (storage.attribute(.kern, at: 0, effectiveRange: nil) as? NSNumber)?
+                .doubleValue == 12
+        )
+        #expect(
+            (
+                storage.attribute(
+                    .kern,
+                    at: NSMaxRange(codeRange) - 1,
+                    effectiveRange: nil
+                ) as? NSNumber
+            )?.doubleValue == 12
+        )
+
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 200,
+            pixelsHigh: 100,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), let graphics = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            Issue.record("Expected a bitmap context for inline-code rendering")
+            return
+        }
+        let drawOrigin = NSPoint(x: 24, y: 24)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphics
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: 200, height: 100).fill()
+        layoutManager.drawBackground(
+            forGlyphRange: fullGlyphRange,
+            at: drawOrigin
+        )
+        layoutManager.drawGlyphs(
+            forGlyphRange: fullGlyphRange,
+            at: drawOrigin
+        )
+        graphics.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+
+        var redBounds = NSRect.null
+        let expectedBackgroundMinX = drawOrigin.x + backgroundBounds.minX
+        let expectedBackgroundMaxX = drawOrigin.x + backgroundBounds.maxX
+        var leftTextMaxX: CGFloat?
+        var rightTextMinX: CGFloat?
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                guard let color = bitmap.colorAt(x: x, y: y)?
+                    .usingColorSpace(.sRGB) else {
+                    continue
+                }
+                if color.redComponent > 0.8,
+                   color.greenComponent < 0.2,
+                   color.blueComponent < 0.2,
+                   color.alphaComponent > 0.8 {
+                    redBounds = redBounds.union(
+                        NSRect(x: x, y: y, width: 1, height: 1)
+                    )
+                }
+                if color.blueComponent > 0.7,
+                   color.redComponent < 0.3,
+                   color.greenComponent < 0.5,
+                   color.alphaComponent > 0.5 {
+                    let pixelX = CGFloat(x)
+                    if pixelX < expectedBackgroundMinX {
+                        leftTextMaxX = max(leftTextMaxX ?? pixelX, pixelX)
+                    } else if pixelX > expectedBackgroundMaxX {
+                        rightTextMinX = min(rightTextMinX ?? pixelX, pixelX)
+                    }
+                }
+            }
+        }
+        guard !redBounds.isNull else {
+            Issue.record("Expected a rendered inline-code background")
+            return
+        }
+        #expect(redBounds.minX <= drawOrigin.x + backgroundBounds.minX + 1)
+        #expect(redBounds.maxX >= drawOrigin.x + backgroundBounds.maxX - 1)
+        #expect(redBounds.height >= codeLayoutBounds.height + 6)
+        #expect(leftTextMaxX != nil)
+        #expect(rightTextMinX != nil)
+        if let leftTextMaxX, let rightTextMinX {
+            #expect(redBounds.minX - leftTextMaxX >= 3)
+            #expect(rightTextMinX - redBounds.maxX >= 3)
+        }
+    }
+
     @Test("Markdown file previews decorate CSS hex colors with matching swatches")
     func markdownColorTokenSwatches() {
         let source = "Colors #abc #abcd #E7E3DD #11223380, not #12345, #E7E3DD0, or #abcxyz"
@@ -810,6 +1101,34 @@ struct AgentResponsesTests {
         #expect(abs(resolved.green - (227.0 / 255.0)) < 0.001)
         #expect(abs(resolved.blue - (221.0 / 255.0)) < 0.001)
         #expect(abs(resolved.opacity - 1.0) < 0.001)
+    }
+
+    @Test("Native Markdown preview preserves hex swatch colors inside inline code")
+    func nativeMarkdownInlineCodeSwatchColor() {
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: "`#E7E3DD`"),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let text = rendered.attributedString.string as NSString
+        let swatchRange = text.range(of: "\u{25A0}")
+        guard swatchRange.location != NSNotFound,
+              let color = rendered.attributedString.attribute(
+                .foregroundColor,
+                at: swatchRange.location,
+                effectiveRange: nil
+              ) as? NSColor,
+              let resolved = color.usingColorSpace(.sRGB) else {
+            Issue.record("Expected an sRGB color on the native preview swatch")
+            return
+        }
+
+        #expect(text.range(of: "\u{25A0}#E7E3DD").location != NSNotFound)
+        #expect(abs(resolved.redComponent - (231.0 / 255.0)) < 0.001)
+        #expect(abs(resolved.greenComponent - (227.0 / 255.0)) < 0.001)
+        #expect(abs(resolved.blueComponent - (221.0 / 255.0)) < 0.001)
+        #expect(abs(resolved.alphaComponent - 1.0) < 0.001)
     }
 
     @Test("Pure inline code cells extract continuous chip content")

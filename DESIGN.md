@@ -650,8 +650,10 @@ Persistence boundaries:
 - Render fenced code with cached syntax-token colors when a language is known. Preserve source
   whitespace, wrap long lines to the available preview width, and fall back to readable
   monospaced text when highlighting is unavailable. Do not horizontally scroll code blocks.
-- Render inline code as a compact monospaced accent block within prose. Keep surrounding text
-  wrapping naturally.
+- Render inline code as a compact monospaced accent block within prose. Expand the existing accent
+  fill around the text for clear inner spacing on every side. Draw that fill once, do not add an
+  outline, and reserve outside spacing so it never overlaps surrounding prose. Keep surrounding
+  text wrapping naturally.
 - In Markdown file Preview mode, render valid CSS hex color tokens (`#RGB`, `#RGBA`, `#RRGGBB`,
   and `#RRGGBBAA`) with an `editorSize` inline square filled by that sRGB color. Apply the swatch in
   prose, inline code, tables, and fenced code without changing Source mode or code-block copy content.
