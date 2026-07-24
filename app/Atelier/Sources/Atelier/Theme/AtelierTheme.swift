@@ -322,12 +322,15 @@ extension View {
         }
     }
 
-    func atelierScrollChrome(backgroundColor: NSColor) -> some View {
+    func atelierScrollChrome(
+        backgroundColor: NSColor,
+        drawsBackground: Bool = true
+    ) -> some View {
         introspect(.scrollView, on: .macOS(.v26)) { scrollView in
             scrollView.autohidesScrollers = true
             scrollView.borderType = .noBorder
-            scrollView.drawsBackground = true
             scrollView.backgroundColor = backgroundColor
+            scrollView.drawsBackground = drawsBackground
             scrollView.scrollerStyle = .overlay
         }
     }

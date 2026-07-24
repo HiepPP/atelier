@@ -126,7 +126,7 @@ struct WorkspaceRailView: View {
                 }
                 .clipped()
             }
-            .atelierScrollChrome(backgroundColor: .clear)
+            .atelierScrollChrome(backgroundColor: .clear, drawsBackground: false)
 
             Rectangle()
                 .fill(AtelierTheme.workspaceRailBorder.opacity(0.72))
