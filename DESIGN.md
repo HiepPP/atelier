@@ -18,7 +18,7 @@ Atelier is a native macOS workspace tool. It should feel focused, dense, calm, a
 
 - Use native macOS structure, behavior, menus, focus, and keyboard input.
 - Keep the center editor as the main visual surface.
-- Use an executive-alloy hierarchy: pale warm navigation, titanium chrome, porcelain work surfaces, and one terracotta accent.
+- Use an executive-alloy hierarchy: smoked graphite navigation, titanium chrome, porcelain work surfaces, and one terracotta accent.
 - Use compact controls and clear hierarchy instead of decorative chrome.
 - Show state through fill, weight, opacity, and thin rules.
 - Keep the editor matte. Reserve glass for navigation, compact chrome, and selected interactive
@@ -129,8 +129,8 @@ All palette colors are dynamic `sRGB` colors. Foreground text uses native label 
 |---|---|---|---|
 | `chrome` | `#E7E3DD` | `#23262A` | Titanium toolbar, headers, status, tab strip |
 | `canvas` | `#DEDAD3` | `#181A1D` | Window and empty-state background |
-| `sidebar` | `#E1DED8` | `#202328` | Explorer and Git sidebar |
-| `panel` | `#F2F0EC` | `#292C30` | Pearl inspector, cards, and panel content |
+| `sidebar` | `#EEEBE3` | `#202328` | Explorer, Git, and Gemma sidecar bases |
+| `panel` | `#F2F0EC` | `#292C30` | Pearl cards and local panel content |
 | `raised` | `#D4D0C9` | `#34383D` | Raised controls and palette body |
 | `editor` | `#F8F7F4` | `#191B1E` | Matte porcelain editor, code, and terminal base |
 | `tabInactive` | `#E5E1DB` | `#25282C` | Inactive tabs |
@@ -142,15 +142,15 @@ All palette colors are dynamic `sRGB` colors. Foreground text uses native label 
 | `pressed` | `#CCC7BF` | `#44494F` | Pressed state |
 | `accent` | `#A44F32` | `#D79570` | Primary emphasis and focus |
 | `accentInk` | `#FFF9F2` | `#21150F` | Text on accent fill |
-| `workspaceRailTop` | `#EEEBE4` | `#EEEBE4` | Pale warm rail background |
-| `workspaceRailBottom` | `#EEEBE4` | `#EEEBE4` | Pale warm rail background |
-| `workspaceRailSolid` | `#EEEBE4` | `#EEEBE4` | Reduce Transparency rail fallback |
-| `workspaceRailForeground` | `#302E2B` | `#302E2B` | Primary text and icons on the rail |
-| `workspaceRailSecondary` | `#68645F` | `#68645F` | Rail metadata and inactive icons |
-| `workspaceRailSelection` | `#DED1C6` | `#DED1C6` | Active rail row fill and Reduce Transparency fallback |
-| `workspaceRailHover` | `#D8D4CD` | `#D8D4CD` | Rail hover fill |
-| `workspaceRailPressed` | `#CCC7BF` | `#CCC7BF` | Rail pressed fill |
-| `workspaceRailBorder` | `#BFBAB2` | `#BFBAB2` | Rail edge and focused control outline |
+| `workspaceRailTop` | `#1D232B` | `#171C22` | Upper graphite rail gradient stop |
+| `workspaceRailBottom` | `#2D3B45` | `#202D35` | Lower petrol rail gradient stop |
+| `workspaceRailSolid` | `#252D35` | `#1D252C` | Reduce Transparency rail fallback |
+| `workspaceRailForeground` | `#F3F1EC` | `#F3F1EC` | Primary text and icons on the rail |
+| `workspaceRailSecondary` | `#B6BEC3` | `#ADB7BD` | Rail metadata and inactive icons |
+| `workspaceRailSelection` | `#4C565F` | `#46505A` | Active rail row fill and Reduce Transparency fallback |
+| `workspaceRailHover` | `#333C44` | `#2D373F` | Rail hover fill |
+| `workspaceRailPressed` | `#46515A` | `#404B54` | Rail pressed fill |
+| `workspaceRailBorder` | `#59636B` | `#4C575F` | Rail edge and focused control outline |
 | `fileTreeForeground` | `#302E2B` | `#E8E4DE` | Stable Explorer label color, including selection |
 | `gitAdded` | `#356B43` | `#7FC58C` | Additions and success |
 | `gitModified` | `#8A5B21` | `#D4A45D` | Modified state |
@@ -163,7 +163,7 @@ Color rules:
 - Use bright warm `chromeSelection` glass and dark-ink `chromeSelectionInk` for selected sidebar and center tabs.
 - Reserve Git colors for file and diff meaning.
 - Use native primary and secondary labels for normal text.
-- Use dedicated rail foreground tokens because the rail remains pale in both appearances.
+- Use dedicated rail foreground tokens because the rail remains dark in both appearances.
 - Do not create feature-local colors when an existing semantic token fits.
 - Use one active accent per surface. Avoid competing highlights.
 
@@ -202,7 +202,7 @@ Depth rules:
 - Use `shadowSoft` only for raised local content.
 - Use `shadowFloating` for modal overlays such as the palette.
 - Use the `0.12` black scrim behind blocking overlays.
-- Keep the workspace rail matte. Allow one restrained directional sheen on shared chrome.
+- Allow one signature gradient on the workspace rail and a restrained directional sheen on shared chrome.
 - Keep editor, terminal, Explorer, Git, and inspector content matte and gradient-free.
 - Do not add broad glow, deep drop shadows, or decorative glass layers. A selected interactive
   surface may use one native glass layer with a top-lit hairline highlight and one soft shadow.
@@ -405,9 +405,9 @@ Interaction geometry rules:
 - Keep the full path in help and accessibility text without rendering it in the row.
 - Use rail-specific hover, pressed, focused, selected, and disabled fills so contrast stays stable.
 - Keep optional motion limited to quick opacity and scale feedback. Disable it under Reduce Motion.
-- Keep the rail pale warm in light and dark appearance. Use `#EEEBE4` as its background.
+- Keep the rail dark in light and dark appearance. Use the graphite-to-petrol gradient as its only signature depth effect.
 - Use `workspaceRailSolid` when Reduce Transparency is enabled.
-- Use one trailing hairline. Do not add sheen, glow, heavy shadows, pills, or dock magnification.
+- Use a faint top-edge sheen and one trailing hairline. Do not add glow, heavy shadows, pills, or dock magnification.
 
 #### Threads
 
@@ -677,6 +677,8 @@ The inspector pane hosts a context-aware Gemma assistant instead of a static
 metadata panel. It reads the active center tab and helps with the current work.
 It is read-only: it never writes files, runs shell commands, or performs Git
 actions. Every run is cancellable and pauses when Ollama is unreachable.
+
+- Use `sidebar` as the inspector pane base so the left and right side panels share one background.
 
 The sidecar uses a one-feed, one-input layout with three fixed zones:
 

@@ -202,6 +202,11 @@ struct AtelierWorkspaceRailBackground: View {
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
+                LinearGradient(
+                    colors: [Color.white.opacity(0.07), Color.clear, Color.black.opacity(0.10)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
         }
     }

@@ -29,7 +29,7 @@ struct GemmaSidecarView: View {
                 )
             }
         }
-        .background(AtelierTheme.panel)
+        .background(AtelierTheme.sidebar)
         .accessibilityLabel("Gemma sidecar assistant")
     }
 
@@ -203,7 +203,7 @@ struct GemmaSidecarView: View {
                 .padding(AtelierMetrics.spaceM)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.panel)
+            .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.sidebar)
             .onChange(of: responseScrollAnchor) {
                 proxy.scrollTo("gemma-sidecar-bottom", anchor: .bottom)
             }
