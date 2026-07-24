@@ -386,6 +386,7 @@ Interaction geometry rules:
 - Keep the Workspaces header. Do not add a Threads tab or separate panel body.
 - Treat each workspace as one collapsible group with its 44-point workspace header and nested thread rows.
 - Keep the labeled Add Workspace action below the scrollable workspace groups.
+- Use an overlay workspace rail scroll indicator that fades away when scrolling stops.
 - Show only the full project name as primary identity. Never use initials, monograms, folder icons,
   or visible paths in workspace rows.
 - Show `Command-1` through `Command-9` below the matching project name in smaller monospaced
