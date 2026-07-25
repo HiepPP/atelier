@@ -627,11 +627,20 @@ Persistence boundaries:
   paragraphs, lists, quotes, code, tables, and Mermaid fallback content. Preserve native `Cmd-C`.
 - Render Markdown file-preview body text at `editorSize` so Source and Preview share the same
   base text size. Center a `documentMaxWidth` text container, use roomier line and section spacing,
-  and render H1/H2 with the editorial serif face. Give H1 a restrained accent underline and tighter
-  display tracking; set H2 apart by serif scale, weight, and top spacing without an underline; render
-  H3 as a system semibold accent eyebrow and H4+ in secondary label color.
+  and render H1/H2 with the editorial serif face. Give H1 and H2 tighter display tracking; render
+  H3 as a system semibold accent eyebrow with light tracking and H4+ in secondary label color.
+- Draw the H1 and H2 rule in the layout pass, not as a glyph underline: one accent lead segment
+  followed by a hairline in the border color across the remaining measure, aligned to the bottom of
+  the heading's last line fragment. Give H1 the longer lead segment and H2 the shorter one.
 - Treat Markdown as an editorial document. Keep prose on a readable measure and give heading
   levels distinct scale, weight, spacing, and restrained accent rules.
+- Set the opening paragraph of a document that starts with an H1 as a lede: slightly larger than
+  body text with looser line spacing. Apply it to the first paragraph only.
+- Show a quiet empty state over the preview surface when the parsed document has no blocks. Keep the
+  native text view mounted behind it.
+- Render leading YAML front matter as one quiet metadata card of key and value rows instead of a
+  divider plus stray paragraphs. Keys use the accent micro face, values stay secondary. Fall back to
+  normal block parsing when the front matter has no closing marker or holds non-metadata lines.
 - When a Markdown file has two or more headings, show a quiet trailing "On This Page" outline in
   both Source and Preview modes. Hide the outline when the center column is too narrow to keep a
   readable measure. Keep outline state session-only.
@@ -639,12 +648,19 @@ Persistence boundaries:
   range in Preview mode. Keep Preview outline selection in sync with the native document scroll
   position. Outline rows use the pointer cursor on hover. Outline scroll chrome uses overlay
   auto-hiding scrollers like other panels; never leave a permanent scroller gutter.
+- Mark the active outline row with a short accent indicator on the leading edge plus the accent label,
+  raise a hovered row's label to full contrast, and keep deeper levels quieter through size and color.
+  Do not animate the indicator during passive document scroll.
 - While Markdown/HTML Preview is visible, keep the native editor mounted but hide it from AppKit
   hit-testing and cursor-rect participation (`isHidden`, non-selectable) so NSTextView I-beam does
   not bleed through the preview or On This Page rail.
 - Parse each Markdown source once per content change and share its blocks and outline with Source
   and Preview. Build one attributed native document from those blocks. Never build or measure a
   second rendered document tree to decide outline visibility.
+- Join a wrapped source line into the list item or block quote directly above it (Markdown lazy
+  continuation), and merge consecutive quote lines into one pull-quote. A blank line, heading, table,
+  fence, divider, or new list item ends the continuation. A wrapped bullet must never render as a
+  bullet plus a detached paragraph.
 - Keep Markdown scroll hot paths cheap: cache the attributed document until source, scale, or
   appearance changes; map headings to TextKit character ranges; update outline selection only when
   the active section ID changes; and never animate the outline rail during passive document scroll.
@@ -654,27 +670,35 @@ Persistence boundaries:
   distinct attributed regions inside the single native document. Keep the palette quiet and
   reserve terracotta for semantic accents. Mark unordered items with an accent bullet glyph, ordered
   items with their number, and task items with an unchecked or checked box glyph. Render a divider as
-  a centered three-dot ornament in the border color, not a full row of dashes.
-- Render a block quote as an editorial pull-quote: an accent left rule drawn once down the quote's
-  full height in the leading gutter, serif italic text in secondary label color, and a readable
-  indent. Do not prefix the quote with a literal `>` marker or paint a per-line background that
-  breaks on soft wrap.
+  a centered three-dot ornament, border color on the outer dots and accent on the middle dot, not a
+  full row of dashes.
+- Align every list marker to one marker gutter with an explicit tab stop so single-line and wrapped
+  items share the same text indent. Render a completed task item in secondary label color with a
+  strikethrough; leave open items at full contrast.
+- Render a block quote as an editorial pull-quote: an accent left rule drawn once as a single fill
+  spanning the quote's full height in the leading gutter, serif italic text in secondary label color,
+  and a readable indent. Do not prefix the quote with a literal `>` marker or paint a per-line
+  background that breaks on soft wrap.
 - Render fenced code with cached syntax-token colors when a language is known. Preserve source
   whitespace, wrap long lines to the available preview width, and fall back to readable
   monospaced text when highlighting is unavailable. Do not horizontally scroll code blocks.
 - Present each fenced-code region as one native code card inside the same text storage. Use a quiet
-  language header, a distinct code body, consistent inner padding, and a hairline border. Keep the
-  header and code selectable with the surrounding document.
-- Show one trailing Copy button over each visible code-card header. Anchor it to the header's TextKit
-  range without inserting an attachment or creating another rendered Markdown tree. Copy the original
-  fenced source only. Keep the button keyboard accessible, expose the "Copy code" accessibility label,
-  and use the link pointer cursor.
+  language header, a code body tinted apart from the editor surface, consistent inner padding, and a
+  hairline border. Keep the header and code selectable with the surrounding document.
+- Show one trailing Copy button over each visible code-card header. Keep it icon-only so the header
+  stays quiet, and confirm a copy by swapping to a checkmark for about one second. Anchor it to the
+  header's TextKit range without inserting an attachment or creating another rendered Markdown tree.
+  Copy the original fenced source only. Keep the button keyboard accessible, expose the "Copy code"
+  accessibility label, and use the link pointer cursor.
 - Materialize code-card controls only for visible code blocks. Diff their stable IDs before updating
   the overlay, and never parse Markdown or rebuild the attributed document during scrolling.
 - Render inline code as a compact monospaced accent block within prose. Expand the existing accent
   fill around the text for clear inner spacing on every side. Draw that fill once, do not add an
   outline, and reserve outside spacing so it never overlaps surrounding prose. Keep surrounding
   text wrapping naturally.
+- Size the inline-code fill from the run's own font box around its baseline, never from the line
+  fragment rect: the fragment carries the paragraph's line spacing below the glyphs, which would
+  push the chip up and leave a heavier gap under the text. Top and bottom padding must read equal.
 - Use JetBrains Mono Regular for fenced code, inline code, code-card language labels, and code-only
   table cells. Ship the font and its license inside the application bundle so installed-app rendering
   does not depend on user fonts. Retain the system monospaced fallback.
@@ -687,8 +711,11 @@ Persistence boundaries:
 - Keep wrapped table rows self-sizing inside the native text container. Wide tables wrap their
   cells without overlapping content or splitting selection into another scroll surface.
 - Size Markdown table columns from bounded, deterministic content weights computed during document
-  construction. Keep the header visually distinct, use quiet horizontal rules and subtle zebra rows,
-  avoid heavy vertical boxing, and never recalculate column weights from the scroll or draw paths.
+  construction. Keep the header visually distinct through an accent wash, semibold weight, and light
+  tracking; use quiet horizontal rules and subtle zebra rows, avoid heavy vertical boxing, and never
+  recalculate column weights from the scroll or draw paths.
+- Wrap unbroken cell tokens such as long paths by character so a narrow column never overflows its
+  neighbor. Decide that per cell during document construction, never during layout or draw.
 - Put the Source/Preview toggle in the trailing editor action group. Keep find and word-wrap
   commands scoped to Source mode.
 - Use `Cmd-E` to toggle Source and Preview for the active `.md` or `.html` file. Keep its existing
@@ -784,6 +811,10 @@ The five background features, all read-only and cancellable:
 - Bound startup discovery to the 100 newest transcript files per source root and 16 MiB of
   uncached transcript data per refresh.
 - Keep status, navigation, refresh, copy, and close actions keyboard accessible.
+- Keep the transcript Markdown treatment consistent with the file-preview surface: pull-quote block
+  quotes with an accent left rule and serif italic secondary text, completed task items in secondary
+  with a strikethrough, accent-washed table headers with light tracking, front matter as a quiet
+  key and value card, and the same icon-only Copy control with checkmark confirmation.
 
 ### Settings
 

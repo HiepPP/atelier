@@ -91,6 +91,12 @@ struct MarkdownFileTabView: View {
         )
     }
 
+    /// Only cover a loaded, genuinely empty document; loading must not flash the state.
+    private var showsEmptyPreview: Bool {
+        guard case .text = file.content else { return false }
+        return document.blocks.isEmpty
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             ZStack {
@@ -118,6 +124,11 @@ struct MarkdownFileTabView: View {
                 .allowsHitTesting(showsPreview)
                 .accessibilityHidden(!showsPreview)
                 .zIndex(1)
+
+                if showsPreview, showsEmptyPreview {
+                    MarkdownEmptyPreview()
+                        .zIndex(2)
+                }
             }
 
             if showsOutline {
@@ -190,12 +201,17 @@ private struct MarkdownFileDocumentView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            MarkdownSelectableDocumentView(
-                document: document,
-                isActive: true,
-                jumpRequest: jumpRequest,
-                selectedOutlineID: $selectedOutlineID
-            )
+            ZStack {
+                MarkdownSelectableDocumentView(
+                    document: document,
+                    isActive: true,
+                    jumpRequest: jumpRequest,
+                    selectedOutlineID: $selectedOutlineID
+                )
+                if document.blocks.isEmpty {
+                    MarkdownEmptyPreview()
+                }
+            }
             if showsOutline {
                 MarkdownDocumentOutline(
                     entries: document.outline,
@@ -233,6 +249,19 @@ private struct MarkdownFileDocumentView: View {
             outlineID: entry.id,
             generation: jumpGeneration
         )
+    }
+}
+
+/// Quiet cover for an empty parsed document. The native text view stays mounted behind it.
+private struct MarkdownEmptyPreview: View {
+    var body: some View {
+        AtelierEmptyState(
+            systemImage: "doc.richtext",
+            title: "Nothing to Preview",
+            message: "This Markdown file has no rendered content yet."
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AtelierTheme.editor)
     }
 }
 
@@ -346,6 +375,11 @@ private struct MarkdownDocumentOutline: View {
     }
 }
 
+private enum MarkdownOutlineRowLayout {
+    static let indicatorWidth: CGFloat = 2
+    static let indicatorHeight: CGFloat = 14
+}
+
 private struct MarkdownOutlineRow: View, Equatable {
     let entry: MarkdownOutlineEntry
     let isSelected: Bool
@@ -366,7 +400,7 @@ private struct MarkdownOutlineRow: View, Equatable {
                         : AtelierTypography.micro,
                     weight: entry.level == 1 ? .semibold : .regular
                 )
-                .foregroundStyle(isSelected ? AtelierTheme.accent : .secondary)
+                .foregroundStyle(labelStyle)
                 .multilineTextAlignment(.leading)
                 .lineLimit(2)
                 .padding(.leading, outlineIndent(for: entry.level))
@@ -382,6 +416,18 @@ private struct MarkdownOutlineRow: View, Equatable {
                     .fill(rowFill)
                     .padding(.horizontal, AtelierMetrics.spaceXS)
                 }
+                .overlay(alignment: .leading) {
+                    // Static marker: never animate the rail during passive scroll.
+                    Capsule(style: .continuous)
+                        .fill(AtelierTheme.accent)
+                        .frame(
+                            width: MarkdownOutlineRowLayout.indicatorWidth,
+                            height: MarkdownOutlineRowLayout.indicatorHeight
+                        )
+                        .padding(.leading, AtelierMetrics.spaceXS)
+                        .opacity(isSelected ? 1 : 0)
+                        .accessibilityHidden(true)
+                }
         }
         .buttonStyle(.plain)
         .atelierPointerCursor()
@@ -394,6 +440,16 @@ private struct MarkdownOutlineRow: View, Equatable {
         }
         .accessibilityLabel("Jump to \(entry.title)")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var labelStyle: Color {
+        if isSelected {
+            AtelierTheme.accent
+        } else if isHovering {
+            Color.primary
+        } else {
+            Color.secondary
+        }
     }
 
     private var rowFill: Color {

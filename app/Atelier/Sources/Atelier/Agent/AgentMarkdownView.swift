@@ -221,6 +221,19 @@ nonisolated enum MermaidResponsePresentationPolicy {
     }
 }
 
+/// Shared pull-quote geometry for both Markdown surfaces.
+nonisolated enum MarkdownQuoteLayout {
+    static let barWidth: CGFloat = 3
+    static let leadingInset: CGFloat = 5
+    static let indent: CGFloat = 20
+}
+
+/// Shared front-matter card geometry.
+nonisolated enum MarkdownFrontMatterLayout {
+    static let keyColumnWidth: CGFloat = 132
+    static let keyColumnPercentage: CGFloat = 26
+}
+
 /// Layout and type treatment for Markdown surfaces.
 /// - `transcript`: compact agent responses
 /// - `document`: file-preview reading layout
@@ -560,6 +573,8 @@ struct AgentMarkdownView: View, Equatable {
     @ViewBuilder
     private func blockView(_ block: AgentMarkdownBlock, index: Int) -> some View {
         switch block {
+        case .frontMatter(let entries):
+            frontMatter(entries)
         case .heading(let level, let content):
             heading(level: level, content: content, index: index)
         case .paragraph(let content):
@@ -574,26 +589,26 @@ struct AgentMarkdownView: View, Equatable {
             listRow(marker: .number(number), content: content, index: index)
                 .frame(maxWidth: proseMaxWidth, alignment: .leading)
         case .taskItem(let isCompleted, let content):
-            listRow(marker: .task(isCompleted), content: content, index: index)
-                .frame(maxWidth: proseMaxWidth, alignment: .leading)
+            listRow(
+                marker: .task(isCompleted),
+                content: content,
+                index: index,
+                isStruck: isCompleted
+            )
+            .frame(maxWidth: proseMaxWidth, alignment: .leading)
         case .quote(let content):
-            HStack(alignment: .top, spacing: AtelierMetrics.spaceM) {
-                RoundedRectangle(cornerRadius: AtelierTheme.strokeFocus)
-                    .fill(AtelierTheme.accent.opacity(0.78))
-                    .frame(width: AtelierTheme.strokeFocus)
+            HStack(alignment: .top, spacing: AtelierMetrics.spaceL) {
+                Rectangle()
+                    .fill(AtelierTheme.accent.opacity(0.62))
+                    .frame(width: MarkdownQuoteLayout.barWidth)
                     .accessibilityHidden(true)
                 inlineText(content, index: index)
-                    .atelierFont(size: bodyFontSize, weight: .medium, design: .serif)
+                    .italic()
+                    .atelierFont(size: bodyFontSize, design: .serif)
                     .lineSpacing(proseLineSpacing)
                     .foregroundStyle(.secondary)
             }
-            .padding(presentation == .document ? AtelierMetrics.spaceL : AtelierMetrics.spaceM)
-            .background(AtelierTheme.raised.opacity(0.42))
-            .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.controlRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                    .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeHairline)
-            }
+            .padding(.vertical, AtelierMetrics.spaceXS)
             .frame(maxWidth: proseMaxWidth, alignment: .leading)
         case .code(let language, let content):
             codeBlock(language: language, content: content)
@@ -681,15 +696,13 @@ struct AgentMarkdownView: View, Equatable {
                         weight: .semibold,
                         design: .monospaced
                     )
+                    .tracking(0.8)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button {
-                    copyToPasteboard(AgentCodeBlockPolicy.copiedContent(content))
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                }
-                .buttonStyle(AtelierGhostButtonStyle())
-                .accessibilityLabel("Copy code")
+                MarkdownCopyButton(
+                    source: AgentCodeBlockPolicy.copiedContent(content),
+                    label: "Copy code"
+                )
             }
             .padding(.horizontal, AtelierMetrics.spaceS)
             .frame(height: AtelierMetrics.fieldHeight)
@@ -804,6 +817,7 @@ struct AgentMarkdownView: View, Equatable {
                         size: AtelierTypography.label,
                         weight: isHeader ? .semibold : .regular
                     )
+                    .tracking(isHeader ? 0.4 : 0)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -819,20 +833,52 @@ struct AgentMarkdownView: View, Equatable {
         }
     }
 
-    private func copyToPasteboard(_ value: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
-    }
-
-    private func listRow(marker: MarkdownListMarker, content: String, index: Int) -> some View {
+    private func listRow(
+        marker: MarkdownListMarker,
+        content: String,
+        index: Int,
+        isStruck: Bool = false
+    ) -> some View {
         HStack(alignment: .top, spacing: AtelierMetrics.spaceM) {
             listMarker(marker)
                 .frame(width: AtelierMetrics.spaceL, height: bodyFontSize + proseLineSpacing)
             inlineText(content, index: index)
+                .strikethrough(isStruck, color: .secondary)
                 .atelierFont(size: bodyFontSize)
                 .lineSpacing(proseLineSpacing)
+                .foregroundStyle(isStruck ? Color.secondary : Color.primary)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private func frontMatter(_ entries: [MarkdownFrontMatterEntry]) -> some View {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
+            ForEach(entries.indices, id: \.self) { index in
+                HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceM) {
+                    Text(verbatim: entries[index].key)
+                        .atelierFont(
+                            size: AtelierTypography.micro,
+                            weight: .semibold,
+                            design: .monospaced
+                        )
+                        .foregroundStyle(AtelierTheme.accent)
+                        .frame(
+                            width: MarkdownFrontMatterLayout.keyColumnWidth,
+                            alignment: .leading
+                        )
+                    Text(verbatim: entries[index].value)
+                        .atelierFont(size: AtelierTypography.label)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(AtelierMetrics.spaceM)
+        .frame(maxWidth: proseMaxWidth, alignment: .leading)
+        .atelierCard(fill: AtelierTheme.raised.opacity(0.32))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Front matter")
     }
 
     @ViewBuilder
@@ -908,12 +954,43 @@ struct AgentMarkdownView: View, Equatable {
         return switch block {
         case .heading(let level, _):
             (level <= 2 ? AtelierMetrics.space2XL : AtelierMetrics.spaceXL) + documentBoost
+        case .frontMatter:
+            AtelierMetrics.spaceL
         case .code, .mermaid, .invalidMermaid, .table, .quote, .divider:
             AtelierMetrics.spaceL + (presentation == .document ? AtelierMetrics.spaceXS : 0)
         case .paragraph:
             AtelierMetrics.spaceM + documentBoost * 0.5
         case .unorderedItem, .orderedItem, .taskItem:
             presentation == .document ? AtelierMetrics.spaceS + 2 : AtelierMetrics.spaceS
+        }
+    }
+}
+
+/// Icon-only copy control shared by both Markdown surfaces. Confirms with a
+/// checkmark, then restores itself; no owner state changes, no document rebuild.
+struct MarkdownCopyButton: View {
+    let source: String
+    let label: String
+
+    @State private var didCopy = false
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(source, forType: .string)
+            didCopy = true
+        } label: {
+            Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                .frame(width: AtelierMetrics.regularIconSize)
+        }
+        .buttonStyle(AtelierGhostButtonStyle(tint: didCopy ? AtelierTheme.accent : .primary))
+        .accessibilityLabel(label)
+        .help(label)
+        .task(id: didCopy) {
+            guard didCopy else { return }
+            try? await Task.sleep(for: .milliseconds(1_100))
+            guard !Task.isCancelled else { return }
+            didCopy = false
         }
     }
 }
@@ -1067,16 +1144,13 @@ struct MermaidResponseCard: View {
                                 weight: .semibold,
                                 design: .monospaced
                             )
+                            .tracking(0.8)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Button {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(source, forType: .string)
-                        } label: {
-                            Label("Copy", systemImage: "doc.on.doc")
-                        }
-                        .buttonStyle(AtelierGhostButtonStyle())
-                        .accessibilityLabel("Copy Mermaid source")
+                        MarkdownCopyButton(
+                            source: source,
+                            label: "Copy Mermaid source"
+                        )
                     }
                     .padding(.horizontal, AtelierMetrics.spaceS)
                     .frame(height: AtelierMetrics.fieldHeight)
@@ -1153,7 +1227,115 @@ private struct MermaidRenderRequest: Hashable {
     let parseError: String?
 }
 
+nonisolated struct MarkdownFrontMatterEntry: Equatable, Sendable {
+    let key: String
+    let value: String
+}
+
+/// Leading YAML front matter recognized as one metadata block. Deliberately strict:
+/// anything that is not `key: value`, a `- item` continuation, or a blank line falls
+/// back to normal block parsing so a plain `---` divider keeps its meaning.
+nonisolated enum MarkdownFrontMatterPolicy {
+    static let maximumLineCount = 64
+    static let maximumKeyLength = 48
+
+    static func parse(
+        _ lines: [String]
+    ) -> (entries: [MarkdownFrontMatterEntry], endIndex: Int)? {
+        guard let opening = lines.first,
+              opening.trimmingCharacters(in: .whitespaces) == "---" else { return nil }
+        var entries: [MarkdownFrontMatterEntry] = []
+        var parents: [(indent: Int, key: String)] = []
+        var index = 1
+        let limit = min(lines.count, maximumLineCount + 1)
+
+        while index < limit {
+            let line = lines[index]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "---" || trimmed == "..." {
+                return entries.isEmpty ? nil : (entries, index + 1)
+            }
+            if trimmed.isEmpty {
+                index += 1
+                continue
+            }
+            let indent = line.prefix { $0 == " " || $0 == "\t" }.count
+
+            if let item = listItem(trimmed) {
+                guard !parents.isEmpty else { return nil }
+                append(item, to: keyPath(parents), in: &entries)
+                index += 1
+                continue
+            }
+
+            guard let field = field(trimmed) else { return nil }
+            while let parent = parents.last, parent.indent >= indent {
+                parents.removeLast()
+            }
+            parents.append((indent, field.key))
+            if !field.value.isEmpty {
+                entries.append(
+                    MarkdownFrontMatterEntry(key: keyPath(parents), value: field.value)
+                )
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    private static func keyPath(_ parents: [(indent: Int, key: String)]) -> String {
+        parents.map(\.key).joined(separator: ".")
+    }
+
+    private static func append(
+        _ value: String,
+        to key: String,
+        in entries: inout [MarkdownFrontMatterEntry]
+    ) {
+        if let last = entries.indices.last, entries[last].key == key {
+            entries[last] = MarkdownFrontMatterEntry(
+                key: key,
+                value: entries[last].value.isEmpty
+                    ? value
+                    : entries[last].value + ", " + value
+            )
+        } else {
+            entries.append(MarkdownFrontMatterEntry(key: key, value: value))
+        }
+    }
+
+    private static func listItem(_ line: String) -> String? {
+        guard line.hasPrefix("- ") else { return nil }
+        let value = line.dropFirst(2).trimmingCharacters(in: .whitespaces)
+        return value.isEmpty ? nil : unquoted(value)
+    }
+
+    private static func field(_ line: String) -> (key: String, value: String)? {
+        guard let separator = line.firstIndex(of: ":") else { return nil }
+        let key = String(line[..<separator])
+        guard !key.isEmpty,
+              key.count <= maximumKeyLength,
+              key.allSatisfy({ $0.isLetter || $0.isNumber || "_-.".contains($0) }) else {
+            return nil
+        }
+        let value = line[line.index(after: separator)...]
+            .trimmingCharacters(in: .whitespaces)
+        return (key, unquoted(value))
+    }
+
+    private static func unquoted(_ value: String) -> String {
+        guard value.count >= 2,
+              let first = value.first,
+              first == "\"" || first == "'",
+              value.last == first else {
+            return value
+        }
+        return String(value.dropFirst().dropLast())
+    }
+}
+
 nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
+    case frontMatter([MarkdownFrontMatterEntry])
     case heading(level: Int, content: String)
     case paragraph(String)
     case unorderedItem(String)
@@ -1179,7 +1361,7 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
                 .taskItem(_, let content),
                 .quote(let content):
             content
-        case .code, .mermaid, .invalidMermaid, .table, .divider:
+        case .frontMatter, .code, .mermaid, .invalidMermaid, .table, .divider:
             nil
         }
     }
@@ -1207,11 +1389,37 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
         var fencedLines: [String] = []
         var fenceMarker: String?
         var fenceLanguage: String?
+        // Index of the list item or quote that a following plain line continues
+        // (Markdown lazy continuation). Reset by a blank line or any new block.
+        var continuationIndex: Int?
 
         func flushParagraph() {
             guard !paragraph.isEmpty else { return }
             blocks.append(.paragraph(paragraph.joined(separator: " ")))
             paragraph.removeAll(keepingCapacity: true)
+        }
+
+        func appendContinuation(_ text: String, at index: Int) -> Bool {
+            guard blocks.indices.contains(index), !text.isEmpty else { return false }
+            switch blocks[index] {
+            case .unorderedItem(let content):
+                blocks[index] = .unorderedItem(joined(content, text))
+            case .orderedItem(let number, let content):
+                blocks[index] = .orderedItem(
+                    number: number,
+                    content: joined(content, text)
+                )
+            case .taskItem(let isCompleted, let content):
+                blocks[index] = .taskItem(
+                    isCompleted: isCompleted,
+                    content: joined(content, text)
+                )
+            case .quote(let content):
+                blocks[index] = .quote(joined(content, text))
+            default:
+                return false
+            }
+            return true
         }
 
         func flushFence(isClosed: Bool) {
@@ -1240,6 +1448,10 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
 
         let lines = source.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var lineIndex = 0
+        if let matter = MarkdownFrontMatterPolicy.parse(lines) {
+            blocks.append(.frontMatter(matter.entries))
+            lineIndex = matter.endIndex
+        }
         while lineIndex < lines.count {
             let line = lines[lineIndex]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -1256,6 +1468,7 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
 
             if let opening = fenceOpening(trimmed) {
                 flushParagraph()
+                continuationIndex = nil
                 fenceMarker = opening.marker
                 fenceLanguage = opening.language
                 lineIndex += 1
@@ -1275,11 +1488,13 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
                     lineIndex += 1
                 }
                 blocks.append(.table(headers: headers, rows: rows))
+                continuationIndex = nil
                 continue
             }
 
             if trimmed.isEmpty {
                 flushParagraph()
+                continuationIndex = nil
                 lineIndex += 1
                 continue
             }
@@ -1287,6 +1502,7 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
             if isDivider(trimmed) {
                 flushParagraph()
                 blocks.append(.divider)
+                continuationIndex = nil
                 lineIndex += 1
                 continue
             }
@@ -1294,6 +1510,7 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
             if let heading = heading(from: trimmed) {
                 flushParagraph()
                 blocks.append(.heading(level: heading.level, content: heading.content))
+                continuationIndex = nil
                 lineIndex += 1
                 continue
             }
@@ -1304,6 +1521,7 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
                     isCompleted: task.isCompleted,
                     content: task.content
                 ))
+                continuationIndex = blocks.count - 1
                 lineIndex += 1
                 continue
             }
@@ -1311,6 +1529,7 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
             if let content = prefixedContent(in: trimmed, prefixes: ["- ", "* ", "+ "]) {
                 flushParagraph()
                 blocks.append(.unorderedItem(content))
+                continuationIndex = blocks.count - 1
                 lineIndex += 1
                 continue
             }
@@ -1318,18 +1537,36 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
             if let item = orderedItem(from: trimmed) {
                 flushParagraph()
                 blocks.append(.orderedItem(number: item.number, content: item.content))
+                continuationIndex = blocks.count - 1
                 lineIndex += 1
                 continue
             }
 
             if let content = prefixedContent(in: trimmed, prefixes: ["> "]) {
+                // Consecutive quote lines are one pull-quote, not one block per line.
+                if let index = continuationIndex,
+                   case .quote = blocks[index],
+                   appendContinuation(content, at: index) {
+                    lineIndex += 1
+                    continue
+                }
                 flushParagraph()
                 blocks.append(.quote(content))
+                continuationIndex = blocks.count - 1
+                lineIndex += 1
+                continue
+            }
+
+            // Wrapped source line for the list item or quote right above it.
+            if paragraph.isEmpty,
+               let index = continuationIndex,
+               appendContinuation(trimmed, at: index) {
                 lineIndex += 1
                 continue
             }
 
             paragraph.append(trimmed)
+            continuationIndex = nil
             lineIndex += 1
         }
 
@@ -1338,6 +1575,10 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
         }
         flushParagraph()
         return blocks
+    }
+
+    private static func joined(_ content: String, _ continuation: String) -> String {
+        content.isEmpty ? continuation : content + " " + continuation
     }
 
     private static func fenceOpening(_ line: String) -> (marker: String, language: String?)? {

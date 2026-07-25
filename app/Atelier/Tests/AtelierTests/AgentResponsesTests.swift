@@ -538,6 +538,346 @@ struct AgentResponsesTests {
         ])
     }
 
+    @Test("Markdown joins wrapped list item and quote continuation lines")
+    func markdownLazyContinuation() {
+        let markdown = """
+        - Outline clicks reveal the source heading line in Source mode
+          and the rendered heading character range in Preview mode.
+        - Second item
+        1. Ordered item
+           wrapped tail
+        - [x] Task item
+          wrapped tail
+
+        Separate paragraph.
+        """
+
+        #expect(AgentMarkdownBlock.parse(markdown) == [
+            .unorderedItem(
+                "Outline clicks reveal the source heading line in Source mode "
+                    + "and the rendered heading character range in Preview mode."
+            ),
+            .unorderedItem("Second item"),
+            .orderedItem(number: 1, content: "Ordered item wrapped tail"),
+            .taskItem(isCompleted: true, content: "Task item wrapped tail"),
+            .paragraph("Separate paragraph.")
+        ])
+
+        let quoted = """
+        > First quote line
+        > second quote line
+        lazy tail
+
+        After.
+        """
+        #expect(AgentMarkdownBlock.parse(quoted) == [
+            .quote("First quote line second quote line lazy tail"),
+            .paragraph("After.")
+        ])
+
+        let interrupted = """
+        - Item
+        ## Heading
+        Plain line
+        """
+        #expect(AgentMarkdownBlock.parse(interrupted) == [
+            .unorderedItem("Item"),
+            .heading(level: 2, content: "Heading"),
+            .paragraph("Plain line")
+        ])
+    }
+
+    @Test("Markdown reads leading front matter as one metadata block")
+    func markdownFrontMatter() {
+        let markdown = """
+        ---
+        name: atelier-preview
+        description: "Editorial Markdown surface"
+        metadata:
+          type: project
+          tags:
+            - macos
+            - swiftui
+        ---
+
+        # Title
+
+        Body.
+        """
+
+        #expect(AgentMarkdownBlock.parse(markdown) == [
+            .frontMatter([
+                MarkdownFrontMatterEntry(key: "name", value: "atelier-preview"),
+                MarkdownFrontMatterEntry(
+                    key: "description",
+                    value: "Editorial Markdown surface"
+                ),
+                MarkdownFrontMatterEntry(
+                    key: "metadata.type",
+                    value: "project"
+                ),
+                MarkdownFrontMatterEntry(
+                    key: "metadata.tags",
+                    value: "macos, swiftui"
+                )
+            ]),
+            .heading(level: 1, content: "Title"),
+            .paragraph("Body.")
+        ])
+    }
+
+    @Test("Markdown keeps dividers when leading front matter is not metadata")
+    func markdownFrontMatterFallback() {
+        let unclosed = """
+        ---
+        name: atelier
+        """
+        #expect(AgentMarkdownBlock.parse(unclosed) == [
+            .divider,
+            .paragraph("name: atelier")
+        ])
+
+        let prose = """
+        ---
+        Plain divider then prose.
+        ---
+        """
+        #expect(AgentMarkdownBlock.parse(prose) == [
+            .divider,
+            .paragraph("Plain divider then prose."),
+            .divider
+        ])
+
+        let midDocument = """
+        # Title
+
+        ---
+
+        name: not front matter
+        """
+        #expect(AgentMarkdownBlock.parse(midDocument) == [
+            .heading(level: 1, content: "Title"),
+            .divider,
+            .paragraph("name: not front matter")
+        ])
+    }
+
+    @Test("Markdown document type policy marks only a leading H1 lede paragraph")
+    func markdownLedePolicy() {
+        let withLede: [AgentMarkdownBlock] = [
+            .heading(level: 1, content: "Title"),
+            .paragraph("Opening."),
+            .paragraph("Second.")
+        ]
+        #expect(MarkdownDocumentTypePolicy.hasLedeParagraph(blocks: withLede))
+
+        #expect(!MarkdownDocumentTypePolicy.hasLedeParagraph(blocks: [
+            .heading(level: 2, content: "Section"),
+            .paragraph("Opening.")
+        ]))
+        #expect(!MarkdownDocumentTypePolicy.hasLedeParagraph(blocks: [
+            .heading(level: 1, content: "Title"),
+            .unorderedItem("Item")
+        ]))
+        #expect(!MarkdownDocumentTypePolicy.hasLedeParagraph(blocks: [
+            .heading(level: 1, content: "Title")
+        ]))
+    }
+
+    @Test("Markdown table cells wrap by character only for long unbroken tokens")
+    func markdownTableCellWrapPolicy() {
+        #expect(
+            MarkdownTableCellPolicy.wrapsByCharacter(
+                "app/Atelier/Sources/Atelier/Editor/FilePreview.swift"
+            )
+        )
+        #expect(!MarkdownTableCellPolicy.wrapsByCharacter("Short cell value"))
+        #expect(!MarkdownTableCellPolicy.wrapsByCharacter(""))
+        #expect(
+            !MarkdownTableCellPolicy.wrapsByCharacter(
+                "many small words stay word wrapped in the column"
+            )
+        )
+    }
+
+    @Test("Native Markdown draws an H1 accent lead plus hairline across the measure")
+    func nativeMarkdownHeadingRule() {
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: "# Title"),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        #expect(
+            (
+                rendered.attributedString.attribute(
+                    .atelierHeadingRule,
+                    at: 0,
+                    effectiveRange: nil
+                ) as? NSNumber
+            )?.intValue == 1
+        )
+        #expect(
+            rendered.attributedString.attribute(
+                .underlineStyle,
+                at: 0,
+                effectiveRange: nil
+            ) == nil
+        )
+
+        let measure: CGFloat = 300
+        let storage = NSTextStorage(attributedString: rendered.attributedString)
+        let layoutManager = MarkdownPreviewLayoutManager(metrics: .current)
+        storage.addLayoutManager(layoutManager)
+        let textContainer = NSTextContainer(
+            containerSize: NSSize(width: measure, height: 200)
+        )
+        textContainer.lineFragmentPadding = 0
+        layoutManager.addTextContainer(textContainer)
+        layoutManager.ensureLayout(for: textContainer)
+        let glyphRange = layoutManager.glyphRange(for: textContainer)
+
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(measure),
+            pixelsHigh: 200,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), let graphics = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            Issue.record("Expected a bitmap context for heading-rule rendering")
+            return
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphics
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: measure, height: 200).fill()
+        // Decorations only: glyphs stay unpainted so every opaque pixel is the rule.
+        NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+            layoutManager.drawBackground(forGlyphRange: glyphRange, at: .zero)
+        }
+        graphics.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+
+        var warm = NSRect.null
+        var neutral = NSRect.null
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                // The hairline is a half-point fill, so it lands as a partial alpha row.
+                guard let color = bitmap.colorAt(x: x, y: y)?
+                    .usingColorSpace(.sRGB),
+                      color.alphaComponent > 0.15 else {
+                    continue
+                }
+                let pixel = NSRect(x: x, y: y, width: 1, height: 1)
+                if color.redComponent - color.blueComponent > 0.2 {
+                    warm = warm.union(pixel)
+                } else {
+                    neutral = neutral.union(pixel)
+                }
+            }
+        }
+        guard !warm.isNull, !neutral.isNull else {
+            Issue.record("Expected an accent lead segment and a hairline")
+            return
+        }
+        #expect(warm.minX <= 1)
+        #expect(warm.maxX <= AtelierMetrics.space2XL + 1)
+        #expect(neutral.minX >= warm.maxX - 1)
+        #expect(neutral.maxX >= measure - 2)
+        #expect(warm.height <= 2)
+        #expect(neutral.height <= 2)
+    }
+
+    @Test("Native Markdown dims and strikes completed task items")
+    func nativeMarkdownTaskItemStyling() {
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(
+                source: "- [x] Done\n- [ ] Open"
+            ),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let text = rendered.attributedString.string as NSString
+        let doneRange = text.range(of: "Done")
+        let openRange = text.range(of: "Open")
+        #expect(doneRange.location != NSNotFound)
+        #expect(openRange.location != NSNotFound)
+        guard doneRange.location != NSNotFound,
+              openRange.location != NSNotFound else { return }
+
+        #expect(
+            (
+                rendered.attributedString.attribute(
+                    .strikethroughStyle,
+                    at: doneRange.location,
+                    effectiveRange: nil
+                ) as? NSNumber
+            )?.intValue == NSUnderlineStyle.single.rawValue
+        )
+        #expect(
+            rendered.attributedString.attribute(
+                .strikethroughStyle,
+                at: openRange.location,
+                effectiveRange: nil
+            ) == nil
+        )
+        #expect(
+            rendered.attributedString.attribute(
+                .foregroundColor,
+                at: doneRange.location,
+                effectiveRange: nil
+            ) as? NSColor == AppKitThemeAdapter.secondary
+        )
+
+        let paragraph = rendered.attributedString.attribute(
+            .paragraphStyle,
+            at: doneRange.location,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        #expect(paragraph?.tabStops.first?.location == AtelierMetrics.spaceXL)
+        #expect(paragraph?.headIndent == AtelierMetrics.spaceXL)
+    }
+
+    @Test("Native Markdown renders front matter keys and values in order")
+    func nativeMarkdownFrontMatterCard() {
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(
+                source: """
+                ---
+                name: preview
+                type: project
+                ---
+
+                # Title
+                """
+            ),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+
+        #expect(
+            rendered.attributedString.string
+                == "name\npreview\ntype\nproject\nTitle\n"
+        )
+        let text = rendered.attributedString.string as NSString
+        let keyRange = text.range(of: "name")
+        #expect(
+            rendered.attributedString.attribute(
+                .foregroundColor,
+                at: keyRange.location,
+                effectiveRange: nil
+            ) as? NSColor == AppKitThemeAdapter.accent
+        )
+        #expect(rendered.headings.count == 1)
+    }
+
     @Test("Markdown outline lists heading anchors in document order")
     func markdownOutline() {
         let markdown = """
@@ -960,18 +1300,18 @@ struct AgentResponsesTests {
     func nativeMarkdownInlineCodePadding() {
         let rendered = MarkdownAttributedDocumentBuilder.build(
             document: ParsedMarkdownDocument(
-                source: "A`code`B"
+                source: "A`dpq`B"
             ),
             scale: 1,
             displayScale: 2,
             usesDarkAppearance: false
         )
         let renderedText = rendered.attributedString.string as NSString
-        let codeRange = renderedText.range(of: "code")
+        let codeRange = renderedText.range(of: "dpq")
         #expect(codeRange.location != NSNotFound)
         guard codeRange.location != NSNotFound else { return }
 
-        #expect(rendered.attributedString.string == "AcodeB\n")
+        #expect(rendered.attributedString.string == "AdpqB\n")
         #expect(
             rendered.attributedString.attribute(
                 .backgroundColor,
@@ -1017,8 +1357,14 @@ struct AgentResponsesTests {
         )
         let storage = NSTextStorage(attributedString: mutable)
         let layoutManager = MarkdownPreviewLayoutManager(
-            inlineCodePadding: NSSize(width: 8, height: 4),
-            inlineCodeHorizontalReservation: 12
+            metrics: MarkdownPreviewDecorationMetrics(
+                inlineCodePadding: NSSize(width: 8, height: 4),
+                inlineCodeHorizontalReservation: 12,
+                headingRuleThickness: 1.5,
+                headingRulePrimaryLead: 32,
+                headingRuleSecondaryLead: 16,
+                hairline: 0.5
+            )
         )
         storage.addLayoutManager(layoutManager)
         let textContainer = NSTextContainer(
@@ -1071,6 +1417,16 @@ struct AgentResponsesTests {
         NSGraphicsContext.current = graphics
         NSColor.clear.setFill()
         NSRect(x: 0, y: 0, width: 200, height: 100).fill()
+        // TextKit lays out in a flipped space like NSTextView. Flip the CTM and
+        // hand TextKit a context that reports `flipped`, so glyphs and
+        // decorations land in the same vertical space as the app.
+        graphics.cgContext.translateBy(x: 0, y: 100)
+        graphics.cgContext.scaleBy(x: 1, y: -1)
+        let flippedContext = NSGraphicsContext(
+            cgContext: graphics.cgContext,
+            flipped: true
+        )
+        NSGraphicsContext.current = flippedContext
         layoutManager.drawBackground(
             forGlyphRange: fullGlyphRange,
             at: drawOrigin
@@ -1079,7 +1435,7 @@ struct AgentResponsesTests {
             forGlyphRange: fullGlyphRange,
             at: drawOrigin
         )
-        graphics.flushGraphics()
+        flippedContext.flushGraphics()
         NSGraphicsContext.restoreGraphicsState()
 
         var redBounds = NSRect.null
@@ -1139,7 +1495,16 @@ struct AgentResponsesTests {
         #expect(abs(leftPad - rightPad) <= 2)
         #expect(leftPad >= 4)
         #expect(rightPad >= 4)
-        #expect(redBounds.height >= codeLayoutBounds.height + 6)
+        // Vertical padding must read the same above and below the text. The line
+        // fragment carries the paragraph's lineSpacing below the glyphs, so a
+        // fragment-derived fill would sit high with a fat bottom gap.
+        let topPad = codeInk.minY - redBounds.minY
+        let bottomPad = redBounds.maxY - codeInk.maxY
+        #expect(topPad >= 3)
+        #expect(bottomPad >= 3)
+        // Slack differs only by the font box: ascender sits above cap height.
+        #expect(abs(topPad - bottomPad) <= 3)
+        #expect(redBounds.height < codeLayoutBounds.height + 2 * 4)
         #expect(leftTextMaxX != nil)
         #expect(rightTextMinX != nil)
         if let leftTextMaxX, let rightTextMinX {
