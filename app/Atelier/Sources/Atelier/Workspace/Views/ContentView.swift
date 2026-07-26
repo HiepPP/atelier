@@ -175,6 +175,8 @@ nonisolated struct WorkspacePanelPresentation: Equatable, Sendable {
 final class WorkspaceChromeModel {
     var panels = WorkspacePanelPresentation.initial(for: .standard)
     var currentLayoutMode = WorkspaceLayoutMode.standard
+    var selectedSidebarTab = WorkspaceSidebarTab.explorer
+    var agentResponseOverlayMode = AgentResponseOverlayMode.half
     var isProjectMenuPresented = false
     var sidebarAnimationRequestID = 0
     var inspectorAnimationRequestID = 0
@@ -183,6 +185,7 @@ final class WorkspaceChromeModel {
     private var projectMenuTransitionID = 0
     private var responderBeforeProjectMenu: NSResponder?
     private var responderBeforeInspector: NSResponder?
+    private var responderBeforeAgentResponses: NSResponder?
 
     func applyInitialLayout(_ layout: WorkspaceLayoutMode) {
         guard !hasAppliedInitialLayout else { return }
@@ -217,6 +220,51 @@ final class WorkspaceChromeModel {
     func toggleSidebar() {
         sidebarAnimationRequestID += 1
         panels = panels.togglingSidebar(layout: currentLayoutMode)
+    }
+
+    func showSidebarTab(_ tab: WorkspaceSidebarTab) {
+        selectedSidebarTab = tab
+        guard currentLayoutMode.docksSidebar, !panels.showsSidebar else { return }
+        toggleSidebar()
+    }
+
+    func toggleAgentResponses(
+        session: WorkspaceSession,
+        windowController: WindowController
+    ) {
+        if session.isAgentSidecarPresented {
+            closeAgentResponses(session: session, windowController: windowController)
+        } else {
+            openAgentResponses(session: session, windowController: windowController)
+        }
+    }
+
+    func openAgentResponses(
+        session: WorkspaceSession,
+        windowController: WindowController
+    ) {
+        guard !session.isAgentSidecarPresented else { return }
+        responderBeforeAgentResponses = windowController.currentFirstResponder()
+        agentResponseOverlayMode = .half
+        session.openAgentSidecar()
+    }
+
+    func closeAgentResponses(
+        session: WorkspaceSession,
+        windowController: WindowController
+    ) {
+        guard session.isAgentSidecarPresented else { return }
+        let responder = responderBeforeAgentResponses
+        responderBeforeAgentResponses = nil
+        session.closeAgentSidecar()
+        Task { @MainActor in
+            await Task.yield()
+            windowController.restoreFirstResponder(responder)
+        }
+    }
+
+    func toggleAgentResponseOverlayMode() {
+        agentResponseOverlayMode = agentResponseOverlayMode == .full ? .half : .full
     }
 
     func updateFocusMode(_ isFocused: Bool) {
@@ -652,8 +700,6 @@ struct WorkspaceView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fileTreeCreationRequest: FileTreeCreationRequest?
     @State private var fileTreeTargetDirectory: URL?
-    @State private var responderBeforeAgentPreview: NSResponder?
-    @State private var selectedSidebarTab = WorkspaceSidebarTab.explorer
     @State private var sidebarTabFrames: [WorkspaceSidebarTab: CGRect] = [:]
 
     var body: some View {
@@ -784,8 +830,10 @@ struct WorkspaceView: View {
             agentResponses: session.agentResponses,
             isWorkspaceActive: isActive,
             isAgentSidecarPresented: session.isAgentSidecarPresented,
+            agentResponseOverlayMode: chrome.agentResponseOverlayMode,
             onOpenAgentSidecar: openAgentSidecar,
-            onCloseAgentSidecar: closeAgentSidecar
+            onCloseAgentSidecar: closeAgentSidecar,
+            onToggleAgentResponseOverlayMode: toggleAgentResponseOverlayMode
         )
         .frame(
             minWidth: AtelierMetrics.centerMinWidth,
@@ -817,19 +865,22 @@ struct WorkspaceView: View {
     }
 
     private func openAgentSidecar() {
-        responderBeforeAgentPreview = app.windowController.currentFirstResponder()
-        Task { @MainActor in
-            await Task.yield()
-            session.openAgentSidecar()
-        }
+        chrome.openAgentResponses(
+            session: session,
+            windowController: app.windowController
+        )
     }
 
     private func closeAgentSidecar() {
-        Task { @MainActor in
-            await Task.yield()
-            session.closeAgentSidecar()
-            app.windowController.restoreFirstResponder(responderBeforeAgentPreview)
-            responderBeforeAgentPreview = nil
+        chrome.closeAgentResponses(
+            session: session,
+            windowController: app.windowController
+        )
+    }
+
+    private func toggleAgentResponseOverlayMode() {
+        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
+            chrome.toggleAgentResponseOverlayMode()
         }
     }
 
@@ -867,7 +918,7 @@ struct WorkspaceView: View {
     private var workspaceSidebar: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .topLeading) {
-                if let frame = sidebarTabFrames[selectedSidebarTab]?.insetBy(
+                if let frame = sidebarTabFrames[chrome.selectedSidebarTab]?.insetBy(
                     dx: AtelierMetrics.spaceXS,
                     dy: 4
                 ) {
@@ -882,10 +933,10 @@ struct WorkspaceView: View {
                     ForEach(WorkspaceSidebarTab.allCases) { tab in
                         WorkspaceSidebarTabButton(
                             tab: tab,
-                            isSelected: selectedSidebarTab == tab,
+                            isSelected: chrome.selectedSidebarTab == tab,
                             gitModel: gitModel
                         ) {
-                            selectedSidebarTab = tab
+                            chrome.selectedSidebarTab = tab
                         }
                         .background {
                             GeometryReader { proxy in
@@ -926,22 +977,22 @@ struct WorkspaceView: View {
 
             ZStack {
                 explorerContent
-                    .opacity(selectedSidebarTab == .explorer ? 1 : 0)
-                    .allowsHitTesting(selectedSidebarTab == .explorer)
-                    .disabled(selectedSidebarTab != .explorer)
-                    .accessibilityHidden(selectedSidebarTab != .explorer)
+                    .opacity(chrome.selectedSidebarTab == .explorer ? 1 : 0)
+                    .allowsHitTesting(chrome.selectedSidebarTab == .explorer)
+                    .disabled(chrome.selectedSidebarTab != .explorer)
+                    .accessibilityHidden(chrome.selectedSidebarTab != .explorer)
 
                 ChangesView(
                     model: gitModel,
                     selectedDiff: terminalTabs.selectedGitDiffSelection,
                     onOpenDiff: terminalTabs.openGitDiff,
-                    isActive: selectedSidebarTab == .sourceControl,
+                    isActive: chrome.selectedSidebarTab == .sourceControl,
                     showsPanelHeader: false
                 )
-                .opacity(selectedSidebarTab == .sourceControl ? 1 : 0)
-                .allowsHitTesting(selectedSidebarTab == .sourceControl)
-                .disabled(selectedSidebarTab != .sourceControl)
-                .accessibilityHidden(selectedSidebarTab != .sourceControl)
+                .opacity(chrome.selectedSidebarTab == .sourceControl ? 1 : 0)
+                .allowsHitTesting(chrome.selectedSidebarTab == .sourceControl)
+                .disabled(chrome.selectedSidebarTab != .sourceControl)
+                .accessibilityHidden(chrome.selectedSidebarTab != .sourceControl)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
@@ -954,7 +1005,7 @@ struct WorkspaceView: View {
         HStack(spacing: 2) {
             Spacer(minLength: 0)
 
-            switch selectedSidebarTab {
+            switch chrome.selectedSidebarTab {
             case .explorer:
                 Group {
                     Button {

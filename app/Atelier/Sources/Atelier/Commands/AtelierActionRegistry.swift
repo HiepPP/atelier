@@ -12,6 +12,9 @@ nonisolated enum AtelierActionID: String, CaseIterable, Identifiable, Sendable {
     case navigateForward
     case reopenClosedTab
     case openGemma
+    case showExplorer
+    case showGit
+    case toggleAgentResponses
     case toggleLeftPanel
     case toggleWorkspacePanels
     case toggleRightPanel
@@ -39,6 +42,7 @@ nonisolated struct AtelierActionContext: Equatable, Sendable {
     let canNavigateBack: Bool
     let canNavigateForward: Bool
     let canReopenClosedTab: Bool
+    let canShowSidebarTab: Bool
     let canToggleLeftPanel: Bool
     let canToggleWorkspacePanels: Bool
     let canToggleRightPanel: Bool
@@ -60,6 +64,9 @@ struct AtelierActionHandlers {
     let navigateForward: () -> Void
     let reopenClosedTab: () -> Void
     let openGemma: () -> Void
+    let showExplorer: () -> Void
+    let showGit: () -> Void
+    let toggleAgentResponses: () -> Void
     let toggleLeftPanel: () -> Void
     let toggleWorkspacePanels: () -> Void
     let toggleRightPanel: () -> Void
@@ -69,7 +76,18 @@ struct AtelierActionHandlers {
     let toggleFocusMode: () -> Void
 
     static func live(model: AppModel) -> AtelierActionHandlers {
-        AtelierActionHandlers(
+        func showSidebarTab(_ tab: WorkspaceSidebarTab) {
+            guard let workspace = model.workspace,
+                  workspace.chrome.currentLayoutMode.docksSidebar else { return }
+            workspace.chrome.selectedSidebarTab = tab
+            if model.zoom.isFocusMode {
+                model.zoom.toggleFocusMode()
+            } else {
+                workspace.chrome.showSidebarTab(tab)
+            }
+        }
+
+        return AtelierActionHandlers(
             openFolder: model.chooseWorkspace,
             closeWorkspace: model.closeWorkspace,
             nextWorkspace: model.selectNextWorkspace,
@@ -81,6 +99,15 @@ struct AtelierActionHandlers {
             navigateForward: { model.workspace?.terminalTabs.navigateForward() },
             reopenClosedTab: { model.workspace?.terminalTabs.reopenClosedTab() },
             openGemma: { model.workspace?.openGemma() },
+            showExplorer: { showSidebarTab(.explorer) },
+            showGit: { showSidebarTab(.sourceControl) },
+            toggleAgentResponses: {
+                guard let workspace = model.workspace else { return }
+                workspace.chrome.toggleAgentResponses(
+                    session: workspace,
+                    windowController: model.windowController
+                )
+            },
             toggleLeftPanel: {
                 guard let chrome = model.workspace?.chrome,
                       !model.zoom.isFocusMode,
@@ -195,6 +222,27 @@ nonisolated enum AtelierActionRegistry {
             shortcutLabel: nil
         ),
         AtelierActionDescriptor(
+            id: .showExplorer,
+            title: "Show Explorer",
+            category: "View",
+            systemImage: "folder",
+            shortcutLabel: "Command-E"
+        ),
+        AtelierActionDescriptor(
+            id: .showGit,
+            title: "Show Git",
+            category: "View",
+            systemImage: "arrow.triangle.branch",
+            shortcutLabel: "Command-R"
+        ),
+        AtelierActionDescriptor(
+            id: .toggleAgentResponses,
+            title: "Toggle Agent Responses",
+            category: "View",
+            systemImage: "text.bubble",
+            shortcutLabel: "Command-Q"
+        ),
+        AtelierActionDescriptor(
             id: .toggleLeftPanel,
             title: "Toggle Left Panel",
             category: "View",
@@ -274,7 +322,11 @@ nonisolated enum AtelierActionRegistry {
             context.canCloseWorkspace
         case .nextWorkspace:
             context.canCycleWorkspaces
-        case .newTerminal, .newClaudeCodeTerminal, .newCodexTerminal, .openGemma:
+        case .newTerminal,
+             .newClaudeCodeTerminal,
+             .newCodexTerminal,
+             .openGemma,
+             .toggleAgentResponses:
             context.hasWorkspace
         case .closeTab:
             context.canCloseTab
@@ -284,6 +336,8 @@ nonisolated enum AtelierActionRegistry {
             context.canNavigateForward
         case .reopenClosedTab:
             context.canReopenClosedTab
+        case .showExplorer, .showGit:
+            context.canShowSidebarTab
         case .toggleLeftPanel:
             context.canToggleLeftPanel
         case .toggleWorkspacePanels:
@@ -307,6 +361,7 @@ nonisolated enum AtelierActionRegistry {
             canNavigateBack: model.workspace?.terminalTabs.canNavigateBack == true,
             canNavigateForward: model.workspace?.terminalTabs.canNavigateForward == true,
             canReopenClosedTab: model.workspace?.terminalTabs.canReopenClosedTab == true,
+            canShowSidebarTab: model.workspace?.chrome.currentLayoutMode.docksSidebar == true,
             canToggleLeftPanel: model.workspace.map { workspace in
                 !model.zoom.isFocusMode && workspace.chrome.currentLayoutMode.docksSidebar
             } ?? false,
@@ -350,6 +405,12 @@ nonisolated enum AtelierActionRegistry {
             handlers.reopenClosedTab()
         case .openGemma:
             handlers.openGemma()
+        case .showExplorer:
+            handlers.showExplorer()
+        case .showGit:
+            handlers.showGit()
+        case .toggleAgentResponses:
+            handlers.toggleAgentResponses()
         case .toggleLeftPanel:
             handlers.toggleLeftPanel()
         case .toggleWorkspacePanels:

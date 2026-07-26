@@ -85,6 +85,7 @@ struct AtelierPalettePresentationTests {
             canNavigateBack: false,
             canNavigateForward: true,
             canReopenClosedTab: false,
+            canShowSidebarTab: hasWorkspace,
             canToggleLeftPanel: hasWorkspace,
             canToggleWorkspacePanels: hasWorkspace,
             canToggleRightPanel: hasWorkspace,

@@ -759,8 +759,8 @@ Persistence boundaries:
   when the visible rail-pixel value changes. Do not animate passive updates or rebuild the document.
 - Put the Source/Preview toggle in the trailing editor action group. Keep find and word-wrap
   commands scoped to Source mode.
-- Use `Cmd-E` to toggle Source and Preview for the active `.md` or `.html` file. Keep its existing
-  Use Selection for Find behavior for other text files.
+- Use `Cmd-D` to toggle Source and Preview for the active `.md` or `.html` file. Disable it for
+  other file types.
 - With a non-empty editor selection, `Cmd-Shift-C` inserts
   `@<workspace-relative-path>:<first-line>~<last-line> ` into the most recently selected terminal
   and switches to that terminal. Keep exactly one trailing space. Disable the command when no
@@ -842,9 +842,9 @@ The five background features, all read-only and cancellable:
 - Use cards for tool activity and structured results.
 - Present agent responses above the complete center work surface at every window width. The
   overlay never becomes a split peer or consumes terminal, editor, diff, or Gemma layout space.
-- Open the response overlay at the full center-content width below the tab strip.
+- Open the response overlay at a trailing half-width below the tab strip.
 - Provide one header control that toggles between full width and a trailing half-width mode.
-- Opening the overlay from the Response action always restores full-width mode.
+- Opening the overlay from the Response action or `Cmd-Q` always restores half-width mode.
 - Restore at most 100 newest final responses for the current workspace at startup.
 - Treat restored responses as read, then count only newly monitored responses as unread.
 - Start transcript restore only when a workspace first becomes active. Keep live monitoring
@@ -880,7 +880,10 @@ The five background features, all read-only and cancellable:
 | `Cmd-Option-F` | Find and replace in active text file |
 | `Cmd-G` | Next file-search match |
 | `Cmd-Shift-G` | Previous file-search match |
-| `Cmd-E` | Toggle Source and Preview for the active Markdown or HTML file |
+| `Cmd-E` | Show the Explorer sidebar tab |
+| `Cmd-R` | Show the Git sidebar tab |
+| `Cmd-Q` | Toggle Agent Responses at the default half width |
+| `Cmd-D` | Toggle Source and Preview for the active Markdown or HTML file |
 | `Cmd-Shift-C` | Insert selected editor line reference into terminal |
 | `Cmd-W` | Close active closable center tab |
 | `Ctrl--` | Back |
@@ -902,6 +905,7 @@ Rules:
 - `Cmd-W` never closes the workspace window. With no active tab or only the final terminal active, it does nothing.
 - `Cmd-W` asks for confirmation only when Claude Code or Codex is the detected foreground agent.
 - Keep Reopen Closed Tab available through menus and the command palette without a default shortcut.
+- Keep Quit available in the application menu without a default shortcut. Reserve `Cmd-Q` for Agent Responses.
 - Show live enabled state in every action surface.
 - Do not reuse an existing shortcut for a new action.
 - Keep shortcut labels monospaced in the command palette.

@@ -21,6 +21,9 @@ struct AtelierActionRegistryTests {
             .navigateForward,
             .reopenClosedTab,
             .openGemma,
+            .showExplorer,
+            .showGit,
+            .toggleAgentResponses,
             .toggleLeftPanel,
             .toggleWorkspacePanels,
             .toggleRightPanel,
@@ -31,6 +34,18 @@ struct AtelierActionRegistryTests {
         ])
         #expect(Set(ids).count == ids.count)
         #expect(AtelierActionRegistry.descriptor(for: .reopenClosedTab).shortcutLabel == nil)
+        #expect(
+            AtelierActionRegistry.descriptor(for: .showExplorer).shortcutLabel
+                == "Command-E"
+        )
+        #expect(
+            AtelierActionRegistry.descriptor(for: .showGit).shortcutLabel
+                == "Command-R"
+        )
+        #expect(
+            AtelierActionRegistry.descriptor(for: .toggleAgentResponses).shortcutLabel
+                == "Command-Q"
+        )
         #expect(
             AtelierActionRegistry.descriptor(for: .toggleLeftPanel).shortcutLabel
                 == "Command-Shift-E"
@@ -51,6 +66,7 @@ struct AtelierActionRegistryTests {
             canNavigateBack: false,
             canNavigateForward: true,
             canReopenClosedTab: false,
+            canShowSidebarTab: false,
             canToggleLeftPanel: false,
             canToggleWorkspacePanels: false,
             canToggleRightPanel: false,
@@ -69,6 +85,9 @@ struct AtelierActionRegistryTests {
         #expect(AtelierActionRegistry.isEnabled(.navigateForward, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.reopenClosedTab, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.openGemma, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.showExplorer, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.showGit, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.toggleAgentResponses, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleLeftPanel, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleWorkspacePanels, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleRightPanel, context: empty))
@@ -85,6 +104,7 @@ struct AtelierActionRegistryTests {
             canNavigateBack: false,
             canNavigateForward: false,
             canReopenClosedTab: false,
+            canShowSidebarTab: false,
             canToggleLeftPanel: false,
             canToggleWorkspacePanels: false,
             canToggleRightPanel: false,
@@ -105,6 +125,9 @@ struct AtelierActionRegistryTests {
 
         #expect(AtelierActionRegistry.title(for: .toggleFocusMode, context: inactive) == "Enter Focus Mode")
         #expect(AtelierActionRegistry.title(for: .toggleFocusMode, context: active) == "Exit Focus Mode")
+        #expect(AtelierActionRegistry.isEnabled(.showExplorer, context: active))
+        #expect(AtelierActionRegistry.isEnabled(.showGit, context: active))
+        #expect(!AtelierActionRegistry.isEnabled(.toggleLeftPanel, context: active))
     }
 
     @Test("Dispatcher routes every action to its matching handler")
@@ -122,6 +145,9 @@ struct AtelierActionRegistryTests {
             navigateForward: { recorded.append(.navigateForward) },
             reopenClosedTab: { recorded.append(.reopenClosedTab) },
             openGemma: { recorded.append(.openGemma) },
+            showExplorer: { recorded.append(.showExplorer) },
+            showGit: { recorded.append(.showGit) },
+            toggleAgentResponses: { recorded.append(.toggleAgentResponses) },
             toggleLeftPanel: { recorded.append(.toggleLeftPanel) },
             toggleWorkspacePanels: { recorded.append(.toggleWorkspacePanels) },
             toggleRightPanel: { recorded.append(.toggleRightPanel) },
@@ -171,6 +197,53 @@ struct AtelierActionRegistryTests {
         #expect(second.terminalTabs.terminalCount == 2)
     }
 
+    @Test("Sidebar and response actions update active workspace chrome")
+    func workspaceChromeActions() throws {
+        let root = temporaryDirectory("workspace-chrome")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let model = AppModel(environment: AppEnvironment(
+            persistence: WorkspacePersistenceService(
+                fileURL: temporaryDirectory("workspace-chrome-state")
+                    .appendingPathComponent("state.json")
+            ),
+            makeWorkspaceAccess: { WorkspaceAccessController() },
+            openFolderPanel: OpenFolderPanel(),
+            windowController: WindowController()
+        ))
+        defer { model.stop() }
+
+        let state = WorkspaceState(path: root.path, bookmark: nil, lastOpenedAt: .now)
+        try model.openWorkspace(state)
+        let workspace = try #require(model.workspace)
+
+        workspace.chrome.toggleSidebar()
+        #expect(!workspace.chrome.panels.showsSidebar)
+
+        AtelierActionRegistry.perform(.showGit, model: model)
+        #expect(workspace.chrome.selectedSidebarTab == .sourceControl)
+        #expect(workspace.chrome.panels.showsSidebar)
+
+        model.zoom.toggleFocusMode()
+        #expect(model.zoom.isFocusMode)
+        AtelierActionRegistry.perform(.showExplorer, model: model)
+        #expect(!model.zoom.isFocusMode)
+        #expect(workspace.chrome.selectedSidebarTab == .explorer)
+        #expect(workspace.chrome.panels.showsSidebar)
+
+        AtelierActionRegistry.perform(.toggleAgentResponses, model: model)
+        #expect(workspace.isAgentSidecarPresented)
+        #expect(workspace.chrome.agentResponseOverlayMode == .half)
+
+        workspace.chrome.toggleAgentResponseOverlayMode()
+        #expect(workspace.chrome.agentResponseOverlayMode == .full)
+
+        AtelierActionRegistry.perform(.toggleAgentResponses, model: model)
+        #expect(!workspace.isAgentSidecarPresented)
+        AtelierActionRegistry.perform(.toggleAgentResponses, model: model)
+        #expect(workspace.isAgentSidecarPresented)
+        #expect(workspace.chrome.agentResponseOverlayMode == .half)
+    }
+
     @Test("Close Workspace removes a selected unavailable catalog item")
     func closeUnavailableWorkspace() throws {
         let model = AppModel(environment: AppEnvironment(
@@ -208,6 +281,7 @@ struct AtelierActionRegistryTests {
             canNavigateBack: true,
             canNavigateForward: true,
             canReopenClosedTab: true,
+            canShowSidebarTab: true,
             canToggleLeftPanel: !isFocusMode,
             canToggleWorkspacePanels: true,
             canToggleRightPanel: !isFocusMode,

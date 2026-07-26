@@ -1090,15 +1090,16 @@ struct AtelierTabCommands: Commands {
             .keyboardShortcut("g", modifiers: [.command, .shift])
             .disabled(!canFindInFile)
 
-            Button(commandETitle) {
-                if let renderedFilePreview {
-                    renderedFilePreview.wrappedValue.toggle()
-                } else {
-                    activeEditor?.performFindAction(.setSearchString)
-                }
+            Button(previewToggleTitle) {
+                renderedFilePreview?.wrappedValue.toggle()
             }
-            .keyboardShortcut("e", modifiers: .command)
-            .disabled(renderedFilePreview == nil && !canFindInFile)
+            .keyboardShortcut("d", modifiers: .command)
+            .disabled(renderedFilePreview == nil)
+
+            Button("Use Selection for Find") {
+                activeEditor?.performFindAction(.setSearchString)
+            }
+            .disabled(!canFindInFile)
         }
 
         CommandGroup(after: .toolbar) {
@@ -1120,8 +1121,8 @@ struct AtelierTabCommands: Commands {
         activeEditor?.canFindInFile == true
     }
 
-    private var commandETitle: String {
-        guard let renderedFilePreview else { return "Use Selection for Find" }
+    private var previewToggleTitle: String {
+        guard let renderedFilePreview else { return "Toggle Source and Preview" }
         return renderedFilePreview.wrappedValue ? "Show Source" : "Show Preview"
     }
 }
@@ -1137,8 +1138,10 @@ struct TerminalTabs: View {
     @Bindable var agentResponses: AgentResponsesModel
     let isWorkspaceActive: Bool
     let isAgentSidecarPresented: Bool
+    let agentResponseOverlayMode: AgentResponseOverlayMode
     let onOpenAgentSidecar: () -> Void
     let onCloseAgentSidecar: () -> Void
+    let onToggleAgentResponseOverlayMode: () -> Void
     @Environment(AtelierZoomModel.self) private var zoom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var renameTargetID: UUID?
@@ -1148,8 +1151,6 @@ struct TerminalTabs: View {
     @State private var hoveredTabID: UUID?
     @State private var renderedPreviewTabIDs: Set<UUID> = []
     @State private var renderedSourceTabIDs: Set<UUID> = []
-    @State private var agentResponseOverlayMode: AgentResponseOverlayMode = .full
-
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
@@ -1608,15 +1609,12 @@ struct TerminalTabs: View {
         if isAgentSidecarPresented {
             onCloseAgentSidecar()
         } else {
-            agentResponseOverlayMode = .full
             onOpenAgentSidecar()
         }
     }
 
     private func toggleAgentResponseOverlayMode() {
-        withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
-            agentResponseOverlayMode = agentResponseOverlayMode == .full ? .half : .full
-        }
+        onToggleAgentResponseOverlayMode()
     }
 
     private func tabBackground(_ tab: CenterTab) -> Color {

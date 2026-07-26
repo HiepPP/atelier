@@ -1,9 +1,16 @@
+import AppKit
 import SwiftUI
 
 struct AppCommands: Commands {
     let model: AppModel
 
     var body: some Commands {
+        CommandGroup(replacing: .appTermination) {
+            Button("Quit Atelier") {
+                NSApplication.shared.terminate(nil)
+            }
+        }
+
         CommandGroup(replacing: .saveItem) {
             Button(title(.closeTab)) {
                 perform(.closeTab)
@@ -90,6 +97,24 @@ struct AppCommands: Commands {
                 perform(.reopenClosedTab)
             }
             .disabled(!isEnabled(.reopenClosedTab))
+
+            Button(title(.showExplorer)) {
+                perform(.showExplorer)
+            }
+            .keyboardShortcut("e", modifiers: .command)
+            .disabled(!isEnabled(.showExplorer))
+
+            Button(title(.showGit)) {
+                perform(.showGit)
+            }
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(!isEnabled(.showGit))
+
+            Button(title(.toggleAgentResponses)) {
+                perform(.toggleAgentResponses)
+            }
+            .keyboardShortcut("q", modifiers: .command)
+            .disabled(!isEnabled(.toggleAgentResponses))
 
             Button(title(.toggleLeftPanel)) {
                 perform(.toggleLeftPanel)
