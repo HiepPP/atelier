@@ -46,11 +46,15 @@ enum AgentMarkdownInlinePolicy {
         let content: String
         let kind: ContentKind
         let showsColorSwatches: Bool
+        let footnoteSignature: String
     }
 
     private static let cacheLimit = 512
     private static let colorTokenExpression = try? NSRegularExpression(
         pattern: "(?<![0-9A-Za-z])#(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{3})(?![0-9A-Za-z])"
+    )
+    private static let footnoteReferenceExpression = try? NSRegularExpression(
+        pattern: "\\[\\^([^\\]\\s]+)\\]"
     )
     private static var cache: [CacheKey: AttributedString] = [:]
     private static var cacheOrder: [CacheKey] = []
@@ -72,12 +76,14 @@ enum AgentMarkdownInlinePolicy {
 
     static func attributedString(
         _ content: String,
-        showsColorSwatches: Bool = false
+        showsColorSwatches: Bool = false,
+        footnoteNumbers: [String: Int] = [:]
     ) -> AttributedString {
         cachedAttributedString(
             content,
             kind: .markdown,
-            showsColorSwatches: showsColorSwatches
+            showsColorSwatches: showsColorSwatches,
+            footnoteNumbers: footnoteNumbers
         )
     }
 
@@ -88,7 +94,8 @@ enum AgentMarkdownInlinePolicy {
         cachedAttributedString(
             content,
             kind: .plain,
-            showsColorSwatches: showsColorSwatches
+            showsColorSwatches: showsColorSwatches,
+            footnoteNumbers: [:]
         )
     }
 
@@ -119,12 +126,18 @@ enum AgentMarkdownInlinePolicy {
     private static func cachedAttributedString(
         _ content: String,
         kind: ContentKind,
-        showsColorSwatches: Bool
+        showsColorSwatches: Bool,
+        footnoteNumbers: [String: Int]
     ) -> AttributedString {
+        let footnoteSignature = footnoteNumbers
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key):\($0.value)" }
+            .joined(separator: "|")
         let key = CacheKey(
             content: content,
             kind: kind,
-            showsColorSwatches: showsColorSwatches
+            showsColorSwatches: showsColorSwatches,
+            footnoteSignature: footnoteSignature
         )
         if let cached = cache[key] {
             return cached
@@ -155,8 +168,41 @@ enum AgentMarkdownInlinePolicy {
         if showsColorSwatches {
             attributed = addingColorSwatches(to: attributed)
         }
+        if !footnoteNumbers.isEmpty {
+            attributed = addingFootnoteReferences(
+                to: attributed,
+                numbers: footnoteNumbers
+            )
+        }
         storeCached(key, attributed)
         return attributed
+    }
+
+    private static func addingFootnoteReferences(
+        to attributed: AttributedString,
+        numbers: [String: Int]
+    ) -> AttributedString {
+        guard let footnoteReferenceExpression else { return attributed }
+        var decorated = attributed
+        let rendered = String(decorated.characters)
+        let fullRange = NSRange(rendered.startIndex..<rendered.endIndex, in: rendered)
+        let matches = footnoteReferenceExpression.matches(in: rendered, range: fullRange)
+
+        for match in matches.reversed() {
+            guard let idRange = Range(match.range(at: 1), in: rendered),
+                  let number = numbers[String(rendered[idRange])],
+                  let sourceRange = Range(match.range, in: rendered),
+                  let lower = AttributedString.Index(sourceRange.lowerBound, within: decorated),
+                  let upper = AttributedString.Index(sourceRange.upperBound, within: decorated) else {
+                continue
+            }
+            var reference = AttributedString(String(number))
+            reference.foregroundColor = AtelierTheme.accent
+            reference.font = .system(size: AtelierTypography.micro, weight: .semibold)
+            reference.baselineOffset = 4
+            decorated.replaceSubrange(lower..<upper, with: reference)
+        }
+        return decorated
     }
 
     private static func color(for token: String) -> Color? {
@@ -226,6 +272,199 @@ nonisolated enum MarkdownQuoteLayout {
     static let barWidth: CGFloat = 3
     static let leadingInset: CGFloat = 5
     static let indent: CGFloat = 20
+}
+
+nonisolated enum MarkdownCalloutKind: String, CaseIterable, Equatable, Sendable {
+    case note = "NOTE"
+    case tip = "TIP"
+    case important = "IMPORTANT"
+    case warning = "WARNING"
+    case caution = "CAUTION"
+
+    var glyph: String {
+        switch self {
+        case .note: "\u{2139}"
+        case .tip: "\u{2726}"
+        case .important: "!"
+        case .warning: "\u{26A0}"
+        case .caution: "\u{25C6}"
+        }
+    }
+
+    @MainActor
+    var color: NSColor {
+        switch self {
+        case .note, .important: AppKitThemeAdapter.accent
+        case .tip: AppKitThemeAdapter.gitAdded
+        case .warning: AppKitThemeAdapter.gitModified
+        case .caution: AppKitThemeAdapter.gitDeleted
+        }
+    }
+
+    @MainActor
+    var swiftUIColor: Color {
+        switch self {
+        case .note, .important: AtelierTheme.accent
+        case .tip: AtelierTheme.gitAdded
+        case .warning: Color(nsColor: AppKitThemeAdapter.gitModified)
+        case .caution: AtelierTheme.gitDeleted
+        }
+    }
+}
+
+nonisolated enum MarkdownColumnAlignment: Equatable, Sendable {
+    case left
+    case center
+    case right
+}
+
+nonisolated struct MarkdownFootnote: Equatable, Sendable {
+    let id: String
+    let number: Int
+    let text: String
+}
+
+nonisolated enum MarkdownFootnotePolicy {
+    private static let definitionExpression = try? NSRegularExpression(
+        pattern: "^\\[\\^([^\\]\\s]+)\\]:\\s*(.+)$"
+    )
+    private static let referenceExpression = try? NSRegularExpression(
+        pattern: "\\[\\^([^\\]\\s]+)\\]"
+    )
+
+    static func definition(from line: String) -> (id: String, text: String)? {
+        guard let definitionExpression else { return nil }
+        let range = NSRange(line.startIndex..<line.endIndex, in: line)
+        guard let match = definitionExpression.firstMatch(in: line, range: range),
+              let idRange = Range(match.range(at: 1), in: line),
+              let textRange = Range(match.range(at: 2), in: line) else {
+            return nil
+        }
+        return (String(line[idRange]), String(line[textRange]))
+    }
+
+    static func notes(
+        in blocks: [AgentMarkdownBlock],
+        definitions: [String: String]
+    ) -> [MarkdownFootnote] {
+        guard let referenceExpression, !definitions.isEmpty else { return [] }
+        var seen: Set<String> = []
+        var ordered: [MarkdownFootnote] = []
+        for block in blocks {
+            let sources: [String]
+            if case .table(let headers, _, let rows) = block {
+                sources = headers + rows.flatMap { $0 }
+            } else if let source = AgentMarkdownBlock.inlineSource(for: block) {
+                sources = [source]
+            } else {
+                sources = []
+            }
+            for source in sources {
+                let range = NSRange(source.startIndex..<source.endIndex, in: source)
+                for match in referenceExpression.matches(in: source, range: range) {
+                    guard let idRange = Range(match.range(at: 1), in: source) else { continue }
+                    let id = String(source[idRange])
+                    guard !seen.contains(id), let text = definitions[id] else { continue }
+                    seen.insert(id)
+                    ordered.append(
+                        MarkdownFootnote(id: id, number: ordered.count + 1, text: text)
+                    )
+                }
+            }
+        }
+        return ordered
+    }
+
+    static func numberMap(in blocks: [AgentMarkdownBlock]) -> [String: Int] {
+        guard let notesBlock = blocks.first(where: {
+            if case .footnotes = $0 { return true }
+            return false
+        }), case .footnotes(let notes) = notesBlock else {
+            return [:]
+        }
+        return Dictionary(uniqueKeysWithValues: notes.map { ($0.id, $0.number) })
+    }
+
+    static func resolvedReferences(
+        in content: String,
+        numbers: [String: Int]
+    ) -> [(sourceRange: NSRange, number: Int)] {
+        guard let referenceExpression, !numbers.isEmpty else { return [] }
+        let range = NSRange(content.startIndex..<content.endIndex, in: content)
+        return referenceExpression.matches(in: content, range: range).compactMap {
+            match in
+            guard let idRange = Range(match.range(at: 1), in: content),
+                  let number = numbers[String(content[idRange])] else {
+                return nil
+            }
+            return (match.range, number)
+        }
+    }
+}
+
+nonisolated enum MarkdownImageFigurePolicy {
+    static func parse(_ line: String) -> (altText: String, urlText: String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("!["),
+              let closeAlt = trimmed.firstIndex(of: "]"),
+              trimmed.index(after: closeAlt) < trimmed.endIndex,
+              trimmed[trimmed.index(after: closeAlt)] == "(",
+              trimmed.last == ")" else {
+            return nil
+        }
+        let altStart = trimmed.index(trimmed.startIndex, offsetBy: 2)
+        let urlStart = trimmed.index(closeAlt, offsetBy: 2)
+        let urlEnd = trimmed.index(before: trimmed.endIndex)
+        let alt = String(trimmed[altStart..<closeAlt])
+        let url = String(trimmed[urlStart..<urlEnd])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else { return nil }
+        return (alt, url)
+    }
+
+    static func localURL(urlText: String, directoryURL: URL?) -> URL? {
+        let trimmed = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if let components = URLComponents(string: trimmed),
+           let scheme = components.scheme,
+           !scheme.isEmpty {
+            guard scheme.lowercased() == "file" else { return nil }
+            return components.url?.standardizedFileURL
+        }
+        let decoded = trimmed.removingPercentEncoding ?? trimmed
+        if decoded.hasPrefix("/") {
+            return URL(fileURLWithPath: decoded).standardizedFileURL
+        }
+        guard let directoryURL else { return nil }
+        return directoryURL
+            .appendingPathComponent(decoded)
+            .standardizedFileURL
+    }
+}
+
+nonisolated enum MarkdownTableAlignmentPolicy {
+    static func numericMajorityColumns(
+        headers: [String],
+        rows: [[String]]
+    ) -> Set<Int> {
+        Set(headers.indices.filter { columnIndex in
+            let values = rows.compactMap { row -> String? in
+                guard row.indices.contains(columnIndex) else { return nil }
+                let value = row[columnIndex].trimmingCharacters(in: .whitespacesAndNewlines)
+                return value.isEmpty ? nil : value
+            }
+            guard !values.isEmpty else { return false }
+            let numericCount = values.filter(isNumeric).count
+            return numericCount * 2 > values.count
+        })
+    }
+
+    private static func isNumeric(_ value: String) -> Bool {
+        let normalized = value
+            .replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "$% "))
+        return Double(normalized) != nil
+    }
 }
 
 /// Shared front-matter card geometry.
@@ -436,6 +675,7 @@ extension EnvironmentValues {
 /// One-shot parse shared by document layout, outline, and block rendering.
 struct ParsedMarkdownDocument: Equatable {
     let source: String
+    let sourceDirectoryURL: URL?
     let blocks: [AgentMarkdownBlock]
     let outline: [MarkdownOutlineEntry]
     /// Pre-parsed inline runs aligned with `blocks` (nil for non-text blocks).
@@ -443,21 +683,16 @@ struct ParsedMarkdownDocument: Equatable {
 
     static let empty = ParsedMarkdownDocument(
         source: "",
+        sourceDirectoryURL: nil,
         blocks: [],
         outline: [],
         inlineRuns: []
     )
 
-    init(source: String) {
+    init(source: String, sourceDirectoryURL: URL? = nil) {
         self.source = source
+        self.sourceDirectoryURL = sourceDirectoryURL
         let blocks = AgentMarkdownBlock.parse(source)
-        self.blocks = blocks
-        self.outline = AgentMarkdownBlock.outline(from: blocks)
-        self.inlineRuns = Self.makeInlineRuns(for: blocks)
-    }
-
-    init(source: String, blocks: [AgentMarkdownBlock]) {
-        self.source = source
         self.blocks = blocks
         self.outline = AgentMarkdownBlock.outline(from: blocks)
         self.inlineRuns = Self.makeInlineRuns(for: blocks)
@@ -465,22 +700,38 @@ struct ParsedMarkdownDocument: Equatable {
 
     init(
         source: String,
+        sourceDirectoryURL: URL? = nil,
+        blocks: [AgentMarkdownBlock]
+    ) {
+        self.source = source
+        self.sourceDirectoryURL = sourceDirectoryURL
+        self.blocks = blocks
+        self.outline = AgentMarkdownBlock.outline(from: blocks)
+        self.inlineRuns = Self.makeInlineRuns(for: blocks)
+    }
+
+    init(
+        source: String,
+        sourceDirectoryURL: URL? = nil,
         blocks: [AgentMarkdownBlock],
         outline: [MarkdownOutlineEntry],
         inlineRuns: [AttributedString?] = []
     ) {
         self.source = source
+        self.sourceDirectoryURL = sourceDirectoryURL
         self.blocks = blocks
         self.outline = outline
         self.inlineRuns = inlineRuns
     }
 
     private static func makeInlineRuns(for blocks: [AgentMarkdownBlock]) -> [AttributedString?] {
-        blocks.map { block in
+        let footnoteNumbers = MarkdownFootnotePolicy.numberMap(in: blocks)
+        return blocks.map { block -> AttributedString? in
             guard let text = AgentMarkdownBlock.inlineSource(for: block) else { return nil }
             return AgentMarkdownInlinePolicy.attributedString(
                 text,
-                showsColorSwatches: true
+                showsColorSwatches: true,
+                footnoteNumbers: footnoteNumbers
             )
         }
     }
@@ -532,16 +783,17 @@ struct AgentMarkdownView: View, Equatable {
 
     var body: some View {
         let resolved = resolvedBlocks
+        let footnoteNumbers = MarkdownFootnotePolicy.numberMap(in: resolved)
         Group {
             if presentation == .document {
                 // Always lazy: eager VStack made free scroll hitch on medium/large files.
                 // Outline jump uses AppKit offset + materialize retries instead.
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: []) {
-                    blockStack(resolved)
+                    blockStack(resolved, footnoteNumbers: footnoteNumbers)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    blockStack(resolved)
+                    blockStack(resolved, footnoteNumbers: footnoteNumbers)
                 }
             }
         }
@@ -550,11 +802,18 @@ struct AgentMarkdownView: View, Equatable {
     }
 
     @ViewBuilder
-    private func blockStack(_ blocks: [AgentMarkdownBlock]) -> some View {
+    private func blockStack(
+        _ blocks: [AgentMarkdownBlock],
+        footnoteNumbers: [String: Int]
+    ) -> some View {
         ForEach(blocks.indices, id: \.self) { index in
             let block = blocks[index]
             let anchorID = AgentMarkdownBlock.blockAnchorID(index)
-            blockView(block, index: index)
+            blockView(
+                block,
+                index: index,
+                footnoteNumbers: footnoteNumbers
+            )
                 .padding(.top, blockTopSpacing(for: block, at: index))
                 .id(anchorID)
                 .modifier(
@@ -571,28 +830,55 @@ struct AgentMarkdownView: View, Equatable {
     }
 
     @ViewBuilder
-    private func blockView(_ block: AgentMarkdownBlock, index: Int) -> some View {
+    private func blockView(
+        _ block: AgentMarkdownBlock,
+        index: Int,
+        footnoteNumbers: [String: Int]
+    ) -> some View {
         switch block {
         case .frontMatter(let entries):
             frontMatter(entries)
         case .heading(let level, let content):
-            heading(level: level, content: content, index: index)
+            heading(
+                level: level,
+                content: content,
+                index: index,
+                footnoteNumbers: footnoteNumbers
+            )
         case .paragraph(let content):
-            inlineText(content, index: index)
+            inlineText(
+                content,
+                index: index,
+                footnoteNumbers: footnoteNumbers
+            )
                 .atelierFont(size: bodyFontSize)
                 .lineSpacing(proseLineSpacing)
                 .frame(maxWidth: proseMaxWidth, alignment: .leading)
-        case .unorderedItem(let content):
-            listRow(marker: .bullet, content: content, index: index)
-                .frame(maxWidth: proseMaxWidth, alignment: .leading)
-        case .orderedItem(let number, let content):
-            listRow(marker: .number(number), content: content, index: index)
-                .frame(maxWidth: proseMaxWidth, alignment: .leading)
-        case .taskItem(let isCompleted, let content):
+        case .unorderedItem(let depth, let content):
             listRow(
-                marker: .task(isCompleted),
+                marker: .bullet(depth),
+                depth: depth,
                 content: content,
                 index: index,
+                footnoteNumbers: footnoteNumbers
+            )
+                .frame(maxWidth: proseMaxWidth, alignment: .leading)
+        case .orderedItem(let number, let depth, let content):
+            listRow(
+                marker: .number(number),
+                depth: depth,
+                content: content,
+                index: index,
+                footnoteNumbers: footnoteNumbers
+            )
+                .frame(maxWidth: proseMaxWidth, alignment: .leading)
+        case .taskItem(let isCompleted, let depth, let content):
+            listRow(
+                marker: .task(isCompleted),
+                depth: depth,
+                content: content,
+                index: index,
+                footnoteNumbers: footnoteNumbers,
                 isStruck: isCompleted
             )
             .frame(maxWidth: proseMaxWidth, alignment: .leading)
@@ -602,7 +888,11 @@ struct AgentMarkdownView: View, Equatable {
                     .fill(AtelierTheme.accent.opacity(0.62))
                     .frame(width: MarkdownQuoteLayout.barWidth)
                     .accessibilityHidden(true)
-                inlineText(content, index: index)
+                inlineText(
+                    content,
+                    index: index,
+                    footnoteNumbers: footnoteNumbers
+                )
                     .italic()
                     .atelierFont(size: bodyFontSize, design: .serif)
                     .lineSpacing(proseLineSpacing)
@@ -610,14 +900,92 @@ struct AgentMarkdownView: View, Equatable {
             }
             .padding(.vertical, AtelierMetrics.spaceXS)
             .frame(maxWidth: proseMaxWidth, alignment: .leading)
+        case .callout(let kind, let content):
+            HStack(alignment: .top, spacing: AtelierMetrics.spaceM) {
+                Rectangle()
+                    .fill(kind.swiftUIColor)
+                    .frame(width: MarkdownQuoteLayout.barWidth)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
+                    Text("\(kind.glyph) \(kind.rawValue)")
+                        .atelierFont(
+                            size: AtelierTypography.micro,
+                            weight: .semibold,
+                            design: .monospaced
+                        )
+                        .tracking(0.7)
+                        .foregroundStyle(kind.swiftUIColor)
+                    inlineText(
+                        content,
+                        index: index,
+                        footnoteNumbers: footnoteNumbers
+                    )
+                        .atelierFont(size: bodyFontSize)
+                        .lineSpacing(proseLineSpacing)
+                        .foregroundStyle(.primary)
+                }
+            }
+            .padding(AtelierMetrics.spaceM)
+            .frame(maxWidth: proseMaxWidth, alignment: .leading)
+            .atelierCard(fill: kind.swiftUIColor.opacity(0.07))
         case .code(let language, let content):
             codeBlock(language: language, content: content)
         case .mermaid(let source):
             MermaidResponseCard(source: source)
         case .invalidMermaid(let source, let error):
             MermaidResponseCard(source: source, parseError: error)
-        case .table(let headers, let rows):
-            table(headers: headers, rows: rows)
+        case .table(let headers, let alignments, let rows):
+            table(
+                headers: headers,
+                alignments: alignments,
+                rows: rows,
+                footnoteNumbers: footnoteNumbers
+            )
+        case .image(let altText, let urlText):
+            VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
+                Label(
+                    altText.isEmpty ? "Image" : altText,
+                    systemImage: "photo"
+                )
+                .atelierFont(size: AtelierTypography.label)
+                .foregroundStyle(.secondary)
+                Text(verbatim: urlText)
+                    .atelierFont(size: AtelierTypography.micro, design: .monospaced)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(AtelierMetrics.spaceM)
+            .frame(maxWidth: proseMaxWidth, alignment: .leading)
+            .atelierCard(fill: AtelierTheme.raised.opacity(0.24))
+        case .footnotes(let notes):
+            VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+                Divider()
+                Text("Notes")
+                    .atelierFont(
+                        size: AtelierTypography.caption,
+                        weight: .semibold,
+                        design: .serif
+                    )
+                ForEach(notes, id: \.id) { note in
+                    HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceS) {
+                        Text("\(note.number).")
+                            .atelierFont(
+                                size: AtelierTypography.micro,
+                                weight: .semibold,
+                                design: .monospaced
+                            )
+                            .foregroundStyle(AtelierTheme.accent)
+                        Text(
+                            AgentMarkdownInlinePolicy.attributedString(
+                                note.text,
+                                showsColorSwatches: presentation == .document
+                            )
+                        )
+                        .atelierFont(size: AtelierTypography.label, design: .serif)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxWidth: proseMaxWidth, alignment: .leading)
         case .divider:
             HStack(spacing: 0) {
                 Rectangle()
@@ -631,9 +999,18 @@ struct AgentMarkdownView: View, Equatable {
         }
     }
 
-    private func heading(level: Int, content: String, index: Int) -> some View {
+    private func heading(
+        level: Int,
+        content: String,
+        index: Int,
+        footnoteNumbers: [String: Int]
+    ) -> some View {
         VStack(alignment: .leading, spacing: level <= 2 ? AtelierMetrics.spaceS : 0) {
-            inlineText(content, index: index)
+            inlineText(
+                content,
+                index: index,
+                footnoteNumbers: footnoteNumbers
+            )
                 .atelierFont(
                     size: headingSize(level),
                     weight: headingWeight(level),
@@ -721,12 +1098,45 @@ struct AgentMarkdownView: View, Equatable {
 
     @ViewBuilder
     private func table(headers: [String], rows: [[String]]) -> some View {
+        table(
+            headers: headers,
+            alignments: [],
+            rows: rows,
+            footnoteNumbers: [:]
+        )
+    }
+
+    @ViewBuilder
+    private func table(
+        headers: [String],
+        alignments: [MarkdownColumnAlignment],
+        rows: [[String]],
+        footnoteNumbers: [String: Int]
+    ) -> some View {
+        let numericColumns = MarkdownTableAlignmentPolicy.numericMajorityColumns(
+            headers: headers,
+            rows: rows
+        )
         if headers.count <= 3 {
-            tableGrid(headers: headers, rows: rows, isFlexible: true)
+            tableGrid(
+                headers: headers,
+                alignments: alignments,
+                numericColumns: numericColumns,
+                rows: rows,
+                isFlexible: true,
+                footnoteNumbers: footnoteNumbers
+            )
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             ScrollView(.horizontal, showsIndicators: true) {
-                tableGrid(headers: headers, rows: rows, isFlexible: false)
+                tableGrid(
+                    headers: headers,
+                    alignments: alignments,
+                    numericColumns: numericColumns,
+                    rows: rows,
+                    isFlexible: false,
+                    footnoteNumbers: footnoteNumbers
+                )
             }
             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.panel)
         }
@@ -734,8 +1144,11 @@ struct AgentMarkdownView: View, Equatable {
 
     private func tableGrid(
         headers: [String],
+        alignments: [MarkdownColumnAlignment],
+        numericColumns: Set<Int>,
         rows: [[String]],
-        isFlexible: Bool
+        isFlexible: Bool,
+        footnoteNumbers: [String: Int]
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
@@ -743,7 +1156,14 @@ struct AgentMarkdownView: View, Equatable {
                     tableCell(
                         headers[index],
                         isHeader: true,
-                        isFlexible: isFlexible
+                        alignment: resolvedAlignment(
+                            column: index,
+                            alignments: alignments,
+                            numericColumns: numericColumns
+                        ),
+                        usesTabularFigures: numericColumns.contains(index),
+                        isFlexible: isFlexible,
+                        footnoteNumbers: footnoteNumbers
                     )
                 }
             }
@@ -758,7 +1178,14 @@ struct AgentMarkdownView: View, Equatable {
                         tableCell(
                             value,
                             isHeader: false,
-                            isFlexible: isFlexible
+                            alignment: resolvedAlignment(
+                                column: columnIndex,
+                                alignments: alignments,
+                                numericColumns: numericColumns
+                            ),
+                            usesTabularFigures: numericColumns.contains(columnIndex),
+                            isFlexible: isFlexible,
+                            footnoteNumbers: footnoteNumbers
                         )
                     }
                 }
@@ -780,7 +1207,10 @@ struct AgentMarkdownView: View, Equatable {
     private func tableCell(
         _ value: String,
         isHeader: Bool,
-        isFlexible: Bool
+        alignment: MarkdownColumnAlignment,
+        usesTabularFigures: Bool,
+        isFlexible: Bool,
+        footnoteNumbers: [String: Int]
     ) -> some View {
         // Pure `code` cells use one View-level chip so soft-wrapped paths keep a
         // continuous fill. AttributedString.backgroundColor paints per line and
@@ -799,6 +1229,7 @@ struct AgentMarkdownView: View, Equatable {
                         design: .monospaced
                     )
                     .foregroundStyle(AtelierTheme.accent)
+                    .markdownTabularFigures(usesTabularFigures)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, AtelierMetrics.spaceXS)
                     .padding(.vertical, 2)
@@ -810,7 +1241,8 @@ struct AgentMarkdownView: View, Equatable {
                 Text(
                     AgentMarkdownInlinePolicy.attributedString(
                         value,
-                        showsColorSwatches: presentation == .document
+                        showsColorSwatches: presentation == .document,
+                        footnoteNumbers: footnoteNumbers
                     )
                 )
                     .atelierFont(
@@ -818,6 +1250,8 @@ struct AgentMarkdownView: View, Equatable {
                         weight: isHeader ? .semibold : .regular
                     )
                     .tracking(isHeader ? 0.4 : 0)
+                    .markdownTabularFigures(usesTabularFigures)
+                    .multilineTextAlignment(textAlignment(alignment))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -826,29 +1260,68 @@ struct AgentMarkdownView: View, Equatable {
 
         if isFlexible {
             cell
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: frameAlignment(alignment))
         } else {
             cell
-                .frame(width: 240, alignment: .leading)
+                .frame(width: 240, alignment: frameAlignment(alignment))
         }
     }
 
     private func listRow(
         marker: MarkdownListMarker,
+        depth: Int,
         content: String,
         index: Int,
+        footnoteNumbers: [String: Int],
         isStruck: Bool = false
     ) -> some View {
-        HStack(alignment: .top, spacing: AtelierMetrics.spaceM) {
+        let markerOpacity: Double = switch marker {
+        case .bullet:
+            1
+        case .number, .task:
+            max(0.46, 1 - Double(depth) * 0.18)
+        }
+        return HStack(alignment: .top, spacing: AtelierMetrics.spaceM) {
             listMarker(marker)
+                .opacity(markerOpacity)
                 .frame(width: AtelierMetrics.spaceL, height: bodyFontSize + proseLineSpacing)
-            inlineText(content, index: index)
+            inlineText(
+                content,
+                index: index,
+                footnoteNumbers: footnoteNumbers
+            )
                 .strikethrough(isStruck, color: .secondary)
                 .atelierFont(size: bodyFontSize)
                 .lineSpacing(proseLineSpacing)
                 .foregroundStyle(isStruck ? Color.secondary : Color.primary)
         }
+        .padding(.leading, CGFloat(depth) * AtelierMetrics.spaceXL)
         .accessibilityElement(children: .combine)
+    }
+
+    private func resolvedAlignment(
+        column: Int,
+        alignments: [MarkdownColumnAlignment],
+        numericColumns: Set<Int>
+    ) -> MarkdownColumnAlignment {
+        if numericColumns.contains(column) { return .right }
+        return alignments.indices.contains(column) ? alignments[column] : .left
+    }
+
+    private func frameAlignment(_ alignment: MarkdownColumnAlignment) -> Alignment {
+        switch alignment {
+        case .left: .leading
+        case .center: .center
+        case .right: .trailing
+        }
+    }
+
+    private func textAlignment(_ alignment: MarkdownColumnAlignment) -> TextAlignment {
+        switch alignment {
+        case .left: .leading
+        case .center: .center
+        case .right: .trailing
+        }
     }
 
     private func frontMatter(_ entries: [MarkdownFrontMatterEntry]) -> some View {
@@ -884,12 +1357,24 @@ struct AgentMarkdownView: View, Equatable {
     @ViewBuilder
     private func listMarker(_ marker: MarkdownListMarker) -> some View {
         switch marker {
-        case .bullet:
-            Circle()
-                .fill(AtelierTheme.accent.opacity(0.82))
-                .frame(width: 5, height: 5)
-                .padding(.top, bodyFontSize * 0.46)
-                .accessibilityHidden(true)
+        case .bullet(let depth):
+            Group {
+                if depth == 0 {
+                    Circle()
+                        .fill(AtelierTheme.accent.opacity(0.82))
+                        .frame(width: 5, height: 5)
+                } else if depth == 1 {
+                    Circle()
+                        .stroke(AtelierTheme.accent.opacity(0.62), lineWidth: 1)
+                        .frame(width: 6, height: 6)
+                } else {
+                    Rectangle()
+                        .fill(AtelierTheme.border)
+                        .frame(width: 7, height: 1)
+                }
+            }
+            .padding(.top, bodyFontSize * 0.46)
+            .accessibilityHidden(true)
         case .number(let number):
             Text("\(number).")
                 .atelierFont(size: AtelierTypography.label, weight: .semibold, design: .monospaced)
@@ -903,7 +1388,11 @@ struct AgentMarkdownView: View, Equatable {
         }
     }
 
-    private func inlineText(_ content: String, index: Int) -> Text {
+    private func inlineText(
+        _ content: String,
+        index: Int,
+        footnoteNumbers: [String: Int]
+    ) -> Text {
         if let inlineRuns,
            inlineRuns.indices.contains(index),
            let precomputed = inlineRuns[index] {
@@ -912,7 +1401,8 @@ struct AgentMarkdownView: View, Equatable {
         return Text(
             AgentMarkdownInlinePolicy.attributedString(
                 content,
-                showsColorSwatches: presentation == .document
+                showsColorSwatches: presentation == .document,
+                footnoteNumbers: footnoteNumbers
             )
         )
     }
@@ -957,6 +1447,8 @@ struct AgentMarkdownView: View, Equatable {
         case .frontMatter:
             AtelierMetrics.spaceL
         case .code, .mermaid, .invalidMermaid, .table, .quote, .divider:
+            AtelierMetrics.spaceL + (presentation == .document ? AtelierMetrics.spaceXS : 0)
+        case .callout, .image, .footnotes:
             AtelierMetrics.spaceL + (presentation == .document ? AtelierMetrics.spaceXS : 0)
         case .paragraph:
             AtelierMetrics.spaceM + documentBoost * 0.5
@@ -1057,7 +1549,7 @@ private struct MarkdownHighlightedCodeText: View {
 }
 
 private enum MarkdownListMarker {
-    case bullet
+    case bullet(Int)
     case number(Int)
     case task(Bool)
 }
@@ -1338,14 +1830,21 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
     case frontMatter([MarkdownFrontMatterEntry])
     case heading(level: Int, content: String)
     case paragraph(String)
-    case unorderedItem(String)
-    case orderedItem(number: Int, content: String)
-    case taskItem(isCompleted: Bool, content: String)
+    case unorderedItem(depth: Int, content: String)
+    case orderedItem(number: Int, depth: Int, content: String)
+    case taskItem(isCompleted: Bool, depth: Int, content: String)
     case quote(String)
+    case callout(kind: MarkdownCalloutKind, content: String)
     case code(language: String?, content: String)
     case mermaid(String)
     case invalidMermaid(source: String, error: String)
-    case table(headers: [String], rows: [[String]])
+    case table(
+        headers: [String],
+        alignments: [MarkdownColumnAlignment],
+        rows: [[String]]
+    )
+    case image(altText: String, urlText: String)
+    case footnotes([MarkdownFootnote])
     case divider
 
     static func blockAnchorID(_ index: Int) -> String {
@@ -1356,12 +1855,14 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
         switch block {
         case .heading(_, let content),
                 .paragraph(let content),
-                .unorderedItem(let content),
-                .orderedItem(_, let content),
-                .taskItem(_, let content),
-                .quote(let content):
+                .unorderedItem(_, let content),
+                .orderedItem(_, _, let content),
+                .taskItem(_, _, let content),
+                .quote(let content),
+                .callout(_, let content):
             content
-        case .frontMatter, .code, .mermaid, .invalidMermaid, .table, .divider:
+        case .frontMatter, .code, .mermaid, .invalidMermaid, .table,
+                .image, .footnotes, .divider:
             nil
         }
     }
@@ -1389,6 +1890,7 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
         var fencedLines: [String] = []
         var fenceMarker: String?
         var fenceLanguage: String?
+        var footnoteDefinitions: [String: String] = [:]
         // Index of the list item or quote that a following plain line continues
         // (Markdown lazy continuation). Reset by a blank line or any new block.
         var continuationIndex: Int?
@@ -1402,20 +1904,30 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
         func appendContinuation(_ text: String, at index: Int) -> Bool {
             guard blocks.indices.contains(index), !text.isEmpty else { return false }
             switch blocks[index] {
-            case .unorderedItem(let content):
-                blocks[index] = .unorderedItem(joined(content, text))
-            case .orderedItem(let number, let content):
-                blocks[index] = .orderedItem(
-                    number: number,
+            case .unorderedItem(let depth, let content):
+                blocks[index] = .unorderedItem(
+                    depth: depth,
                     content: joined(content, text)
                 )
-            case .taskItem(let isCompleted, let content):
+            case .orderedItem(let number, let depth, let content):
+                blocks[index] = .orderedItem(
+                    number: number,
+                    depth: depth,
+                    content: joined(content, text)
+                )
+            case .taskItem(let isCompleted, let depth, let content):
                 blocks[index] = .taskItem(
                     isCompleted: isCompleted,
+                    depth: depth,
                     content: joined(content, text)
                 )
             case .quote(let content):
                 blocks[index] = .quote(joined(content, text))
+            case .callout(let kind, let content):
+                blocks[index] = .callout(
+                    kind: kind,
+                    content: joined(content, text)
+                )
             default:
                 return false
             }
@@ -1455,6 +1967,8 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
         while lineIndex < lines.count {
             let line = lines[lineIndex]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let leadingSpaces = line.prefix { $0 == " " }.count
+            let listDepth = min(3, leadingSpaces / 2)
 
             if let fenceMarker {
                 if isFenceClosing(trimmed, marker: fenceMarker) {
@@ -1477,23 +1991,45 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
 
             if lineIndex + 1 < lines.count,
                let headers = tableRow(from: trimmed),
-               isTableDivider(lines[lineIndex + 1], columnCount: headers.count) {
+               let alignments = tableAlignments(
+                   from: lines[lineIndex + 1],
+                   columnCount: headers.count
+               ) {
                 flushParagraph()
                 var rows: [[String]] = []
                 lineIndex += 2
                 while lineIndex < lines.count,
                       let row = tableRow(from: lines[lineIndex]),
-                      !isTableDivider(lines[lineIndex], columnCount: headers.count) {
+                      tableAlignments(
+                          from: lines[lineIndex],
+                          columnCount: headers.count
+                      ) == nil {
                     rows.append(normalizedTableRow(row, columnCount: headers.count))
                     lineIndex += 1
                 }
-                blocks.append(.table(headers: headers, rows: rows))
+                blocks.append(
+                    .table(
+                        headers: headers,
+                        alignments: alignments,
+                        rows: rows
+                    )
+                )
                 continuationIndex = nil
                 continue
             }
 
             if trimmed.isEmpty {
                 flushParagraph()
+                continuationIndex = nil
+                lineIndex += 1
+                continue
+            }
+
+            if let definition = MarkdownFootnotePolicy.definition(from: trimmed) {
+                flushParagraph()
+                if footnoteDefinitions[definition.id] == nil {
+                    footnoteDefinitions[definition.id] = definition.text
+                }
                 continuationIndex = nil
                 lineIndex += 1
                 continue
@@ -1515,10 +2051,24 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
                 continue
             }
 
+            if let figure = MarkdownImageFigurePolicy.parse(trimmed) {
+                flushParagraph()
+                blocks.append(
+                    .image(
+                        altText: figure.altText,
+                        urlText: figure.urlText
+                    )
+                )
+                continuationIndex = nil
+                lineIndex += 1
+                continue
+            }
+
             if let task = taskItem(from: trimmed) {
                 flushParagraph()
                 blocks.append(.taskItem(
                     isCompleted: task.isCompleted,
+                    depth: listDepth,
                     content: task.content
                 ))
                 continuationIndex = blocks.count - 1
@@ -1528,7 +2078,7 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
 
             if let content = prefixedContent(in: trimmed, prefixes: ["- ", "* ", "+ "]) {
                 flushParagraph()
-                blocks.append(.unorderedItem(content))
+                blocks.append(.unorderedItem(depth: listDepth, content: content))
                 continuationIndex = blocks.count - 1
                 lineIndex += 1
                 continue
@@ -1536,9 +2086,45 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
 
             if let item = orderedItem(from: trimmed) {
                 flushParagraph()
-                blocks.append(.orderedItem(number: item.number, content: item.content))
+                blocks.append(
+                    .orderedItem(
+                        number: item.number,
+                        depth: listDepth,
+                        content: item.content
+                    )
+                )
                 continuationIndex = blocks.count - 1
                 lineIndex += 1
+                continue
+            }
+
+            if let kind = calloutKind(from: trimmed) {
+                flushParagraph()
+                var contentLines: [String] = []
+                lineIndex += 1
+                while lineIndex < lines.count {
+                    let quoted = lines[lineIndex]
+                        .trimmingCharacters(in: .whitespaces)
+                    if quoted == ">" {
+                        contentLines.append("")
+                    } else if let content = prefixedContent(
+                        in: quoted,
+                        prefixes: ["> "]
+                    ) {
+                        contentLines.append(content)
+                    } else {
+                        break
+                    }
+                    lineIndex += 1
+                }
+                blocks.append(
+                    .callout(
+                        kind: kind,
+                        content: contentLines.joined(separator: " ")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
+                )
+                continuationIndex = nil
                 continue
             }
 
@@ -1574,6 +2160,13 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
             flushFence(isClosed: false)
         }
         flushParagraph()
+        let notes = MarkdownFootnotePolicy.notes(
+            in: blocks,
+            definitions: footnoteDefinitions
+        )
+        if !notes.isEmpty {
+            blocks.append(.footnotes(notes))
+        }
         return blocks
     }
 
@@ -1656,13 +2249,41 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
         return cells.isEmpty ? nil : cells
     }
 
-    private static func isTableDivider(_ line: String, columnCount: Int) -> Bool {
-        guard let cells = tableRow(from: line), cells.count == columnCount else { return false }
-        return cells.allSatisfy { cell in
+    private static func tableAlignments(
+        from line: String,
+        columnCount: Int
+    ) -> [MarkdownColumnAlignment]? {
+        guard let cells = tableRow(from: line), cells.count == columnCount else { return nil }
+        var alignments: [MarkdownColumnAlignment] = []
+        for cell in cells {
             let marker = cell.trimmingCharacters(in: .whitespaces)
+            let hasLeadingColon = marker.hasPrefix(":")
+            let hasTrailingColon = marker.hasSuffix(":")
             let dashes = marker.filter { $0 == "-" }.count
-            return dashes >= 3 && marker.allSatisfy { $0 == "-" || $0 == ":" }
+            let minimumDashes = hasLeadingColon && hasTrailingColon
+                ? 1
+                : (hasLeadingColon || hasTrailingColon ? 2 : 3)
+            guard marker.count >= 3,
+                  dashes >= minimumDashes,
+                  marker.allSatisfy({ $0 == "-" || $0 == ":" }) else {
+                return nil
+            }
+            if hasLeadingColon, hasTrailingColon {
+                alignments.append(.center)
+            } else if hasTrailingColon {
+                alignments.append(.right)
+            } else {
+                alignments.append(.left)
+            }
         }
+        return alignments
+    }
+
+    private static func calloutKind(from line: String) -> MarkdownCalloutKind? {
+        guard line.hasPrefix("> [!"), line.hasSuffix("]") else { return nil }
+        let start = line.index(line.startIndex, offsetBy: 4)
+        let end = line.index(before: line.endIndex)
+        return MarkdownCalloutKind(rawValue: String(line[start..<end]).uppercased())
     }
 
     private static func normalizedTableRow(_ row: [String], columnCount: Int) -> [String] {
@@ -1671,5 +2292,16 @@ nonisolated enum AgentMarkdownBlock: Equatable, Sendable {
             normalized.append(contentsOf: repeatElement("", count: columnCount - normalized.count))
         }
         return normalized
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func markdownTabularFigures(_ enabled: Bool) -> some View {
+        if enabled {
+            monospacedDigit()
+        } else {
+            self
+        }
     }
 }

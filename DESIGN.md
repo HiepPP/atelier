@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Status | Current implementation baseline |
-| Updated | 2026-07-24 |
+| Updated | 2026-07-26 |
 | Baseline commit | `02ebe5b` |
 | Platform | macOS 26+ |
 | UI stack | SwiftUI, AppKit, Luminare |
@@ -641,6 +641,10 @@ Persistence boundaries:
 - Render leading YAML front matter as one quiet metadata card of key and value rows instead of a
   divider plus stray paragraphs. Keys use the accent micro face, values stay secondary. Fall back to
   normal block parsing when the front matter has no closing marker or holds non-metadata lines.
+- When front matter is followed by H1, render H1 first. Then show up to three short, scalar,
+  non-title values in source order as one accent micro masthead row with hairline gaps. Keep the
+  first paragraph as the lede and place remaining metadata in the existing quiet card below it.
+  Keep documents without this exact pattern in their current order.
 - When a Markdown file has two or more headings, show a quiet trailing "On This Page" outline in
   both Source and Preview modes. Hide the outline when the center column is too narrow to keep a
   readable measure. Keep outline state session-only.
@@ -675,16 +679,31 @@ Persistence boundaries:
 - Align every list marker to one marker gutter with an explicit tab stop so single-line and wrapped
   items share the same text indent. Render a completed task item in secondary label color with a
   strikethrough; leave open items at full contrast.
+- Preserve up to three list depths from leading spaces for unordered, ordered, and task items.
+  Use filled bullet, ring, then dash markers for unordered depths zero through two. Increase the
+  marker gutter and explicit tab stop by depth, keep wrapped lines on the text indent, and fade
+  markers from accent toward border. Resolve all depth values during parsing and document build.
 - Render a block quote as an editorial pull-quote: an accent left rule drawn once as a single fill
   spanning the quote's full height in the leading gutter, serif italic text in secondary label color,
   and a readable indent. Do not prefix the quote with a literal `>` marker or paint a per-line
   background that breaks on soft wrap.
+- Add one cached large serif opening quote glyph beside the pull-quote rule at accent `0.18` alpha.
+  Draw one glyph per quote region. Shift list markers about one point into the gutter without moving
+  the text tab stop or wrapped-line indent. Allocate no glyph runs, fonts, colors, or paths in draw.
+- Render GitHub `NOTE`, `TIP`, `IMPORTANT`, `WARNING`, and `CAUTION` callouts as quiet native cards.
+  Remove the marker line, show one accent-family left rule plus glyph and micro label, and keep body
+  text full contrast and non-italic. Use existing semantic colors only. Ordinary quotes remain
+  editorial pull-quotes.
 - Render fenced code with cached syntax-token colors when a language is known. Preserve source
   whitespace, wrap long lines to the available preview width, and fall back to readable
   monospaced text when highlighting is unavailable. Do not horizontally scroll code blocks.
 - Present each fenced-code region as one native code card inside the same text storage. Use a quiet
   language header, a code body tinted apart from the editor surface, consistent inner padding, and a
   hairline border. Keep the header and code selectable with the surrounding document.
+- Give each fenced-code line a right-aligned secondary number at `0.85` code-face scale and `0.55`
+  alpha. Use one explicit gutter tab stop. Native selected-text copy and the code-card Copy action
+  return original fenced source only, excluding number glyphs. Preserve original whitespace,
+  syntax-highlight offsets, and wrapped code behavior.
 - Show one trailing Copy button over each visible code-card header. Keep it icon-only so the header
   stays quiet, and confirm a copy by swapping to a checkmark for about one second. Anchor it to the
   header's TextKit range without inserting an attachment or creating another rendered Markdown tree.
@@ -714,8 +733,27 @@ Persistence boundaries:
   construction. Keep the header visually distinct through an accent wash, semibold weight, and light
   tracking; use quiet horizontal rules and subtle zebra rows, avoid heavy vertical boxing, and never
   recalculate column weights from the scroll or draw paths.
+- Preserve delimiter-row table alignment per column. Apply left, center, or right paragraph alignment
+  to every cell. Force numeric-majority data columns right and use tabular numeric figures. Keep
+  column weights, wrapping, and alignment deterministic during document construction.
 - Wrap unbroken cell tokens such as long paths by character so a narrow column never overflows its
   neighbor. Decide that per cell during document construction, never during layout or draw.
+- Base native Markdown vertical spacing on one `bodyFont.lineHeight` unit snapped to display scale.
+  Use `0.5u` paragraph spacing, H3 `1u` before and `0.5u` after, H1 and H2 `2u` before and `0.75u`
+  after, divider `1.5u`, code card `1u`, and lede `0.75u`. Resolve rhythm during document build.
+- Render an image-only Markdown line as one stable native figure when it resolves to a local file.
+  Resolve relative paths from the Markdown file directory. Never load remote images. Reserve final
+  attachment bounds before off-main decoding, preserve those bounds after decode, cap the figure at
+  `documentMaxWidth`, and show source alt text exactly as its caption. Missing images keep the same
+  quiet bordered placeholder. Never invent captions.
+- Collect one-line Markdown footnote definitions without rendering their source syntax. Number
+  resolved references by first-reference order, render accent superscript numbers, preserve unresolved
+  references literally, and append one quiet Notes section after content. Keep Notes out of outline.
+- Render links as accent text with an accent underline at `0.35` alpha. Raise only the hovered link
+  underline to full strength while keeping native activation and the pointing-hand cursor.
+- Show passive reading progress as a one-pixel accent hairline on the outline rail's leading edge.
+  Derive it from the existing native bounds observer, clamp it to zero through one, and report only
+  when the visible rail-pixel value changes. Do not animate passive updates or rebuild the document.
 - Put the Source/Preview toggle in the trailing editor action group. Keep find and word-wrap
   commands scoped to Source mode.
 - Use `Cmd-E` to toggle Source and Preview for the active `.md` or `.html` file. Keep its existing

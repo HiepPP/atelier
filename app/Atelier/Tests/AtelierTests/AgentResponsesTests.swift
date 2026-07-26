@@ -482,6 +482,7 @@ struct AgentResponsesTests {
             .paragraph("Before."),
             .table(
                 headers: ["Provider", "State"],
+                alignments: [.left, .right],
                 rows: [["Codex", "Ready"], ["Claude", "Working"]]
             ),
             .paragraph("After.")
@@ -503,7 +504,11 @@ struct AgentResponsesTests {
         """
 
         #expect(AgentMarkdownBlock.parse(markdown) == [
-            .table(headers: ["A", "B"], rows: [["one", ""], ["two", "three"]]),
+            .table(
+                headers: ["A", "B"],
+                alignments: [.left, .left],
+                rows: [["one", ""], ["two", "three"]]
+            ),
             .quote("Quote"),
             .code(language: "swift", content: "let value = \"unterminated\"")
         ])
@@ -516,7 +521,11 @@ struct AgentResponsesTests {
         After | table
         """
         #expect(AgentMarkdownBlock.parse(stopped) == [
-            .table(headers: ["A", "B"], rows: [["one", "two"]]),
+            .table(
+                headers: ["A", "B"],
+                alignments: [.left, .left],
+                rows: [["one", "two"]]
+            ),
             .paragraph("After | table")
         ])
     }
@@ -531,10 +540,10 @@ struct AgentResponsesTests {
         """
 
         #expect(AgentMarkdownBlock.parse(markdown) == [
-            .taskItem(isCompleted: false, content: "Pending"),
-            .taskItem(isCompleted: true, content: "Done"),
-            .taskItem(isCompleted: true, content: "Also done"),
-            .unorderedItem("Regular")
+            .taskItem(isCompleted: false, depth: 0, content: "Pending"),
+            .taskItem(isCompleted: true, depth: 0, content: "Done"),
+            .taskItem(isCompleted: true, depth: 0, content: "Also done"),
+            .unorderedItem(depth: 0, content: "Regular")
         ])
     }
 
@@ -554,12 +563,17 @@ struct AgentResponsesTests {
 
         #expect(AgentMarkdownBlock.parse(markdown) == [
             .unorderedItem(
-                "Outline clicks reveal the source heading line in Source mode "
+                depth: 0,
+                content: "Outline clicks reveal the source heading line in Source mode "
                     + "and the rendered heading character range in Preview mode."
             ),
-            .unorderedItem("Second item"),
-            .orderedItem(number: 1, content: "Ordered item wrapped tail"),
-            .taskItem(isCompleted: true, content: "Task item wrapped tail"),
+            .unorderedItem(depth: 0, content: "Second item"),
+            .orderedItem(number: 1, depth: 0, content: "Ordered item wrapped tail"),
+            .taskItem(
+                isCompleted: true,
+                depth: 0,
+                content: "Task item wrapped tail"
+            ),
             .paragraph("Separate paragraph.")
         ])
 
@@ -581,7 +595,7 @@ struct AgentResponsesTests {
         Plain line
         """
         #expect(AgentMarkdownBlock.parse(interrupted) == [
-            .unorderedItem("Item"),
+            .unorderedItem(depth: 0, content: "Item"),
             .heading(level: 2, content: "Heading"),
             .paragraph("Plain line")
         ])
@@ -677,7 +691,7 @@ struct AgentResponsesTests {
         ]))
         #expect(!MarkdownDocumentTypePolicy.hasLedeParagraph(blocks: [
             .heading(level: 1, content: "Title"),
-            .unorderedItem("Item")
+            .unorderedItem(depth: 0, content: "Item")
         ]))
         #expect(!MarkdownDocumentTypePolicy.hasLedeParagraph(blocks: [
             .heading(level: 1, content: "Title")
@@ -844,7 +858,7 @@ struct AgentResponsesTests {
         #expect(paragraph?.headIndent == AtelierMetrics.spaceXL)
     }
 
-    @Test("Native Markdown renders front matter keys and values in order")
+    @Test("Native Markdown renders front matter values after its title")
     func nativeMarkdownFrontMatterCard() {
         let rendered = MarkdownAttributedDocumentBuilder.build(
             document: ParsedMarkdownDocument(
@@ -864,14 +878,14 @@ struct AgentResponsesTests {
 
         #expect(
             rendered.attributedString.string
-                == "name\npreview\ntype\nproject\nTitle\n"
+                == "Title\npreview\nproject\n"
         )
         let text = rendered.attributedString.string as NSString
-        let keyRange = text.range(of: "name")
+        let valueRange = text.range(of: "preview")
         #expect(
             rendered.attributedString.attribute(
                 .foregroundColor,
-                at: keyRange.location,
+                at: valueRange.location,
                 effectiveRange: nil
             ) as? NSColor == AppKitThemeAdapter.accent
         )
@@ -1006,9 +1020,13 @@ struct AgentResponsesTests {
 
         #expect(style(for: "AtelierApp")?.paragraphSpacing == 0)
         #expect(style(for: "`-- ContentView")?.paragraphSpacing == 0)
+        let rhythm = MarkdownRhythm(
+            bodyFont: NSFont.systemFont(ofSize: AtelierTypography.editorSize),
+            displayScale: 2
+        )
         #expect(
             style(for: "    |-- Workspace rail")?.paragraphSpacing
-                == AtelierMetrics.spaceL
+                == rhythm.codeCard
         )
         #expect(
             rendered.codeHighlights.map(\.source)
@@ -1363,7 +1381,10 @@ struct AgentResponsesTests {
                 headingRuleThickness: 1.5,
                 headingRulePrimaryLead: 32,
                 headingRuleSecondaryLead: 16,
-                hairline: 0.5
+                hairline: 0.5,
+                quoteGlyphFontSize: 38,
+                quoteGlyphAlpha: 0.18,
+                codeLineNumberGap: 8
             )
         )
         storage.addLayoutManager(layoutManager)
@@ -1590,13 +1611,736 @@ struct AgentResponsesTests {
         #expect(AgentMarkdownInlinePolicy.pureCodeContent("`a` and `b`") == nil)
     }
 
+    @Test("Markdown GitHub callouts parse and build as native cards")
+    func markdownCallout() {
+        let source = MarkdownCalloutKind.allCases.map {
+            "> [!\($0.rawValue)]\n> Body for \($0.rawValue)"
+        }.joined(separator: "\n\n")
+        let blocks = AgentMarkdownBlock.parse(source)
+
+        #expect(blocks.count == MarkdownCalloutKind.allCases.count)
+        for (index, kind) in MarkdownCalloutKind.allCases.enumerated() {
+            #expect(
+                blocks[index] == .callout(
+                    kind: kind,
+                    content: "Body for \(kind.rawValue)"
+                )
+            )
+        }
+        #expect(AgentMarkdownBlock.parse("> Ordinary") == [.quote("Ordinary")])
+
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: source),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        #expect(!rendered.attributedString.string.contains("[!"))
+        for kind in MarkdownCalloutKind.allCases {
+            let text = rendered.attributedString.string as NSString
+            let label = text.range(of: kind.rawValue)
+            let body = text.range(of: "Body for \(kind.rawValue)")
+            #expect(label.location != NSNotFound)
+            #expect(body.location != NSNotFound)
+            if body.location != NSNotFound {
+                let paragraph = rendered.attributedString.attribute(
+                    .paragraphStyle,
+                    at: body.location,
+                    effectiveRange: nil
+                ) as? NSParagraphStyle
+                #expect(paragraph?.textBlocks.first is NSTextTableBlock)
+                #expect(
+                    rendered.attributedString.attribute(
+                        .foregroundColor,
+                        at: body.location,
+                        effectiveRange: nil
+                    ) as? NSColor == AppKitThemeAdapter.foreground
+                )
+            }
+        }
+    }
+
+    @Test("Markdown lists preserve depth, continuation, and capped gutters")
+    func markdownNestedList() {
+        let source = """
+        - Root
+          - Child
+            - Grandchild
+                  - Capped
+          continuation for capped
+        1. Ordered
+            2. Ordered nested
+        - [ ] Task
+              - [x] Task nested
+        """
+        let blocks = AgentMarkdownBlock.parse(source)
+        #expect(blocks == [
+            .unorderedItem(depth: 0, content: "Root"),
+            .unorderedItem(depth: 1, content: "Child"),
+            .unorderedItem(depth: 2, content: "Grandchild"),
+            .unorderedItem(depth: 3, content: "Capped continuation for capped"),
+            .orderedItem(number: 1, depth: 0, content: "Ordered"),
+            .orderedItem(number: 2, depth: 2, content: "Ordered nested"),
+            .taskItem(isCompleted: false, depth: 0, content: "Task"),
+            .taskItem(isCompleted: true, depth: 3, content: "Task nested")
+        ])
+
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: source),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let text = rendered.attributedString.string as NSString
+        for (value, depth) in [
+            ("Root", 0),
+            ("Child", 1),
+            ("Grandchild", 2),
+            ("Capped", 3)
+        ] {
+            let range = text.range(of: value)
+            let paragraph = rendered.attributedString.attribute(
+                .paragraphStyle,
+                at: range.location,
+                effectiveRange: nil
+            ) as? NSParagraphStyle
+            let expected = AtelierMetrics.spaceXL
+                + CGFloat(depth) * AtelierMetrics.spaceXL
+            #expect(paragraph?.headIndent == expected)
+            #expect(paragraph?.tabStops.first?.location == expected)
+        }
+    }
+
+    @Test("Transcript ordered and task markers fade with nested depth")
+    @MainActor
+    func markdownTranscriptListMarkerDepth() {
+        func markerStrength(source: String, xOffset: CGFloat) -> Double {
+            let renderer = ImageRenderer(
+                content: AgentMarkdownView(source: source)
+                    .frame(width: 220, height: 52, alignment: .topLeading)
+                    .background(Color.white)
+                    .environment(\.colorScheme, .light)
+            )
+            renderer.scale = 2
+            guard let image = renderer.cgImage else {
+                Issue.record("Expected transcript marker image")
+                return 0
+            }
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            let xStart = max(0, Int((xOffset * renderer.scale).rounded(.down)))
+            let xEnd = min(
+                bitmap.pixelsWide,
+                Int(((xOffset + 18) * renderer.scale).rounded(.up))
+            )
+            var maximum = 0.0
+            for y in 0..<bitmap.pixelsHigh {
+                for x in xStart..<xEnd {
+                    guard let color = bitmap.colorAt(x: x, y: y)?
+                        .usingColorSpace(.sRGB) else {
+                        continue
+                    }
+                    let strength = (1 - color.redComponent)
+                        + (1 - color.greenComponent)
+                        + (1 - color.blueComponent)
+                    maximum = max(maximum, strength)
+                }
+            }
+            return maximum
+        }
+
+        let nestedOffset = AtelierMetrics.spaceXL * 3
+        let orderedRoot = markerStrength(source: "1. Root", xOffset: 0)
+        let orderedNested = markerStrength(
+            source: "      1. Nested",
+            xOffset: nestedOffset
+        )
+        let taskRoot = markerStrength(source: "- [ ] Root", xOffset: 0)
+        let taskNested = markerStrength(
+            source: "      - [ ] Nested",
+            xOffset: nestedOffset
+        )
+
+        #expect(orderedRoot > 0)
+        #expect(orderedNested < orderedRoot * 0.75)
+        #expect(taskRoot > 0)
+        #expect(taskNested < taskRoot * 0.75)
+    }
+
+    @Test("Markdown tables honor delimiter and numeric-majority alignment")
+    func markdownTableAlignment() {
+        let source = """
+        | Item | State | Count |
+        | :-- | :-: | --: |
+        | Alpha | Ready | 10 |
+        | Beta | Waiting | 2 |
+        | Gamma | Ready | none |
+        """
+        let blocks = AgentMarkdownBlock.parse(source)
+        #expect(blocks == [
+            .table(
+                headers: ["Item", "State", "Count"],
+                alignments: [.left, .center, .right],
+                rows: [
+                    ["Alpha", "Ready", "10"],
+                    ["Beta", "Waiting", "2"],
+                    ["Gamma", "Ready", "none"]
+                ]
+            )
+        ])
+
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: source),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let text = rendered.attributedString.string as NSString
+        for (value, expected) in [
+            ("Alpha", NSTextAlignment.left),
+            ("Ready", NSTextAlignment.center),
+            ("10", NSTextAlignment.right)
+        ] {
+            let range = text.range(of: value)
+            let paragraph = rendered.attributedString.attribute(
+                .paragraphStyle,
+                at: range.location,
+                effectiveRange: nil
+            ) as? NSParagraphStyle
+            #expect(paragraph?.alignment == expected)
+        }
+        #expect(
+            MarkdownTableAlignmentPolicy.numericMajorityColumns(
+                headers: ["Item", "Count"],
+                rows: [["A", "1"], ["B", "2"], ["C", "none"]]
+            ) == [1]
+        )
+    }
+
+    @Test("Native Markdown uses one snapped font-derived rhythm")
+    func nativeMarkdownRhythm() {
+        let bodyFont = NSFont.systemFont(ofSize: AtelierTypography.editorSize)
+        let rhythm = MarkdownRhythm(bodyFont: bodyFont, displayScale: 2)
+        let source = """
+        # Title
+
+        Opening.
+
+        ### Detail
+
+        Body.
+
+        ---
+
+        ```text
+        code
+        ```
+        """
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: source),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let text = rendered.attributedString.string as NSString
+        func style(_ value: String) -> NSParagraphStyle? {
+            let range = text.range(of: value)
+            guard range.location != NSNotFound else { return nil }
+            return rendered.attributedString.attribute(
+                .paragraphStyle,
+                at: range.location,
+                effectiveRange: nil
+            ) as? NSParagraphStyle
+        }
+
+        #expect(rhythm.unit * 2 == (rhythm.unit * 2).rounded(.toNearestOrAwayFromZero))
+        #expect(style("Opening.")?.paragraphSpacing == rhythm.lede)
+        #expect(style("Detail")?.paragraphSpacingBefore == rhythm.heading3Before)
+        #expect(style("Detail")?.paragraphSpacing == rhythm.heading3After)
+        #expect(style("Body.")?.paragraphSpacing == rhythm.paragraph)
+        #expect(style("TEXT")?.paragraphSpacingBefore == rhythm.codeCard)
+        #expect(style("code")?.paragraphSpacing == rhythm.codeCard)
+    }
+
+    @Test("Markdown local image figures keep stable bounds and skip remote URLs")
+    func markdownImageFigure() async {
+        let directory = temporaryDirectory("markdown-image")
+        let localURL = directory.appendingPathComponent("figure.png")
+        let png = Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        try? FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        try? png?.write(to: localURL)
+
+        #expect(
+            AgentMarkdownBlock.parse("![Exact caption](figure.png)") == [
+                .image(altText: "Exact caption", urlText: "figure.png")
+            ]
+        )
+        #expect(
+            MarkdownImageFigurePolicy.localURL(
+                urlText: "https://example.com/image.png",
+                directoryURL: directory
+            ) == nil
+        )
+
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(
+                source: "![Exact caption](figure.png)",
+                sourceDirectoryURL: directory
+            ),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        #expect(rendered.imageFigures.count == 1)
+        guard let region = rendered.imageFigures.first else { return }
+        #expect(region.url == localURL.standardizedFileURL)
+        #expect(region.attachment.bounds == region.bounds)
+        #expect(rendered.attributedString.string.contains("Exact caption"))
+        let decoded = await MarkdownLocalImageLoader.load(region.url)
+        #expect(decoded?.width == 1)
+        #expect(decoded?.height == 1)
+        #expect(decoded?.pixels.count == 4)
+        #expect(decoded?.cgImage() != nil)
+        #expect(region.attachment.bounds == region.bounds)
+
+        let cancelledLoad = Task {
+            await MarkdownLocalImageLoader.load(region.url)
+        }
+        cancelledLoad.cancel()
+        #expect(await cancelledLoad.value == nil)
+
+        let remote = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(
+                source: "![Remote](https://example.com/image.png)",
+                sourceDirectoryURL: directory
+            ),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        #expect(remote.imageFigures.isEmpty)
+    }
+
+    @Test("Native Markdown code numbers stay inside the gutter and preserve source")
+    func markdownCodeLineNumbers() {
+        let source = "first\n  second\nthird"
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(
+                source: "```swift\n\(source)\n```"
+            ),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        guard let region = rendered.codeBlocks.first else {
+            Issue.record("Expected one numbered code region")
+            return
+        }
+        let text = rendered.attributedString.string as NSString
+        #expect(region.usesGeneratedLineNumbers)
+        #expect(region.source == source)
+        #expect(text.substring(with: region.sourceRange) == source)
+        #expect(rendered.codeHighlights.first?.range == region.sourceRange)
+        let paragraph = rendered.attributedString.attribute(
+            .paragraphStyle,
+            at: region.sourceRange.location,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        var lineNumberCount = 0
+        rendered.attributedString.enumerateAttribute(
+            .atelierCodeLineNumber,
+            in: region.sourceRange
+        ) { value, _, _ in
+            if value != nil {
+                lineNumberCount += 1
+            }
+        }
+        #expect(lineNumberCount == 3)
+        #expect(paragraph?.textLists.isEmpty == true)
+        #expect(paragraph?.tabStops.count == 2)
+
+        let measure: CGFloat = 320
+        let storage = NSTextStorage(attributedString: rendered.attributedString)
+        let layoutManager = MarkdownPreviewLayoutManager(metrics: .current)
+        storage.addLayoutManager(layoutManager)
+        let textContainer = NSTextContainer(
+            containerSize: NSSize(width: measure, height: 200)
+        )
+        textContainer.lineFragmentPadding = 0
+        layoutManager.addTextContainer(textContainer)
+        layoutManager.ensureLayout(for: textContainer)
+
+        let firstLineGlyphRange = layoutManager.glyphRange(
+            forCharacterRange: NSRange(
+                location: region.sourceRange.location,
+                length: 1
+            ),
+            actualCharacterRange: nil
+        )
+        var fragment = NSRect.zero
+        var usedFragment = NSRect.zero
+        layoutManager.enumerateLineFragments(
+            forGlyphRange: firstLineGlyphRange
+        ) { lineRect, usedRect, _, _, stop in
+            fragment = lineRect
+            usedFragment = usedRect
+            stop.pointee = true
+        }
+        #expect(usedFragment.minX > fragment.minX)
+        let baseline = fragment.minY
+            + layoutManager.location(forGlyphAt: firstLineGlyphRange.location).y
+
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(measure),
+            pixelsHigh: 200,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), let bitmapGraphics = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            Issue.record("Expected a bitmap context for code-number rendering")
+            return
+        }
+        let bitmapContext = bitmapGraphics.cgContext
+        bitmapContext.translateBy(x: 0, y: CGFloat(bitmap.pixelsHigh))
+        bitmapContext.scaleBy(x: 1, y: -1)
+        let graphics = NSGraphicsContext(
+            cgContext: bitmapContext,
+            flipped: true
+        )
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphics
+        NSColor.clear.setFill()
+        NSRect(x: 0, y: 0, width: measure, height: 200).fill()
+        NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+            layoutManager.drawBackground(
+                forGlyphRange: layoutManager.glyphRange(for: textContainer),
+                at: .zero
+            )
+        }
+        graphics.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+
+        let backgroundX = Int(fragment.minX.rounded(.up)) + 2
+        let gutterStartX = backgroundX + 2
+        let gutterEndX = Int(usedFragment.minX.rounded(.down)) - 2
+        let rowStart = max(0, Int(fragment.minY.rounded(.down)))
+        let rowEnd = min(
+            bitmap.pixelsHigh - 1,
+            Int(fragment.maxY.rounded(.up))
+        )
+        var numberInkX: [Int] = []
+        var numberInkY: [Int] = []
+        if gutterStartX <= gutterEndX, rowStart <= rowEnd {
+            for y in rowStart...rowEnd {
+                guard let background = bitmap.colorAt(
+                    x: backgroundX,
+                    y: y
+                )?.usingColorSpace(.deviceRGB) else {
+                    continue
+                }
+                for x in gutterStartX...gutterEndX {
+                    guard let color = bitmap.colorAt(
+                        x: x,
+                        y: y
+                    )?.usingColorSpace(.deviceRGB) else {
+                        continue
+                    }
+                    let difference = abs(color.redComponent - background.redComponent)
+                        + abs(color.greenComponent - background.greenComponent)
+                        + abs(color.blueComponent - background.blueComponent)
+                    if difference > 0.05 {
+                        numberInkX.append(x)
+                        numberInkY.append(y)
+                    }
+                }
+            }
+        }
+        #expect(!numberInkX.isEmpty)
+        #expect(CGFloat(numberInkX.min() ?? -1) >= fragment.minX)
+        #expect(CGFloat(numberInkX.max() ?? Int.max) < usedFragment.minX)
+        #expect(CGFloat(numberInkY.max() ?? Int.max) <= ceil(baseline) + 1)
+    }
+
+    @Test("Native Markdown caches quote glyph geometry and optically outdents markers")
+    func nativeMarkdownOpticalMarkers() {
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: "> Quote\n\n- Item"),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let text = rendered.attributedString.string as NSString
+        let quoteRange = text.range(of: "Quote")
+        let itemRange = text.range(of: "Item")
+        #expect(
+            rendered.attributedString.attribute(
+                .atelierBlockquoteBar,
+                at: quoteRange.location,
+                effectiveRange: nil
+            ) != nil
+        )
+        let itemStyle = rendered.attributedString.attribute(
+            .paragraphStyle,
+            at: itemRange.location,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        #expect(itemStyle?.firstLineHeadIndent == -1)
+        #expect(itemStyle?.headIndent == AtelierMetrics.spaceXL)
+
+        let storage = NSTextStorage(attributedString: rendered.attributedString)
+        let layoutManager = MarkdownPreviewLayoutManager(metrics: .current)
+        storage.addLayoutManager(layoutManager)
+        let container = NSTextContainer(
+            containerSize: NSSize(width: 240, height: 160)
+        )
+        container.lineFragmentPadding = 0
+        layoutManager.addTextContainer(container)
+        layoutManager.ensureLayout(for: container)
+        let glyphRange = layoutManager.glyphRange(for: container)
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 240,
+            pixelsHigh: 160,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), let graphics = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            Issue.record("Expected quote bitmap")
+            return
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphics
+        layoutManager.drawBackground(forGlyphRange: glyphRange, at: .zero)
+        graphics.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+        var glyphPixelCount = 0
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 10..<bitmap.pixelsWide {
+                if let color = bitmap.colorAt(x: x, y: y),
+                   color.alphaComponent > 0.05 {
+                    glyphPixelCount += 1
+                }
+            }
+        }
+        #expect(glyphPixelCount > 0)
+    }
+
+    @Test("Native Markdown front matter yields title masthead lede then card")
+    func nativeMarkdownFrontMatterMasthead() {
+        let source = """
+        ---
+        title: Metadata title
+        author: Hiep
+        date: 2026-07-26
+        kind: guide
+        summary: This value is deliberately much longer than the masthead limit for fallback.
+        ---
+        # Visible Title
+
+        Opening lede.
+        """
+        let document = ParsedMarkdownDocument(source: source)
+        let plan = MarkdownFrontMatterMastheadPolicy.plan(blocks: document.blocks)
+        #expect(plan?.masthead.map(\.key) == ["author", "date", "kind"])
+        #expect(plan?.remaining.map(\.key) == ["title", "summary"])
+        #expect(MarkdownDocumentTypePolicy.hasLedeParagraph(blocks: document.blocks))
+
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: document,
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let text = rendered.attributedString.string
+        let title = text.range(of: "Visible Title")
+        let author = text.range(of: "Hiep")
+        let lede = text.range(of: "Opening lede.")
+        let metadata = text.range(of: "Metadata title")
+        #expect(title != nil && author != nil && lede != nil && metadata != nil)
+        if let title, let author, let lede, let metadata {
+            #expect(title.lowerBound < author.lowerBound)
+            #expect(author.lowerBound < lede.lowerBound)
+            #expect(lede.lowerBound < metadata.lowerBound)
+        }
+    }
+
+    @Test("Markdown footnotes number resolved references and preserve unresolved syntax")
+    func markdownFootnotes() {
+        let source = """
+        # Title
+
+        Alpha[^a], beta[^missing], then alpha again[^a] and gamma[^b].
+
+        | Item | Note |
+        | :-- | --: |
+        | Table | Table reference[^table] |
+
+        [^b]: Second note.
+        [^a]: First note.
+        [^table]: Table note.
+        """
+        let document = ParsedMarkdownDocument(source: source)
+        guard case .footnotes(let notes) = document.blocks.last else {
+            Issue.record("Expected trailing footnotes block")
+            return
+        }
+        #expect(notes == [
+            MarkdownFootnote(id: "a", number: 1, text: "First note."),
+            MarkdownFootnote(id: "b", number: 2, text: "Second note."),
+            MarkdownFootnote(id: "table", number: 3, text: "Table note.")
+        ])
+        #expect(document.outline.map(\.title) == ["Title"])
+        let inlineRuns = document.inlineRuns.compactMap { $0 }
+        #expect(
+            inlineRuns.contains {
+                String($0.characters).contains("Alpha1")
+                    && !String($0.characters).contains("[^a]")
+            }
+        )
+        let transcriptInline = AgentMarkdownInlinePolicy.attributedString(
+            "Transcript[^a]",
+            footnoteNumbers: MarkdownFootnotePolicy.numberMap(in: document.blocks)
+        )
+        #expect(String(transcriptInline.characters) == "Transcript1")
+
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: document,
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let text = rendered.attributedString.string as NSString
+        #expect(!rendered.attributedString.string.contains("[^a]"))
+        #expect(rendered.attributedString.string.contains("[^missing]"))
+        #expect(rendered.attributedString.string.contains("NOTES"))
+        #expect(rendered.attributedString.string.contains("Table reference3"))
+        #expect(rendered.headings.count == 1)
+        let alpha = text.range(of: "Alpha")
+        let reference = NSRange(
+            location: NSMaxRange(alpha),
+            length: 1
+        )
+        #expect(text.substring(with: reference) == "1")
+        #expect(
+            (
+                rendered.attributedString.attribute(
+                    .baselineOffset,
+                    at: reference.location,
+                    effectiveRange: nil
+                ) as? NSNumber
+            )?.doubleValue == 4
+        )
+    }
+
+    @Test("Markdown links stay quiet and reading progress is pixel-quantized")
+    func markdownLinkAndProgress() {
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(
+                source: "[Atelier](https://example.com)"
+            ),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        let range = (rendered.attributedString.string as NSString).range(of: "Atelier")
+        #expect(
+            rendered.attributedString.attribute(
+                .link,
+                at: range.location,
+                effectiveRange: nil
+            ) != nil
+        )
+
+        let storage = NSTextStorage(
+            attributedString: NSAttributedString(
+                string: "Atelier",
+                attributes: [.link: URL(string: "https://example.com") as Any]
+            )
+        )
+        let layoutManager = NSLayoutManager()
+        storage.addLayoutManager(layoutManager)
+        let textContainer = NSTextContainer(
+            containerSize: NSSize(width: 240, height: 60)
+        )
+        textContainer.lineFragmentPadding = 0
+        layoutManager.addTextContainer(textContainer)
+        let textView = MarkdownPreviewTextView(
+            frame: NSRect(x: 0, y: 0, width: 240, height: 60),
+            textContainer: textContainer
+        )
+        textView.textContainerInset = .zero
+        layoutManager.ensureLayout(for: textContainer)
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: NSRange(location: 0, length: storage.length),
+            actualCharacterRange: nil
+        )
+        let glyphRect = layoutManager.boundingRect(
+            forGlyphRange: glyphRange,
+            in: textContainer
+        )
+        let origin = textView.textContainerOrigin
+        #expect(
+            textView.linkRange(
+                at: NSPoint(
+                    x: origin.x + glyphRect.midX,
+                    y: origin.y + glyphRect.midY
+                )
+            ) == NSRange(location: 0, length: storage.length)
+        )
+        #expect(
+            textView.linkRange(
+                at: NSPoint(
+                    x: origin.x + glyphRect.maxX + 20,
+                    y: origin.y + glyphRect.midY
+                )
+            ) == nil
+        )
+        #expect(MarkdownLinkStylePolicy.normalUnderlineAlpha == 0.35)
+        #expect(
+            MarkdownReadingProgressPolicy.fraction(
+                originY: 400,
+                viewportHeight: 200,
+                documentHeight: 1_000
+            ) == 0.5
+        )
+        #expect(
+            MarkdownReadingProgressPolicy.visiblePixel(
+                fraction: 0.5001,
+                railHeight: 800
+            ) == MarkdownReadingProgressPolicy.visiblePixel(
+                fraction: 0.5004,
+                railHeight: 800
+            )
+        )
+        #expect(
+            MarkdownReadingProgressPolicy.fraction(
+                originY: 2_000,
+                viewportHeight: 200,
+                documentHeight: 1_000
+            ) == 1
+        )
+    }
+
 #if DEBUG
     @Test("Memory fixture matches captured response shape")
     func responseMemoryFixtureShape() {
         let responses = AgentResponseMemoryFixture.responses
         let blocks = responses.flatMap { AgentMarkdownBlock.parse($0.markdown) }
         let tableRows = blocks.reduce(into: 0) { count, block in
-            if case .table(_, let rows) = block {
+            if case .table(_, _, let rows) = block {
                 count += rows.count
             }
         }

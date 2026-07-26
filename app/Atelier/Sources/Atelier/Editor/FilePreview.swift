@@ -44,7 +44,10 @@ struct FileRenderedPreview: View {
         case .text(let source):
             switch kind {
             case .markdown:
-                MarkdownFileDocumentView(source: source)
+                MarkdownFileDocumentView(
+                    source: source,
+                    sourceDirectoryURL: fileURL.deletingLastPathComponent()
+                )
             case .html:
                 HTMLFilePreview(
                     sourceVersion: source,
@@ -78,6 +81,7 @@ struct MarkdownFileTabView: View {
     @State private var jumpGeneration = 0
     @State private var previewJumpRequest: MarkdownPreviewJumpRequest?
     @State private var sourceRevealRequest: FileViewerRevealRequest?
+    @State private var readingProgress: CGFloat = 0
 
     private var source: String {
         guard case .text(let source) = file.content else { return "" }
@@ -118,7 +122,8 @@ struct MarkdownFileTabView: View {
                     document: document,
                     isActive: isActive && showsPreview,
                     jumpRequest: previewJumpRequest,
-                    selectedOutlineID: $selectedOutlineID
+                    selectedOutlineID: $selectedOutlineID,
+                    readingProgress: $readingProgress
                 )
                 .opacity(showsPreview ? 1 : 0)
                 .allowsHitTesting(showsPreview)
@@ -135,6 +140,7 @@ struct MarkdownFileTabView: View {
                 MarkdownDocumentOutline(
                     entries: document.outline,
                     selectedID: selectedOutlineID,
+                    readingProgress: readingProgress,
                     onSelect: jumpToOutlineEntry
                 )
             }
@@ -156,7 +162,10 @@ struct MarkdownFileTabView: View {
         }
         .onChange(of: source, initial: true) { _, newSource in
             guard document.source != newSource else { return }
-            document = ParsedMarkdownDocument(source: newSource)
+            document = ParsedMarkdownDocument(
+                source: newSource,
+                sourceDirectoryURL: file.document.url.deletingLastPathComponent()
+            )
             sourceHeadingLines = MarkdownSourceOutlinePolicy.lineNumberByOutlineID(
                 source: newSource,
                 entries: document.outline
@@ -185,12 +194,14 @@ struct MarkdownFileTabView: View {
 
 private struct MarkdownFileDocumentView: View {
     let source: String
+    let sourceDirectoryURL: URL
 
     @State private var document: ParsedMarkdownDocument = .empty
     @State private var selectedOutlineID: String?
     @State private var containerWidth: CGFloat = 0
     @State private var jumpGeneration = 0
     @State private var jumpRequest: MarkdownPreviewJumpRequest?
+    @State private var readingProgress: CGFloat = 0
 
     private var showsOutline: Bool {
         MarkdownFileDocumentPolicy.showsOutline(
@@ -206,7 +217,8 @@ private struct MarkdownFileDocumentView: View {
                     document: document,
                     isActive: true,
                     jumpRequest: jumpRequest,
-                    selectedOutlineID: $selectedOutlineID
+                    selectedOutlineID: $selectedOutlineID,
+                    readingProgress: $readingProgress
                 )
                 if document.blocks.isEmpty {
                     MarkdownEmptyPreview()
@@ -216,6 +228,7 @@ private struct MarkdownFileDocumentView: View {
                 MarkdownDocumentOutline(
                     entries: document.outline,
                     selectedID: selectedOutlineID,
+                    readingProgress: readingProgress,
                     onSelect: jumpToOutlineEntry
                 )
             }
@@ -237,7 +250,10 @@ private struct MarkdownFileDocumentView: View {
         }
         .onChange(of: source, initial: true) { _, newSource in
             guard document.source != newSource else { return }
-            document = ParsedMarkdownDocument(source: newSource)
+            document = ParsedMarkdownDocument(
+                source: newSource,
+                sourceDirectoryURL: sourceDirectoryURL
+            )
             selectedOutlineID = document.outline.first?.id
         }
     }
@@ -328,6 +344,7 @@ enum MarkdownFileDocumentPolicy {
 private struct MarkdownDocumentOutline: View {
     let entries: [MarkdownOutlineEntry]
     let selectedID: String?
+    let readingProgress: CGFloat
     let onSelect: (MarkdownOutlineEntry) -> Void
 
     var body: some View {
@@ -363,9 +380,23 @@ private struct MarkdownDocumentOutline: View {
         .frame(width: AtelierMetrics.markdownOutlineWidth)
         .background(AtelierTheme.panel.opacity(0.72))
         .overlay(alignment: .leading) {
-            Rectangle()
-                .fill(AtelierTheme.border)
-                .frame(width: AtelierTheme.strokeHairline)
+            GeometryReader { geometry in
+                ZStack(alignment: .topLeading) {
+                    Rectangle()
+                        .fill(AtelierTheme.border)
+                        .frame(width: AtelierTheme.strokeHairline)
+                    Rectangle()
+                        .fill(AtelierTheme.accent)
+                        .frame(
+                            width: 1,
+                            height: geometry.size.height
+                                * min(1, max(0, readingProgress))
+                        )
+                }
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
+            }
         }
         // Whole rail claims pointer so AppKit text cursors cannot bleed in.
         .contentShape(Rectangle())

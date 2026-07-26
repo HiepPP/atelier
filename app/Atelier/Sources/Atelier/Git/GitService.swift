@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import Synchronization
 
@@ -305,6 +306,23 @@ nonisolated final class GitCommand: Sendable {
         let process = Process()
         let output = Pipe()
         let errorOutput = Pipe()
+        // Foundation pipes are inheritable. A concurrent child process can keep
+        // another Git command's writer alive and prevent its readers from seeing EOF.
+        for fileHandle in [
+            output.fileHandleForReading,
+            output.fileHandleForWriting,
+            errorOutput.fileHandleForReading,
+            errorOutput.fileHandleForWriting
+        ] {
+            let descriptor = fileHandle.fileDescriptor
+            let flags = fcntl(descriptor, F_GETFD)
+            guard flags >= 0,
+                  fcntl(descriptor, F_SETFD, flags | FD_CLOEXEC) >= 0 else {
+                throw GitServiceError.outputRead(
+                    "Could not configure Git output pipe: \(String(cString: strerror(errno)))"
+                )
+            }
+        }
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = arguments
         process.currentDirectoryURL = URL(fileURLWithPath: workspacePath, isDirectory: true)

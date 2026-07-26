@@ -1,4 +1,6 @@
 import AppKit
+import CoreText
+import ImageIO
 import SwiftUI
 
 nonisolated struct MarkdownPreviewJumpRequest: Equatable, Sendable {
@@ -22,6 +24,14 @@ struct MarkdownCodeBlockRegion: Equatable {
     let headerRange: NSRange
     let sourceRange: NSRange
     let source: String
+    let usesGeneratedLineNumbers: Bool
+}
+
+struct MarkdownImageFigureRegion {
+    let id: String
+    let url: URL
+    let attachment: NSTextAttachment
+    let bounds: NSRect
 }
 
 struct MarkdownAttributedDocument {
@@ -29,12 +39,14 @@ struct MarkdownAttributedDocument {
     let headings: [MarkdownAttributedHeading]
     let codeHighlights: [MarkdownCodeHighlightRequest]
     let codeBlocks: [MarkdownCodeBlockRegion]
+    let imageFigures: [MarkdownImageFigureRegion]
 
     static let empty = MarkdownAttributedDocument(
         attributedString: NSAttributedString(),
         headings: [],
         codeHighlights: [],
-        codeBlocks: []
+        codeBlocks: [],
+        imageFigures: []
     )
 }
 
@@ -49,6 +61,30 @@ extension NSAttributedString.Key {
     nonisolated static let atelierHeadingRule = NSAttributedString.Key(
         "app.atelier.markdown.heading-rule"
     )
+    nonisolated static let atelierCodeLineNumber = NSAttributedString.Key(
+        "app.atelier.markdown.code-line-number"
+    )
+}
+
+@MainActor
+private final class MarkdownCodeLineNumberDecoration: NSObject {
+    let line: CTLine
+    let width: CGFloat
+
+    @MainActor
+    init(number: Int, codeFont: NSFont) {
+        let text = NSAttributedString(
+            string: String(number),
+            attributes: [
+                .font: AtelierTypography.codeFont(size: codeFont.pointSize * 0.85),
+                .foregroundColor: AppKitThemeAdapter.secondary.withAlphaComponent(0.55)
+            ]
+        )
+        let line = CTLineCreateWithAttributedString(text)
+        self.line = line
+        self.width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        super.init()
+    }
 }
 
 private enum MarkdownInlineCodeLayout {
@@ -71,19 +107,125 @@ nonisolated enum MarkdownCodeCardLayout {
     static let copyControlReservation: CGFloat = 44
 }
 
+nonisolated struct MarkdownRhythm: Equatable, Sendable {
+    let unit: CGFloat
+
+    @MainActor
+    init(bodyFont: NSFont, displayScale: CGFloat) {
+        unit = AtelierFontScaling.snapped(
+            ceil(bodyFont.ascender - bodyFont.descender + bodyFont.leading),
+            displayScale: displayScale
+        )
+    }
+
+    var paragraph: CGFloat { unit * 0.5 }
+    var heading3Before: CGFloat { unit }
+    var heading3After: CGFloat { unit * 0.5 }
+    var headingPrimaryBefore: CGFloat { unit * 2 }
+    var headingPrimaryAfter: CGFloat { unit * 0.75 }
+    var divider: CGFloat { unit * 1.5 }
+    var codeCard: CGFloat { unit }
+    var lede: CGFloat { unit * 0.75 }
+}
+
+nonisolated enum MarkdownImageFigureLayout {
+    static let aspectRatio: CGFloat = 16 / 9
+
+    @MainActor
+    static func bounds(scale: CGFloat) -> NSRect {
+        let width = AtelierMetrics.documentMaxWidth
+        return NSRect(
+            x: 0,
+            y: 0,
+            width: width,
+            height: width / aspectRatio
+        )
+    }
+}
+
+nonisolated struct MarkdownFrontMatterMastheadPlan: Equatable, Sendable {
+    let headingIndex: Int
+    let ledeIndex: Int?
+    let masthead: [MarkdownFrontMatterEntry]
+    let remaining: [MarkdownFrontMatterEntry]
+}
+
+nonisolated enum MarkdownFrontMatterMastheadPolicy {
+    static let maximumEntryCount = 3
+    static let maximumValueLength = 48
+
+    static func plan(
+        blocks: [AgentMarkdownBlock]
+    ) -> MarkdownFrontMatterMastheadPlan? {
+        guard blocks.count > 1,
+              case .frontMatter(let entries) = blocks[0],
+              case .heading(let level, _) = blocks[1],
+              level == 1 else {
+            return nil
+        }
+        let eligible = entries.filter {
+            $0.key.caseInsensitiveCompare("title") != .orderedSame
+                && !$0.value.isEmpty
+                && $0.value.count <= maximumValueLength
+                && !$0.value.contains(",")
+        }
+        let masthead = Array(eligible.prefix(maximumEntryCount))
+        let selectedKeys = Set(masthead.map(\.key))
+        let remaining = entries.filter { !selectedKeys.contains($0.key) }
+        let ledeIndex: Int? = blocks.indices.contains(2) && {
+            if case .paragraph = blocks[2] { return true }
+            return false
+        }() ? 2 : nil
+        return MarkdownFrontMatterMastheadPlan(
+            headingIndex: 1,
+            ledeIndex: ledeIndex,
+            masthead: masthead,
+            remaining: remaining
+        )
+    }
+}
+
+nonisolated enum MarkdownReadingProgressPolicy {
+    static func fraction(
+        originY: CGFloat,
+        viewportHeight: CGFloat,
+        documentHeight: CGFloat
+    ) -> CGFloat {
+        let maximum = max(0, documentHeight - max(0, viewportHeight))
+        guard maximum > 0 else { return 0 }
+        return min(1, max(0, originY / maximum))
+    }
+
+    static func visiblePixel(
+        fraction: CGFloat,
+        railHeight: CGFloat
+    ) -> Int {
+        Int((min(1, max(0, fraction)) * max(0, railHeight)).rounded())
+    }
+}
+
+nonisolated enum MarkdownLinkStylePolicy {
+    static let normalUnderlineAlpha: CGFloat = 0.35
+
+    @MainActor
+    static var normalUnderlineColor: NSColor {
+        AppKitThemeAdapter.accent.withAlphaComponent(normalUnderlineAlpha)
+    }
+}
+
 /// Editorial type decisions taken once during document construction.
 nonisolated enum MarkdownDocumentTypePolicy {
     static let ledeScale: CGFloat = 1.08
 
     /// A document that opens with an H1 gives its first paragraph the lede treatment.
     static func hasLedeParagraph(blocks: [AgentMarkdownBlock]) -> Bool {
-        guard blocks.count > 1,
-              case .heading(let level, _) = blocks[0],
-              level == 1,
-              case .paragraph = blocks[1] else {
-            return false
+        if blocks.count > 1,
+           case .heading(let level, _) = blocks[0],
+           level == 1,
+           case .paragraph = blocks[1] {
+            return true
         }
-        return true
+        return MarkdownFrontMatterMastheadPolicy.plan(blocks: blocks)?.ledeIndex != nil
     }
 }
 
@@ -114,6 +256,9 @@ nonisolated struct MarkdownPreviewDecorationMetrics: Sendable {
     let headingRulePrimaryLead: CGFloat
     let headingRuleSecondaryLead: CGFloat
     let hairline: CGFloat
+    let quoteGlyphFontSize: CGFloat
+    let quoteGlyphAlpha: CGFloat
+    let codeLineNumberGap: CGFloat
 
     @MainActor
     static var current: Self {
@@ -124,20 +269,47 @@ nonisolated struct MarkdownPreviewDecorationMetrics: Sendable {
             headingRuleThickness: MarkdownHeadingRuleLayout.thickness,
             headingRulePrimaryLead: MarkdownHeadingRuleLayout.primaryLeadWidth,
             headingRuleSecondaryLead: MarkdownHeadingRuleLayout.secondaryLeadWidth,
-            hairline: AtelierTheme.strokeHairline
+            hairline: AtelierTheme.strokeHairline,
+            quoteGlyphFontSize: 38,
+            quoteGlyphAlpha: 0.18,
+            codeLineNumberGap: AtelierMetrics.spaceS
         )
     }
 }
 
-nonisolated final class MarkdownPreviewLayoutManager: NSLayoutManager {
+nonisolated
+final class MarkdownPreviewLayoutManager: NSLayoutManager {
     private let metrics: MarkdownPreviewDecorationMetrics
     private let inlineCodePadding: NSSize
     private let inlineCodeHorizontalReservation: CGFloat
+    private let quoteFont: CTFont
+    private let quoteGlyph: CGGlyph
+    private let quoteColor: CGColor
 
     init(metrics: MarkdownPreviewDecorationMetrics) {
         self.metrics = metrics
         self.inlineCodePadding = metrics.inlineCodePadding
         self.inlineCodeHorizontalReservation = metrics.inlineCodeHorizontalReservation
+        let quoteFont = CTFontCreateWithName(
+            "NewYork" as CFString,
+            metrics.quoteGlyphFontSize,
+            nil
+        )
+        self.quoteFont = quoteFont
+        var character = Array("\u{201C}".utf16)
+        var glyph = CGGlyph()
+        if !CTFontGetGlyphsForCharacters(
+            quoteFont,
+            &character,
+            &glyph,
+            character.count
+        ) {
+            glyph = 0
+        }
+        self.quoteGlyph = glyph
+        self.quoteColor = AppKitThemeAdapter.accent
+            .withAlphaComponent(metrics.quoteGlyphAlpha)
+            .cgColor
         super.init()
     }
 
@@ -244,6 +416,28 @@ nonisolated final class MarkdownPreviewLayoutManager: NSLayoutManager {
                 width: MarkdownQuoteLayout.barWidth,
                 height: maxY - minY
             ).fill()
+            guard self.quoteGlyph != 0,
+                  NSLocationInRange(barGlyphRange.location, glyphsToShow),
+                  let context = NSGraphicsContext.current?.cgContext else {
+                return
+            }
+            var glyph = self.quoteGlyph
+            var position = CGPoint(
+                x: origin.x + MarkdownQuoteLayout.leadingInset
+                    + MarkdownQuoteLayout.barWidth
+                    + 4,
+                y: minY + origin.y + self.metrics.quoteGlyphFontSize * 0.78
+            )
+            context.saveGState()
+            context.setFillColor(self.quoteColor)
+            CTFontDrawGlyphs(
+                self.quoteFont,
+                &glyph,
+                &position,
+                1,
+                context
+            )
+            context.restoreGState()
         }
         textStorage.enumerateAttribute(
             .atelierHeadingRule,
@@ -251,6 +445,57 @@ nonisolated final class MarkdownPreviewLayoutManager: NSLayoutManager {
         ) { value, range, _ in
             guard let level = (value as? NSNumber)?.intValue else { return }
             drawHeadingRule(level: level, characterRange: range, at: origin)
+        }
+        textStorage.enumerateAttribute(
+            .atelierCodeLineNumber,
+            in: characterRange
+        ) { value, range, _ in
+            guard let decoration = value as? MarkdownCodeLineNumberDecoration,
+                  let graphicsContext = NSGraphicsContext.current else {
+                return
+            }
+            let context = graphicsContext.cgContext
+            let isFlipped = graphicsContext.isFlipped
+            let anchorGlyphRange = glyphRange(
+                forCharacterRange: range,
+                actualCharacterRange: nil
+            )
+            let visibleAnchor = NSIntersectionRange(
+                anchorGlyphRange,
+                glyphsToShow
+            )
+            guard visibleAnchor.length > 0 else { return }
+            let glyphIndex = visibleAnchor.location
+            var fragment = NSRect.zero
+            var usedFragment = NSRect.zero
+            enumerateLineFragments(
+                forGlyphRange: NSRange(location: glyphIndex, length: 1)
+            ) { lineRect, usedRect, _, _, stop in
+                fragment = lineRect
+                usedFragment = usedRect
+                stop.pointee = true
+            }
+            let baseline = fragment.minY + location(forGlyphAt: glyphIndex).y
+            let textPosition = CGPoint(
+                x: origin.x
+                    + usedFragment.minX
+                    - metrics.codeLineNumberGap,
+                y: origin.y + baseline
+            )
+            MainActor.assumeIsolated {
+                let previousTextMatrix = context.textMatrix
+                context.saveGState()
+                context.textMatrix = isFlipped
+                    ? CGAffineTransform(scaleX: 1, y: -1)
+                    : .identity
+                context.textPosition = CGPoint(
+                    x: textPosition.x - decoration.width,
+                    y: textPosition.y
+                )
+                CTLineDraw(decoration.line, context)
+                context.textMatrix = previousTextMatrix
+                context.restoreGState()
+            }
         }
     }
 
@@ -317,6 +562,7 @@ enum MarkdownAttributedDocumentBuilder {
         var headings: [MarkdownAttributedHeading] = []
         var codeHighlights: [MarkdownCodeHighlightRequest] = []
         var codeBlocks: [MarkdownCodeBlockRegion] = []
+        var imageFigures: [MarkdownImageFigureRegion] = []
         let bodySize = AtelierFontScaling.snapped(
             AtelierTypography.editorSize * scale,
             displayScale: displayScale
@@ -328,19 +574,33 @@ enum MarkdownAttributedDocumentBuilder {
                 displayScale: displayScale
             )
         )
+        let rhythm = MarkdownRhythm(
+            bodyFont: bodyFont,
+            displayScale: displayScale
+        )
 
         let hasLede = MarkdownDocumentTypePolicy.hasLedeParagraph(
             blocks: document.blocks
+        )
+        let mastheadPlan = MarkdownFrontMatterMastheadPolicy.plan(
+            blocks: document.blocks
+        )
+        let footnoteNumbers = MarkdownFootnotePolicy.numberMap(
+            in: document.blocks
         )
 
         for (index, block) in document.blocks.enumerated() {
             switch block {
             case .frontMatter(let entries):
+                if mastheadPlan != nil, index == 0 {
+                    continue
+                }
                 appendFrontMatter(
                     entries,
                     to: output,
                     bodySize: bodySize,
-                    codeFont: codeFont
+                    codeFont: codeFont,
+                    rhythm: rhythm
                 )
 
             case .heading(let level, let content):
@@ -350,15 +610,21 @@ enum MarkdownAttributedDocumentBuilder {
                     lineSpacing: level <= 2
                         ? AtelierMetrics.spaceS
                         : AtelierMetrics.spaceXS,
-                    before: index == 0 ? 0 : headingTopSpacing(level: level),
-                    after: level <= 2 ? AtelierMetrics.spaceL : AtelierMetrics.spaceXS
+                    before: output.length == 0 ? 0 : headingTopSpacing(
+                        level: level,
+                        rhythm: rhythm
+                    ),
+                    after: level <= 2
+                        ? rhythm.headingPrimaryAfter
+                        : rhythm.heading3After
                 )
                 let text = inlineText(
                     content,
                     font: font,
                     foregroundColor: headingColor(level: level),
                     paragraphStyle: paragraph,
-                    codeFont: codeFont
+                    codeFont: codeFont,
+                    footnoteNumbers: footnoteNumbers
                 )
                 let headingRange = NSRange(location: 0, length: text.length)
                 if level <= 2 {
@@ -387,9 +653,28 @@ enum MarkdownAttributedDocumentBuilder {
                         )
                     )
                 }
+                if let mastheadPlan,
+                   index == mastheadPlan.headingIndex {
+                    appendMasthead(
+                        mastheadPlan.masthead,
+                        to: output,
+                        bodySize: bodySize,
+                        rhythm: rhythm
+                    )
+                    if mastheadPlan.ledeIndex == nil {
+                        appendFrontMatter(
+                            mastheadPlan.remaining,
+                            to: output,
+                            bodySize: bodySize,
+                            codeFont: codeFont,
+                            rhythm: rhythm
+                        )
+                    }
+                }
 
             case .paragraph(let content):
-                let isLede = hasLede && index == 1
+                let isLede = hasLede
+                    && (index == 1 || index == mastheadPlan?.ledeIndex)
                 let ledeFont = isLede
                     ? NSFont.systemFont(
                         ofSize: AtelierFontScaling.snapped(
@@ -407,44 +692,64 @@ enum MarkdownAttributedDocumentBuilder {
                         lineSpacing: isLede
                             ? AtelierMetrics.spaceS + 2
                             : AtelierMetrics.spaceS,
-                        before: index == 0 ? 0 : AtelierMetrics.spaceM,
-                        after: isLede ? AtelierMetrics.spaceS : AtelierMetrics.spaceXS
+                        before: output.length == 0 ? 0 : rhythm.paragraph,
+                        after: isLede ? rhythm.lede : rhythm.paragraph
+                    ),
+                    footnoteNumbers: footnoteNumbers
+                )
+                if let mastheadPlan,
+                   index == mastheadPlan.ledeIndex {
+                    appendFrontMatter(
+                        mastheadPlan.remaining,
+                        to: output,
+                        bodySize: bodySize,
+                        codeFont: codeFont,
+                        rhythm: rhythm
                     )
-                )
+                }
 
-            case .unorderedItem(let content):
+            case .unorderedItem(let depth, let content):
                 appendListItem(
-                    marker: "\u{2022}",
-                    content: content,
-                    to: output,
-                    bodyFont: bodyFont,
-                    codeFont: codeFont
-                )
-
-            case .orderedItem(let number, let content):
-                appendListItem(
-                    marker: "\(number).",
-                    content: content,
-                    to: output,
-                    bodyFont: bodyFont,
-                    codeFont: codeFont
-                )
-
-            case .taskItem(let isCompleted, let content):
-                appendListItem(
-                    marker: isCompleted ? "\u{2611}" : "\u{2610}",
+                    marker: unorderedMarker(depth: depth),
+                    depth: depth,
                     content: content,
                     to: output,
                     bodyFont: bodyFont,
                     codeFont: codeFont,
-                    isCompleted: isCompleted
+                    rhythm: rhythm,
+                    footnoteNumbers: footnoteNumbers
+                )
+
+            case .orderedItem(let number, let depth, let content):
+                appendListItem(
+                    marker: "\(number).",
+                    depth: depth,
+                    content: content,
+                    to: output,
+                    bodyFont: bodyFont,
+                    codeFont: codeFont,
+                    rhythm: rhythm,
+                    footnoteNumbers: footnoteNumbers
+                )
+
+            case .taskItem(let isCompleted, let depth, let content):
+                appendListItem(
+                    marker: isCompleted ? "\u{2611}" : "\u{2610}",
+                    depth: depth,
+                    content: content,
+                    to: output,
+                    bodyFont: bodyFont,
+                    codeFont: codeFont,
+                    isCompleted: isCompleted,
+                    rhythm: rhythm,
+                    footnoteNumbers: footnoteNumbers
                 )
 
             case .quote(let content):
                 let paragraph = paragraphStyle(
                     lineSpacing: AtelierMetrics.spaceS,
-                    before: AtelierMetrics.spaceL,
-                    after: AtelierMetrics.spaceL,
+                    before: rhythm.paragraph,
+                    after: rhythm.paragraph,
                     firstLineHeadIndent: MarkdownQuoteLayout.indent,
                     headIndent: MarkdownQuoteLayout.indent,
                     tailIndent: -AtelierMetrics.spaceL
@@ -455,7 +760,8 @@ enum MarkdownAttributedDocumentBuilder {
                     font: serifItalicFont(size: bodySize),
                     foregroundColor: AppKitThemeAdapter.secondary,
                     paragraphStyle: paragraph,
-                    codeFont: codeFont
+                    codeFont: codeFont,
+                    footnoteNumbers: footnoteNumbers
                 )
                 output.append(quote)
                 output.append(NSAttributedString(string: "\n", attributes: [
@@ -471,6 +777,17 @@ enum MarkdownAttributedDocumentBuilder {
                     )
                 )
 
+            case .callout(let kind, let content):
+                appendCallout(
+                    kind: kind,
+                    content: content,
+                    to: output,
+                    bodyFont: bodyFont,
+                    codeFont: codeFont,
+                    rhythm: rhythm,
+                    footnoteNumbers: footnoteNumbers
+                )
+
             case .code(let language, let content):
                 appendCode(
                     id: AgentMarkdownBlock.blockAnchorID(index),
@@ -478,6 +795,7 @@ enum MarkdownAttributedDocumentBuilder {
                     content: content,
                     to: output,
                     codeFont: codeFont,
+                    rhythm: rhythm,
                     codeHighlights: &codeHighlights,
                     codeBlocks: &codeBlocks
                 )
@@ -500,21 +818,46 @@ enum MarkdownAttributedDocumentBuilder {
                     codeFont: codeFont
                 )
 
-            case .table(let headers, let rows):
+            case .table(let headers, let alignments, let rows):
                 appendTable(
                     headers: headers,
+                    alignments: alignments,
                     rows: rows,
                     to: output,
                     bodyFont: bodyFont,
                     codeFont: codeFont,
-                    usesDarkAppearance: usesDarkAppearance
+                    usesDarkAppearance: usesDarkAppearance,
+                    rhythm: rhythm,
+                    footnoteNumbers: footnoteNumbers
+                )
+
+            case .image(let altText, let urlText):
+                appendImageFigure(
+                    id: AgentMarkdownBlock.blockAnchorID(index),
+                    altText: altText,
+                    urlText: urlText,
+                    sourceDirectoryURL: document.sourceDirectoryURL,
+                    to: output,
+                    bodyFont: bodyFont,
+                    scale: scale,
+                    rhythm: rhythm,
+                    imageFigures: &imageFigures
+                )
+
+            case .footnotes(let notes):
+                appendFootnotes(
+                    notes,
+                    to: output,
+                    bodyFont: bodyFont,
+                    codeFont: codeFont,
+                    rhythm: rhythm
                 )
 
             case .divider:
                 let paragraph = paragraphStyle(
                     lineSpacing: 0,
-                    before: AtelierMetrics.spaceXL,
-                    after: AtelierMetrics.spaceXL
+                    before: rhythm.divider,
+                    after: rhythm.divider
                 )
                 paragraph.alignment = .center
                 let ornament = NSMutableAttributedString(
@@ -541,7 +884,8 @@ enum MarkdownAttributedDocumentBuilder {
             attributedString: NSAttributedString(attributedString: output),
             headings: headings,
             codeHighlights: codeHighlights,
-            codeBlocks: codeBlocks
+            codeBlocks: codeBlocks,
+            imageFigures: imageFigures
         )
     }
 
@@ -550,7 +894,8 @@ enum MarkdownAttributedDocumentBuilder {
         to output: NSMutableAttributedString,
         font: NSFont,
         codeFont: NSFont,
-        paragraphStyle: NSParagraphStyle
+        paragraphStyle: NSParagraphStyle,
+        footnoteNumbers: [String: Int] = [:]
     ) {
         output.append(
             inlineText(
@@ -558,7 +903,8 @@ enum MarkdownAttributedDocumentBuilder {
                 font: font,
                 foregroundColor: AppKitThemeAdapter.foreground,
                 paragraphStyle: paragraphStyle,
-                codeFont: codeFont
+                codeFont: codeFont,
+                footnoteNumbers: footnoteNumbers
             )
         )
         output.append(NSAttributedString(string: "\n", attributes: [
@@ -569,18 +915,22 @@ enum MarkdownAttributedDocumentBuilder {
 
     private static func appendListItem(
         marker: String,
+        depth: Int,
         content: String,
         to output: NSMutableAttributedString,
         bodyFont: NSFont,
         codeFont: NSFont,
-        isCompleted: Bool = false
+        isCompleted: Bool = false,
+        rhythm: MarkdownRhythm,
+        footnoteNumbers: [String: Int]
     ) {
         let markerWidth = AtelierMetrics.spaceXL
+            + CGFloat(depth) * AtelierMetrics.spaceXL
         let paragraph = paragraphStyle(
             lineSpacing: AtelierMetrics.spaceS,
-            before: AtelierMetrics.spaceXS,
-            after: AtelierMetrics.spaceXS,
-            firstLineHeadIndent: 0,
+            before: rhythm.paragraph * 0.5,
+            after: rhythm.paragraph * 0.5,
+            firstLineHeadIndent: -1,
             headIndent: markerWidth
         )
         // One explicit stop keeps single-line and wrapped items on the same indent.
@@ -588,9 +938,14 @@ enum MarkdownAttributedDocumentBuilder {
             NSTextTab(textAlignment: .left, location: markerWidth, options: [:])
         ]
         paragraph.defaultTabInterval = markerWidth
+        let markerColor = blendedColor(
+            from: AppKitThemeAdapter.accent,
+            to: AppKitThemeAdapter.border,
+            fraction: min(1, CGFloat(depth) / 3)
+        )
         output.append(NSAttributedString(string: marker + "\t", attributes: [
             .font: NSFont.systemFont(ofSize: bodyFont.pointSize, weight: .semibold),
-            .foregroundColor: AppKitThemeAdapter.accent,
+            .foregroundColor: markerColor,
             .paragraphStyle: paragraph
         ]))
         let text = inlineText(
@@ -600,7 +955,8 @@ enum MarkdownAttributedDocumentBuilder {
                 ? AppKitThemeAdapter.secondary
                 : AppKitThemeAdapter.foreground,
             paragraphStyle: paragraph,
-            codeFont: codeFont
+            codeFont: codeFont,
+            footnoteNumbers: footnoteNumbers
         )
         if isCompleted {
             text.addAttributes([
@@ -621,6 +977,7 @@ enum MarkdownAttributedDocumentBuilder {
         content: String,
         to output: NSMutableAttributedString,
         codeFont: NSFont,
+        rhythm: MarkdownRhythm,
         codeHighlights: inout [MarkdownCodeHighlightRequest],
         codeBlocks: inout [MarkdownCodeBlockRegion]
     ) {
@@ -645,7 +1002,7 @@ enum MarkdownAttributedDocumentBuilder {
         )
         let headerStyle = paragraphStyle(
             lineSpacing: 0,
-            before: AtelierMetrics.spaceL,
+            before: rhythm.codeCard,
             after: 0,
             firstLineHeadIndent: 0,
             headIndent: 0,
@@ -687,19 +1044,34 @@ enum MarkdownAttributedDocumentBuilder {
             lineSpacing: AtelierMetrics.spaceXS,
             before: 0,
             after: 0,
-            firstLineHeadIndent: 0,
-            headIndent: 0,
+            firstLineHeadIndent: AtelierMetrics.space2XL,
+            headIndent: AtelierMetrics.space2XL,
             tailIndent: 0
         )
+        codeStyle.tabStops = [
+            NSTextTab(
+                textAlignment: .right,
+                location: AtelierMetrics.spaceXL,
+                options: [:]
+            ),
+            NSTextTab(
+                textAlignment: .left,
+                location: AtelierMetrics.space2XL,
+                options: [:]
+            )
+        ]
+        codeStyle.defaultTabInterval = AtelierMetrics.space2XL
         codeStyle.textBlocks = [bodyBlock]
         let trailingCodeStyle = paragraphStyle(
             lineSpacing: AtelierMetrics.spaceXS,
             before: 0,
-            after: AtelierMetrics.spaceL,
-            firstLineHeadIndent: 0,
-            headIndent: 0,
+            after: rhythm.codeCard,
+            firstLineHeadIndent: AtelierMetrics.space2XL,
+            headIndent: AtelierMetrics.space2XL,
             tailIndent: 0
         )
+        trailingCodeStyle.tabStops = codeStyle.tabStops
+        trailingCodeStyle.defaultTabInterval = AtelierMetrics.space2XL
         trailingCodeStyle.textBlocks = [bodyBlock]
         let source = content.isEmpty ? " " : content
         let range = NSRange(location: output.length, length: (source as NSString).length)
@@ -718,6 +1090,21 @@ enum MarkdownAttributedDocumentBuilder {
                 length: code.length - lastLineStart
             )
         )
+        var lineStart = 0
+        for (lineIndex, line) in source.split(
+            separator: "\n",
+            omittingEmptySubsequences: false
+        ).enumerated() where lineStart < source.utf16.count {
+            code.addAttribute(
+                .atelierCodeLineNumber,
+                value: MarkdownCodeLineNumberDecoration(
+                    number: lineIndex + 1,
+                    codeFont: codeFont
+                ),
+                range: NSRange(location: lineStart, length: 1)
+            )
+            lineStart += line.utf16.count + 1
+        }
         output.append(code)
         codeBlocks.append(
             MarkdownCodeBlockRegion(
@@ -727,7 +1114,8 @@ enum MarkdownAttributedDocumentBuilder {
                     length: range.location - headerStart
                 ),
                 sourceRange: range,
-                source: content
+                source: content,
+                usesGeneratedLineNumbers: true
             )
         )
         if !content.isEmpty {
@@ -785,7 +1173,8 @@ enum MarkdownAttributedDocumentBuilder {
         _ entries: [MarkdownFrontMatterEntry],
         to output: NSMutableAttributedString,
         bodySize: CGFloat,
-        codeFont: NSFont
+        codeFont: NSFont,
+        rhythm: MarkdownRhythm
     ) {
         guard !entries.isEmpty else { return }
         let table = NSTextTable()
@@ -858,7 +1247,7 @@ enum MarkdownAttributedDocumentBuilder {
                 // Table cells keep zero paragraph spacing; the next block owns the gap.
                 let paragraph = paragraphStyle(
                     lineSpacing: AtelierMetrics.spaceXS,
-                    before: 0,
+                    before: rowIndex == 0 ? rhythm.paragraph : 0,
                     after: 0
                 )
                 if columnIndex == 0 {
@@ -876,6 +1265,311 @@ enum MarkdownAttributedDocumentBuilder {
                         .paragraphStyle: paragraph
                     ]
                 ))
+            }
+        }
+    }
+
+    private static func appendMasthead(
+        _ entries: [MarkdownFrontMatterEntry],
+        to output: NSMutableAttributedString,
+        bodySize: CGFloat,
+        rhythm: MarkdownRhythm
+    ) {
+        guard !entries.isEmpty else { return }
+        let table = NSTextTable()
+        table.numberOfColumns = entries.count
+        table.collapsesBorders = true
+        table.hidesEmptyCells = false
+        table.setContentWidth(100, type: .percentageValueType)
+        let font = AtelierTypography.codeFont(size: max(9, bodySize * 0.68))
+
+        for (column, entry) in entries.enumerated() {
+            let block = NSTextTableBlock(
+                table: table,
+                startingRow: 0,
+                rowSpan: 1,
+                startingColumn: column,
+                columnSpan: 1
+            )
+            if column < entries.count - 1 {
+                block.setBorderColor(AppKitThemeAdapter.border)
+                block.setWidth(
+                    AtelierTheme.strokeHairline,
+                    type: .absoluteValueType,
+                    for: .border,
+                    edge: .maxX
+                )
+            }
+            block.setWidth(
+                AtelierMetrics.spaceS,
+                type: .absoluteValueType,
+                for: .padding,
+                edge: .minX
+            )
+            block.setWidth(
+                AtelierMetrics.spaceS,
+                type: .absoluteValueType,
+                for: .padding,
+                edge: .maxX
+            )
+            let paragraph = paragraphStyle(
+                lineSpacing: 0,
+                before: rhythm.paragraph,
+                after: 0
+            )
+            paragraph.alignment = .center
+            paragraph.textBlocks = [block]
+            output.append(NSAttributedString(
+                string: entry.value + "\n",
+                attributes: [
+                    .font: font,
+                    .foregroundColor: AppKitThemeAdapter.accent,
+                    .kern: 0.6,
+                    .paragraphStyle: paragraph
+                ]
+            ))
+        }
+    }
+
+    private static func appendCallout(
+        kind: MarkdownCalloutKind,
+        content: String,
+        to output: NSMutableAttributedString,
+        bodyFont: NSFont,
+        codeFont: NSFont,
+        rhythm: MarkdownRhythm,
+        footnoteNumbers: [String: Int]
+    ) {
+        let table = NSTextTable()
+        table.numberOfColumns = 1
+        table.collapsesBorders = true
+        table.hidesEmptyCells = false
+        table.setContentWidth(100, type: .percentageValueType)
+        let block = NSTextTableBlock(
+            table: table,
+            startingRow: 0,
+            rowSpan: 2,
+            startingColumn: 0,
+            columnSpan: 1
+        )
+        block.backgroundColor = kind.color.withAlphaComponent(0.07)
+        block.setBorderColor(AppKitThemeAdapter.border)
+        block.setWidth(
+            AtelierTheme.strokeHairline,
+            type: .absoluteValueType,
+            for: .border
+        )
+        block.setBorderColor(kind.color, for: .minX)
+        block.setWidth(
+            MarkdownQuoteLayout.barWidth,
+            type: .absoluteValueType,
+            for: .border,
+            edge: .minX
+        )
+        for edge in [NSRectEdge.minX, .maxX] {
+            block.setWidth(
+                AtelierMetrics.spaceM,
+                type: .absoluteValueType,
+                for: .padding,
+                edge: edge
+            )
+        }
+        for edge in [NSRectEdge.minY, .maxY] {
+            block.setWidth(
+                AtelierMetrics.spaceS,
+                type: .absoluteValueType,
+                for: .padding,
+                edge: edge
+            )
+        }
+        let labelStyle = paragraphStyle(
+            lineSpacing: 0,
+            before: rhythm.paragraph,
+            after: AtelierMetrics.spaceXS
+        )
+        labelStyle.textBlocks = [block]
+        output.append(NSAttributedString(
+            string: "\(kind.glyph) \(kind.rawValue)\n",
+            attributes: [
+                .font: AtelierTypography.codeFont(
+                    size: max(9, bodyFont.pointSize * 0.68)
+                ),
+                .foregroundColor: kind.color,
+                .kern: 0.7,
+                .paragraphStyle: labelStyle
+            ]
+        ))
+        let bodyStyle = paragraphStyle(
+            lineSpacing: AtelierMetrics.spaceS,
+            before: 0,
+            after: rhythm.paragraph
+        )
+        bodyStyle.textBlocks = [block]
+        output.append(
+            inlineText(
+                content,
+                font: bodyFont,
+                foregroundColor: AppKitThemeAdapter.foreground,
+                paragraphStyle: bodyStyle,
+                codeFont: codeFont,
+                footnoteNumbers: footnoteNumbers
+            )
+        )
+        output.append(NSAttributedString(string: "\n", attributes: [
+            .font: bodyFont,
+            .paragraphStyle: bodyStyle
+        ]))
+    }
+
+    private static func appendImageFigure(
+        id: String,
+        altText: String,
+        urlText: String,
+        sourceDirectoryURL: URL?,
+        to output: NSMutableAttributedString,
+        bodyFont: NSFont,
+        scale: CGFloat,
+        rhythm: MarkdownRhythm,
+        imageFigures: inout [MarkdownImageFigureRegion]
+    ) {
+        let bounds = MarkdownImageFigureLayout.bounds(scale: scale)
+        let attachment = NSTextAttachment()
+        attachment.bounds = bounds
+        attachment.image = MarkdownImageFigureRenderer.image(
+            size: bounds.size,
+            content: nil
+        )
+        let paragraph = paragraphStyle(
+            lineSpacing: 0,
+            before: rhythm.paragraph,
+            after: altText.isEmpty ? rhythm.paragraph : AtelierMetrics.spaceXS
+        )
+        paragraph.alignment = .center
+        let figure = NSMutableAttributedString(attachment: attachment)
+        figure.addAttribute(
+            .paragraphStyle,
+            value: paragraph,
+            range: NSRange(location: 0, length: figure.length)
+        )
+        output.append(figure)
+        output.append(NSAttributedString(string: "\n", attributes: [
+            .font: bodyFont,
+            .paragraphStyle: paragraph
+        ]))
+
+        if !altText.isEmpty {
+            let caption = paragraphStyle(
+                lineSpacing: AtelierMetrics.spaceXS,
+                before: 0,
+                after: rhythm.paragraph
+            )
+            caption.alignment = .center
+            output.append(NSAttributedString(
+                string: altText + "\n",
+                attributes: [
+                    .font: serifItalicFont(size: max(10, bodyFont.pointSize * 0.82)),
+                    .foregroundColor: AppKitThemeAdapter.secondary,
+                    .paragraphStyle: caption
+                ]
+            ))
+        }
+
+        guard let url = MarkdownImageFigurePolicy.localURL(
+            urlText: urlText,
+            directoryURL: sourceDirectoryURL
+        ) else {
+            return
+        }
+        imageFigures.append(
+            MarkdownImageFigureRegion(
+                id: id,
+                url: url,
+                attachment: attachment,
+                bounds: bounds
+            )
+        )
+    }
+
+    private static func appendFootnotes(
+        _ notes: [MarkdownFootnote],
+        to output: NSMutableAttributedString,
+        bodyFont: NSFont,
+        codeFont: NSFont,
+        rhythm: MarkdownRhythm
+    ) {
+        guard !notes.isEmpty else { return }
+        let table = NSTextTable()
+        table.numberOfColumns = 1
+        table.collapsesBorders = true
+        table.hidesEmptyCells = false
+        table.setContentWidth(100, type: .percentageValueType)
+
+        for row in 0...notes.count {
+            let block = NSTextTableBlock(
+                table: table,
+                startingRow: row,
+                rowSpan: 1,
+                startingColumn: 0,
+                columnSpan: 1
+            )
+            if row == 0 {
+                block.setBorderColor(AppKitThemeAdapter.border)
+                block.setWidth(
+                    AtelierTheme.strokeHairline,
+                    type: .absoluteValueType,
+                    for: .border,
+                    edge: .minY
+                )
+            }
+            let paragraph = paragraphStyle(
+                lineSpacing: AtelierMetrics.spaceXS,
+                before: row == 0 ? rhythm.divider : 0,
+                after: row == notes.count ? rhythm.paragraph : AtelierMetrics.spaceXS,
+                firstLineHeadIndent: row == 0 ? 0 : AtelierMetrics.spaceXL,
+                headIndent: row == 0 ? 0 : AtelierMetrics.spaceXL
+            )
+            paragraph.textBlocks = [block]
+            if row == 0 {
+                output.append(NSAttributedString(
+                    string: "NOTES\n",
+                    attributes: [
+                        .font: serifFont(
+                            size: max(10, bodyFont.pointSize * 0.82),
+                            weight: .semibold
+                        ),
+                        .foregroundColor: AppKitThemeAdapter.secondary,
+                        .kern: 0.6,
+                        .paragraphStyle: paragraph
+                    ]
+                ))
+            } else {
+                let note = notes[row - 1]
+                output.append(NSAttributedString(
+                    string: "\(note.number).\t",
+                    attributes: [
+                        .font: AtelierTypography.codeFont(
+                            size: max(9, bodyFont.pointSize * 0.72)
+                        ),
+                        .foregroundColor: AppKitThemeAdapter.accent,
+                        .paragraphStyle: paragraph
+                    ]
+                ))
+                output.append(
+                    inlineText(
+                        note.text,
+                        font: serifFont(
+                            size: max(10, bodyFont.pointSize * 0.86),
+                            weight: .regular
+                        ),
+                        foregroundColor: AppKitThemeAdapter.secondary,
+                        paragraphStyle: paragraph,
+                        codeFont: codeFont
+                    )
+                )
+                output.append(NSAttributedString(string: "\n", attributes: [
+                    .font: bodyFont,
+                    .paragraphStyle: paragraph
+                ]))
             }
         }
     }
@@ -930,11 +1624,14 @@ enum MarkdownAttributedDocumentBuilder {
 
     private static func appendTable(
         headers: [String],
+        alignments: [MarkdownColumnAlignment],
         rows: [[String]],
         to output: NSMutableAttributedString,
         bodyFont: NSFont,
         codeFont: NSFont,
-        usesDarkAppearance: Bool
+        usesDarkAppearance: Bool,
+        rhythm: MarkdownRhythm,
+        footnoteNumbers: [String: Int]
     ) {
         guard !headers.isEmpty else { return }
         let table = NSTextTable()
@@ -944,9 +1641,13 @@ enum MarkdownAttributedDocumentBuilder {
         table.setContentWidth(100, type: .percentageValueType)
         let allRows = [headers] + rows
         let columnPercentages = tableColumnPercentages(headers: headers, rows: rows)
+        let numericColumns = MarkdownTableAlignmentPolicy.numericMajorityColumns(
+            headers: headers,
+            rows: rows
+        )
         let spacerStyle = paragraphStyle(
             lineSpacing: 0,
-            before: AtelierMetrics.spaceL,
+            before: rhythm.paragraph,
             after: 0
         )
         output.append(NSAttributedString(string: "\n", attributes: [
@@ -1026,17 +1727,30 @@ enum MarkdownAttributedDocumentBuilder {
                 if MarkdownTableCellPolicy.wrapsByCharacter(value) {
                     paragraph.lineBreakMode = .byCharWrapping
                 }
+                let declaredAlignment = alignments.indices.contains(columnIndex)
+                    ? alignments[columnIndex]
+                    : .left
+                paragraph.alignment = nativeAlignment(
+                    numericColumns.contains(columnIndex)
+                        ? .right
+                        : declaredAlignment
+                )
                 paragraph.textBlocks = [block]
                 let cellSize = bodyFont.pointSize * MarkdownTableCellPolicy.fontScale
-                let font = rowIndex == 0
-                    ? NSFont.systemFont(ofSize: cellSize, weight: .semibold)
-                    : NSFont.systemFont(ofSize: cellSize)
+                let weight: NSFont.Weight = rowIndex == 0 ? .semibold : .regular
+                let font = numericColumns.contains(columnIndex)
+                    ? NSFont.monospacedDigitSystemFont(
+                        ofSize: cellSize,
+                        weight: weight
+                    )
+                    : NSFont.systemFont(ofSize: cellSize, weight: weight)
                 let cell = inlineText(
                     value,
                     font: font,
                     foregroundColor: AppKitThemeAdapter.foreground,
                     paragraphStyle: paragraph,
-                    codeFont: codeFont
+                    codeFont: codeFont,
+                    footnoteNumbers: footnoteNumbers
                 )
                 if rowIndex == 0 {
                     cell.addAttribute(
@@ -1096,16 +1810,45 @@ enum MarkdownAttributedDocumentBuilder {
         font: NSFont,
         foregroundColor: NSColor,
         paragraphStyle: NSParagraphStyle,
-        codeFont: NSFont
+        codeFont: NSFont,
+        footnoteNumbers: [String: Int] = [:]
     ) -> NSMutableAttributedString {
         let swiftValue = AgentMarkdownInlinePolicy.attributedString(
             content,
-            showsColorSwatches: true
+            showsColorSwatches: true,
+            footnoteNumbers: footnoteNumbers
         )
         let output = NSMutableAttributedString(attributedString: NSAttributedString(swiftValue))
         let fullRange = NSRange(location: 0, length: output.length)
         guard fullRange.length > 0 else { return output }
 
+        if !footnoteNumbers.isEmpty {
+            let source = content as NSString
+            for reference in MarkdownFootnotePolicy.resolvedReferences(
+                in: content,
+                numbers: footnoteNumbers
+            ) {
+                let prefix = source.substring(to: reference.sourceRange.location)
+                let renderedPrefix = AgentMarkdownInlinePolicy.attributedString(
+                    prefix,
+                    showsColorSwatches: true,
+                    footnoteNumbers: footnoteNumbers
+                )
+                let range = NSRange(
+                    location: NSAttributedString(renderedPrefix).length,
+                    length: String(reference.number).utf16.count
+                )
+                guard NSMaxRange(range) <= output.length else { continue }
+                output.addAttributes([
+                    .font: NSFont.systemFont(
+                        ofSize: AtelierTypography.micro,
+                        weight: .semibold
+                    ),
+                    .foregroundColor: AppKitThemeAdapter.accent,
+                    .baselineOffset: 4
+                ], range: range)
+            }
+        }
         let nativeString = output.string as NSString
         var swatchColors: [(range: NSRange, color: NSColor)] = []
         let matches = colorSwatchExpression?.matches(
@@ -1297,8 +2040,40 @@ enum MarkdownAttributedDocumentBuilder {
         }
     }
 
-    private static func headingTopSpacing(level: Int) -> CGFloat {
-        level <= 2 ? AtelierMetrics.space2XL + AtelierMetrics.spaceS : AtelierMetrics.spaceXL
+    private static func headingTopSpacing(
+        level: Int,
+        rhythm: MarkdownRhythm
+    ) -> CGFloat {
+        level <= 2 ? rhythm.headingPrimaryBefore : rhythm.heading3Before
+    }
+
+    private static func unorderedMarker(depth: Int) -> String {
+        switch depth {
+        case 0: "\u{2022}"
+        case 1: "\u{25E6}"
+        default: "\u{2013}"
+        }
+    }
+
+    private static func nativeAlignment(
+        _ alignment: MarkdownColumnAlignment
+    ) -> NSTextAlignment {
+        switch alignment {
+        case .left: .left
+        case .center: .center
+        case .right: .right
+        }
+    }
+
+    private static func blendedColor(
+        from: NSColor,
+        to: NSColor,
+        fraction: CGFloat
+    ) -> NSColor {
+        from.blended(
+            withFraction: min(1, max(0, fraction)),
+            of: to
+        ) ?? from
     }
 }
 
@@ -1307,6 +2082,295 @@ private struct MarkdownCodeCopyControl: View {
 
     var body: some View {
         MarkdownCopyButton(source: source, label: "Copy code")
+    }
+}
+
+nonisolated struct MarkdownDecodedImage: Sendable {
+    let width: Int
+    let height: Int
+    let pixels: Data
+
+    @MainActor
+    func cgImage() -> CGImage? {
+        guard width > 0,
+              height > 0,
+              pixels.count == width * height * 4,
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let provider = CGDataProvider(data: pixels as CFData) else {
+            return nil
+        }
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGBitmapInfo(
+                rawValue: CGImageAlphaInfo.premultipliedLast.rawValue
+            ),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        )
+    }
+}
+
+@MainActor
+private enum MarkdownImageFigureRenderer {
+    static func image(size: NSSize, content: CGImage?) -> NSImage {
+        let width = max(1, Int(size.width.rounded(.up)))
+        let height = max(1, Int(size.height.rounded(.up)))
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else {
+            return NSImage(size: size)
+        }
+
+        let canvas = CGRect(x: 0, y: 0, width: width, height: height)
+        let borderWidth = max(1, AtelierTheme.strokeHairline)
+        let frame = canvas.insetBy(dx: borderWidth / 2, dy: borderWidth / 2)
+        let shape = CGPath(
+            roundedRect: frame,
+            cornerWidth: AtelierTheme.controlRadius,
+            cornerHeight: AtelierTheme.controlRadius,
+            transform: nil
+        )
+        context.setFillColor(
+            AppKitThemeAdapter.raised.withAlphaComponent(0.45).cgColor
+        )
+        context.addPath(shape)
+        context.fillPath()
+
+        if let content {
+            let sourceSize = CGSize(
+                width: content.width,
+                height: content.height
+            )
+            let fit = min(
+                frame.width / sourceSize.width,
+                frame.height / sourceSize.height
+            )
+            let fittedSize = CGSize(
+                width: sourceSize.width * fit,
+                height: sourceSize.height * fit
+            )
+            let fitted = CGRect(
+                x: frame.midX - fittedSize.width / 2,
+                y: frame.midY - fittedSize.height / 2,
+                width: fittedSize.width,
+                height: fittedSize.height
+            )
+            context.saveGState()
+            context.addPath(shape)
+            context.clip()
+            context.interpolationQuality = .high
+            context.draw(content, in: fitted)
+            context.restoreGState()
+        }
+
+        context.setStrokeColor(AppKitThemeAdapter.border.cgColor)
+        context.setLineWidth(borderWidth)
+        context.addPath(shape)
+        context.strokePath()
+        guard let rendered = context.makeImage() else {
+            return NSImage(size: size)
+        }
+        return NSImage(cgImage: rendered, size: size)
+    }
+}
+
+nonisolated enum MarkdownLocalImageLoader {
+    static func load(_ url: URL) async -> MarkdownDecodedImage? {
+        guard !Task.isCancelled else { return nil }
+        return await withTaskGroup(
+            of: MarkdownDecodedImage?.self,
+            returning: MarkdownDecodedImage?.self
+        ) { group in
+            group.addTask(priority: .utility) {
+                decode(url)
+            }
+            return await group.next() ?? nil
+        }
+    }
+
+    private static func decode(_ url: URL) -> MarkdownDecodedImage? {
+        guard !Task.isCancelled,
+              url.isFileURL,
+              let source = CGImageSourceCreateWithURL(
+                  url as CFURL,
+                  [
+                      kCGImageSourceShouldCache: false,
+                      kCGImageSourceShouldCacheImmediately: true
+                  ] as CFDictionary
+              ),
+              let image = CGImageSourceCreateImageAtIndex(
+                  source,
+                  0,
+                  [
+                      kCGImageSourceShouldCacheImmediately: true
+                  ] as CFDictionary
+              ),
+              !Task.isCancelled else {
+            return nil
+        }
+        let width = image.width
+        let height = image.height
+        let bytesPerRow = width * 4
+        var pixels = Data(count: bytesPerRow * height)
+        let didRender = pixels.withUnsafeMutableBytes { buffer in
+            guard !Task.isCancelled,
+                  let address = buffer.baseAddress,
+                  let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+                  let context = CGContext(
+                      data: address,
+                      width: width,
+                      height: height,
+                      bitsPerComponent: 8,
+                      bytesPerRow: bytesPerRow,
+                      space: colorSpace,
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  ) else {
+                return false
+            }
+            context.draw(
+                image,
+                in: CGRect(x: 0, y: 0, width: width, height: height)
+            )
+            return true
+        }
+        guard didRender, !Task.isCancelled else { return nil }
+        return MarkdownDecodedImage(
+            width: width,
+            height: height,
+            pixels: pixels
+        )
+    }
+}
+
+@MainActor
+final class MarkdownPreviewTextView: NSTextView {
+    private var linkTrackingArea: NSTrackingArea?
+    private var hoveredLinkRange: NSRange?
+    var quietLinkUnderlineColor = MarkdownLinkStylePolicy.normalUnderlineColor
+    var activeLinkUnderlineColor = AppKitThemeAdapter.accent
+
+    override func updateTrackingAreas() {
+        if let linkTrackingArea {
+            removeTrackingArea(linkTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [
+                .activeInKeyWindow,
+                .inVisibleRect,
+                .mouseMoved,
+                .mouseEnteredAndExited
+            ],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        linkTrackingArea = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let point = convert(event.locationInWindow, from: nil)
+        let range = linkRange(at: point)
+        updateHoveredLink(range)
+        if range != nil {
+            NSCursor.pointingHand.set()
+        } else {
+            NSCursor.iBeam.set()
+        }
+    }
+
+    func linkRange(at point: NSPoint) -> NSRange? {
+        guard let textContainer,
+              let layoutManager,
+              let textStorage else {
+            return nil
+        }
+        let containerPoint = NSPoint(
+            x: point.x - textContainerOrigin.x,
+            y: point.y - textContainerOrigin.y
+        )
+        let glyphIndex = layoutManager.glyphIndex(
+            for: containerPoint,
+            in: textContainer,
+            fractionOfDistanceThroughGlyph: nil
+        )
+        guard glyphIndex < layoutManager.numberOfGlyphs else {
+            return nil
+        }
+        let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+        guard characterIndex < textStorage.length else {
+            return nil
+        }
+        var range = NSRange()
+        let link = textStorage.attribute(
+            .link,
+            at: characterIndex,
+            longestEffectiveRange: &range,
+            in: NSRange(location: 0, length: textStorage.length)
+        )
+        guard link != nil else { return nil }
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: range,
+            actualCharacterRange: nil
+        )
+        var containsPoint = false
+        layoutManager.enumerateEnclosingRects(
+            forGlyphRange: glyphRange,
+            withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+            in: textContainer
+        ) { rect, stop in
+            guard rect.contains(containerPoint) else { return }
+            containsPoint = true
+            stop.pointee = true
+        }
+        return containsPoint ? range : nil
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        updateHoveredLink(nil)
+        super.mouseExited(with: event)
+    }
+
+    func resetHoveredLink() {
+        updateHoveredLink(nil)
+    }
+
+    private func updateHoveredLink(_ range: NSRange?) {
+        guard hoveredLinkRange != range, let textStorage else { return }
+        textStorage.beginEditing()
+        if let hoveredLinkRange,
+           NSMaxRange(hoveredLinkRange) <= textStorage.length {
+            textStorage.addAttribute(
+                .underlineColor,
+                value: quietLinkUnderlineColor,
+                range: hoveredLinkRange
+            )
+        }
+        if let range, NSMaxRange(range) <= textStorage.length {
+            textStorage.addAttribute(
+                .underlineColor,
+                value: activeLinkUnderlineColor,
+                range: range
+            )
+        }
+        textStorage.endEditing()
+        hoveredLinkRange = range
     }
 }
 
@@ -1319,6 +2383,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
     let isActive: Bool
     let jumpRequest: MarkdownPreviewJumpRequest?
     @Binding var selectedOutlineID: String?
+    @Binding var readingProgress: CGFloat
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -1351,7 +2416,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
         textContainer.lineFragmentPadding = 0
         layoutManager.addTextContainer(textContainer)
 
-        let textView = NSTextView(
+        let textView = MarkdownPreviewTextView(
             frame: NSRect(origin: .zero, size: scrollView.contentSize),
             textContainer: textContainer
         )
@@ -1380,7 +2445,8 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
         ]
         textView.linkTextAttributes = [
             .foregroundColor: AppKitThemeAdapter.accent,
-            .underlineStyle: NSUnderlineStyle.single.rawValue
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+            .underlineColor: MarkdownLinkStylePolicy.normalUnderlineColor
         ]
         textView.setAccessibilityLabel("Markdown preview")
         scrollView.documentView = textView
@@ -1396,7 +2462,8 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             usesDarkAppearance: colorScheme == .dark,
             isActive: isActive,
             jumpRequest: jumpRequest,
-            onSelectedOutlineChange: { selectedOutlineID = $0 }
+            onSelectedOutlineChange: { selectedOutlineID = $0 },
+            onReadingProgressChange: { readingProgress = $0 }
         )
     }
 
@@ -1423,6 +2490,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
         private weak var textView: NSTextView?
         private var boundsObserver: NSObjectProtocol?
         private var renderedSource = ""
+        private var renderedDirectoryURL: URL?
         private var renderedScale: CGFloat = 0
         private var renderedDisplayScale: CGFloat = 0
         private var renderedDarkAppearance: Bool?
@@ -1432,8 +2500,12 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
         private var appliedJumpRequest: MarkdownPreviewJumpRequest?
         private var lastReportedOutlineID: String?
         private var onSelectedOutlineChange: (String?) -> Void = { _ in }
+        private var onReadingProgressChange: (CGFloat) -> Void = { _ in }
         private var highlightGeneration = 0
         private var highlightTask: Task<Void, Never>?
+        private var imageGeneration = 0
+        private var imageTask: Task<Void, Never>?
+        private var lastReportedProgressPixel = -1
         private var lastViewportWidth: CGFloat = 0
         private var isActive = false
 
@@ -1448,6 +2520,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                 MainActor.assumeIsolated {
                     self?.updateTextInsets()
                     self?.syncActiveHeading()
+                    self?.syncReadingProgress()
                     self?.syncVisibleCodeCopyControls()
                 }
             }
@@ -1460,19 +2533,23 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             usesDarkAppearance: Bool,
             isActive: Bool,
             jumpRequest: MarkdownPreviewJumpRequest?,
-            onSelectedOutlineChange: @escaping (String?) -> Void
+            onSelectedOutlineChange: @escaping (String?) -> Void,
+            onReadingProgressChange: @escaping (CGFloat) -> Void
         ) {
             self.onSelectedOutlineChange = onSelectedOutlineChange
+            self.onReadingProgressChange = onReadingProgressChange
             updateActiveState(isActive)
             updateTextInsets()
 
             let needsRender =
                 renderedSource != document.source
+                || renderedDirectoryURL != document.sourceDirectoryURL
                 || renderedScale != scale
                 || renderedDisplayScale != displayScale
                 || renderedDarkAppearance != usesDarkAppearance
             if needsRender {
                 renderedSource = document.source
+                renderedDirectoryURL = document.sourceDirectoryURL
                 renderedScale = scale
                 renderedDisplayScale = displayScale
                 renderedDarkAppearance = usesDarkAppearance
@@ -1487,6 +2564,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                     rendered.codeHighlights,
                     usesDarkAppearance: usesDarkAppearance
                 )
+                scheduleImageLoads(rendered.imageFigures)
             }
 
             if appliedJumpRequest != jumpRequest {
@@ -1501,6 +2579,9 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             highlightGeneration += 1
             highlightTask?.cancel()
             highlightTask = nil
+            imageGeneration += 1
+            imageTask?.cancel()
+            imageTask = nil
             for control in codeCopyControls.values {
                 control.removeFromSuperview()
             }
@@ -1513,6 +2594,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             textView = nil
             scrollView = nil
             onSelectedOutlineChange = { _ in }
+            onReadingProgressChange = { _ in }
         }
 
         private func updateActiveState(_ active: Bool) {
@@ -1566,6 +2648,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                 )
             }
             textStorage.setAttributedString(document.attributedString)
+            (textView as? MarkdownPreviewTextView)?.resetHoveredLink()
             let length = textStorage.length
             if selection.location <= length {
                 textView.setSelectedRange(
@@ -1587,7 +2670,55 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             )
             scrollView.reflectScrolledClipView(scrollView.contentView)
             syncActiveHeading()
+            syncReadingProgress()
             syncVisibleCodeCopyControls()
+        }
+
+        private func scheduleImageLoads(
+            _ figures: [MarkdownImageFigureRegion]
+        ) {
+            imageGeneration += 1
+            let generation = imageGeneration
+            imageTask?.cancel()
+            imageTask = nil
+            guard !figures.isEmpty else { return }
+            imageTask = Task { [weak self] in
+                for figure in figures {
+                    guard !Task.isCancelled else { return }
+                    guard let decoded = await MarkdownLocalImageLoader.load(
+                        figure.url
+                    ) else {
+                        continue
+                    }
+                    guard !Task.isCancelled else { return }
+                    self?.applyImage(
+                        decoded,
+                        to: figure,
+                        generation: generation
+                    )
+                }
+            }
+        }
+
+        private func applyImage(
+            _ decoded: MarkdownDecodedImage,
+            to figure: MarkdownImageFigureRegion,
+            generation: Int
+        ) {
+            guard generation == imageGeneration,
+                  let scrollView,
+                  let textView else {
+                return
+            }
+            let origin = scrollView.contentView.bounds.origin
+            figure.attachment.image = MarkdownImageFigureRenderer.image(
+                size: figure.bounds.size,
+                content: decoded.cgImage()
+            )
+            figure.attachment.bounds = figure.bounds
+            textView.needsDisplay = true
+            scrollView.contentView.scroll(to: origin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
         private func syncVisibleCodeCopyControls() {
@@ -1783,6 +2914,29 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             let active = headings.last(where: { $0.range.location <= characterIndex })
                 ?? headings.first
             reportActiveHeading(active?.id)
+        }
+
+        private func syncReadingProgress() {
+            guard isActive,
+                  let scrollView,
+                  let textView else {
+                return
+            }
+            let viewportHeight = scrollView.contentView.bounds.height
+            let progress = MarkdownReadingProgressPolicy.fraction(
+                originY: scrollView.contentView.bounds.minY,
+                viewportHeight: viewportHeight,
+                documentHeight: textView.frame.height
+            )
+            let pixel = MarkdownReadingProgressPolicy.visiblePixel(
+                fraction: progress,
+                railHeight: viewportHeight
+            )
+            guard pixel != lastReportedProgressPixel else { return }
+            lastReportedProgressPixel = pixel
+            Task { @MainActor [onReadingProgressChange] in
+                onReadingProgressChange(progress)
+            }
         }
 
         private func reportActiveHeading(_ id: String?) {
