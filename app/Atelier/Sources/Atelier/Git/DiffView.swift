@@ -1,5 +1,6 @@
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 
 nonisolated enum GitDiffLineKind: Equatable, Sendable {
     case metadata
@@ -136,8 +137,53 @@ nonisolated struct GitDiffDocument: Equatable, Sendable {
 nonisolated enum GitDiffLoadState: Equatable, Sendable {
     case loading
     case loaded(GitDiffDocument)
+    case image(Data)
     case message(String)
     case failed(String)
+}
+
+private nonisolated struct GitImagePreviewError: LocalizedError {
+    let message: String
+
+    var errorDescription: String? {
+        message
+    }
+}
+
+private nonisolated enum GitImagePreviewLoader {
+    static func supports(path: String) -> Bool {
+        let fileExtension = URL(fileURLWithPath: path).pathExtension
+        return UTType(filenameExtension: fileExtension)?.conforms(to: .image) == true
+    }
+
+    static func load(
+        selection: DiffSelection,
+        workspacePath: String,
+        service: GitService
+    ) async throws -> Data {
+        if selection.staged {
+            let limit = FileLoader.defaultImageLimit
+            let data = try await service.run(
+                arguments: ["cat-file", "blob", ":\(selection.change.path)"],
+                workspacePath: workspacePath,
+                maxOutputBytes: limit
+            )
+            guard data.count <= limit else {
+                throw GitImagePreviewError(
+                    message: "Image is too large to preview."
+                )
+            }
+            return data
+        }
+
+        let fileURL = URL(fileURLWithPath: workspacePath, isDirectory: true)
+            .appendingPathComponent(selection.change.path)
+        let content = await FileLoader.loadAsync(url: fileURL)
+        guard case .image(let data) = content else {
+            throw GitImagePreviewError(message: content.displayText)
+        }
+        return data
+    }
 }
 
 /// Shared LRU cache of raw `git diff` output, keyed by the diff request plus a
@@ -231,6 +277,31 @@ final class GitDiffSession {
         loadTask?.cancel()
         needsReload = false
 
+        if GitImagePreviewLoader.supports(path: selection.change.path) {
+            state = .loading
+            loadTask = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let data = try await GitImagePreviewLoader.load(
+                        selection: selection,
+                        workspacePath: workspacePath,
+                        service: service
+                    )
+                    guard !Task.isCancelled, loadGeneration == generation else { return }
+                    state = .image(data)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard !Task.isCancelled, loadGeneration == generation else { return }
+                    state = .failed(error.localizedDescription)
+                    AppLogger.git.error(
+                        "Git image preview failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                }
+            }
+            return
+        }
+
         let isUntracked = selection.change.kind == .untracked
         let key = GitDiffCache.Key(
             path: selection.change.path,
@@ -309,7 +380,11 @@ struct GitDiffTabView: View {
 
     private var header: some View {
         HStack(spacing: AtelierMetrics.spaceS) {
-            Image(systemName: "doc.text.magnifyingglass")
+            Image(
+                systemName: GitImagePreviewLoader.supports(path: session.selection.change.path)
+                    ? "photo"
+                    : "doc.text.magnifyingglass"
+            )
                 .foregroundStyle(AtelierTheme.accent)
 
             VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
@@ -380,6 +455,8 @@ struct GitDiffTabView: View {
         case .loaded(let document):
             DiffView(document: document)
                 .environment(\.atelierZoomScale, zoom.contentScale)
+        case .image(let data):
+            ImageViewer(data: data, name: session.selection.displayName)
         case .message(let message):
             diffStateView(
                 title: "No Diff Available",

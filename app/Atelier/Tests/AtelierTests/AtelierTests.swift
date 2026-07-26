@@ -793,6 +793,33 @@ struct AtelierTests {
         #expect(stagedPaths == ["tracked.txt", "untracked.txt"])
     }
 
+    @Test("Git service lists files inside untracked directories")
+    func gitNestedUntrackedFiles() async throws {
+        let repository = temporaryDirectory("git-nested-untracked-files")
+        let article = repository.appendingPathComponent(
+            "generated-assets/20260727-article",
+            isDirectory: true
+        )
+        let images = article.appendingPathComponent("images", isDirectory: true)
+        try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
+
+        let command = GitCommand()
+        _ = try command.run(arguments: ["init", "-q"], workspacePath: repository.path)
+        try Data("article\n".utf8).write(to: article.appendingPathComponent("article.mdx"))
+        try Data("cover\n".utf8).write(to: images.appendingPathComponent("cover.txt"))
+
+        let service = GitService()
+        let snapshot = try await service.snapshot(workspacePath: repository.path)
+        let refreshedStatus = try await service.status(workspacePath: repository.path)
+        let expectedPaths = [
+            "generated-assets/20260727-article/article.mdx",
+            "generated-assets/20260727-article/images/cover.txt"
+        ]
+
+        #expect(snapshot.status.untracked.map(\.path) == expectedPaths)
+        #expect(refreshedStatus.untracked.map(\.path) == expectedPaths)
+    }
+
     @Test("Unified diff parser tracks old and new line numbers")
     func gitDiffParsing() throws {
         let document = GitDiffDocument(text: """
@@ -820,6 +847,86 @@ struct AtelierTests {
         #expect(deletion.newLineNumber == nil)
         #expect(additions.map(\.newLineNumber) == [2, 3])
         #expect(additions.allSatisfy { $0.oldLineNumber == nil })
+    }
+
+    @Test("Git image diff previews staged and untracked versions")
+    @MainActor
+    func gitImageDiffPreview() async throws {
+        let repository = temporaryDirectory("git-image-diff-preview")
+        let imageDirectory = repository.appendingPathComponent("images", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: imageDirectory,
+            withIntermediateDirectories: true
+        )
+
+        let imageURL = imageDirectory.appendingPathComponent("banner.png")
+        let untrackedImageURL = imageDirectory.appendingPathComponent("untracked.png")
+        let indexData = try #require(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        ))
+        var workingTreeData = indexData
+        workingTreeData.append(0)
+
+        let command = GitCommand()
+        _ = try command.run(arguments: ["init", "-q"], workspacePath: repository.path)
+        try indexData.write(to: imageURL)
+        _ = try command.run(
+            arguments: ["add", "--", "images/banner.png"],
+            workspacePath: repository.path
+        )
+        try workingTreeData.write(to: untrackedImageURL)
+
+        let stagedChange = GitChange(
+            path: "images/banner.png",
+            originalPath: nil,
+            kind: .added,
+            isStaged: true,
+            isUnstaged: false
+        )
+        let untrackedChange = GitChange(
+            path: "images/untracked.png",
+            originalPath: nil,
+            kind: .untracked,
+            isStaged: false,
+            isUnstaged: true
+        )
+        let stagedSession = GitDiffSession(
+            selection: DiffSelection(change: stagedChange, staged: true),
+            workspacePath: repository.path
+        )
+        let workingTreeSession = GitDiffSession(
+            selection: DiffSelection(change: untrackedChange, staged: false),
+            workspacePath: repository.path
+        )
+        defer {
+            stagedSession.close()
+            workingTreeSession.close()
+        }
+
+        for _ in 0..<200 {
+            let stagedLoading = stagedSession.state == .loading
+            let workingTreeLoading = workingTreeSession.state == .loading
+            if !stagedLoading, !workingTreeLoading { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let stagedPreview: Data?
+        if case .image(let data) = stagedSession.state {
+            stagedPreview = data
+        } else {
+            stagedPreview = nil
+        }
+        let workingTreePreview: Data?
+        if case .image(let data) = workingTreeSession.state {
+            workingTreePreview = data
+        } else {
+            workingTreePreview = nil
+        }
+
+        #expect(stagedPreview == indexData)
+        #expect(workingTreePreview == workingTreeData)
+        #expect(NSImage(data: try #require(stagedPreview)) != nil)
+        #expect(NSImage(data: try #require(workingTreePreview)) != nil)
     }
 
     @Test("Git diff tabs reuse identity and close without affecting file tabs")

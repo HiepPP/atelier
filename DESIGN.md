@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Status | Current implementation baseline |
-| Updated | 2026-07-26 |
+| Updated | 2026-07-27 |
 | Baseline commit | `02ebe5b` |
 | Platform | macOS 26+ |
 | UI stack | SwiftUI, AppKit, Luminare |
@@ -591,6 +591,9 @@ Persistence boundaries:
 - Stop commit-message generation after 30 seconds. Restore the idle Push state and show a
   retryable error without staging, committing, or pushing.
 - Open file diffs as center tabs, not inside the Git sidebar.
+- Render image changes as fitted native image previews in their center diff tabs instead of
+  showing binary diff metadata. Use index bytes for staged rows and working-tree bytes for
+  unstaged or untracked rows.
 - Use semantic green, orange, red, and teal only for Git meaning.
 - Keep diff line numbers in a fixed 48-point gutter.
 - Use monospaced selectable diff text.

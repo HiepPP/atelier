@@ -635,6 +635,7 @@ final class TerminalTabsModel {
         switch state {
         case .loading: "Loading"
         case .loaded: "Ready"
+        case .image: "Image preview"
         case .message: "No diff"
         case .failed: "Load failed"
         }

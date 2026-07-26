@@ -410,7 +410,13 @@ nonisolated final class GitCommand: Sendable {
 nonisolated final class GitService: Sendable {
     func snapshot(workspacePath: String) async throws -> GitSnapshot {
         async let statusData = run(
-            arguments: ["status", "--ignored=matching", "--porcelain=v2", "-z"],
+            arguments: [
+                "status",
+                "--ignored=matching",
+                "--untracked-files=all",
+                "--porcelain=v2",
+                "-z"
+            ],
             workspacePath: workspacePath
         )
         async let branchData = run(
@@ -441,7 +447,13 @@ nonisolated final class GitService: Sendable {
     /// full snapshot needs; branch and branch-list refresh stay on git actions.
     func status(workspacePath: String) async throws -> GitStatus {
         let data = try await run(
-            arguments: ["status", "--ignored=matching", "--porcelain=v2", "-z"],
+            arguments: [
+                "status",
+                "--ignored=matching",
+                "--untracked-files=all",
+                "--porcelain=v2",
+                "-z"
+            ],
             workspacePath: workspacePath
         )
         return GitStatus.parse(data)
