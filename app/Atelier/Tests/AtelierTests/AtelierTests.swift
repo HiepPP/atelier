@@ -226,6 +226,35 @@ struct AtelierTests {
         outlineView.updateTrackingAreas()
         #expect(!outlineView.trackingAreas.contains { $0.options.contains(.cursorUpdate) })
 
+        let firstRowView = try #require(
+            outlineView.rowView(atRow: 0, makeIfNecessary: true)
+        )
+        let mouseLocation = NSEvent.mouseLocation
+        window.setFrameOrigin(NSPoint(
+            x: mouseLocation.x + 10_000,
+            y: mouseLocation.y + 10_000
+        ))
+        let hoverEvent = try #require(NSEvent.mouseEvent(
+            with: .mouseMoved,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 0,
+            pressure: 0
+        ))
+        firstRowView.mouseEntered(with: hoverEvent)
+        let hoverState = {
+            Mirror(reflecting: firstRowView).children.first {
+                $0.label == "isHovering"
+            }?.value as? Bool
+        }
+        #expect(hoverState() == true)
+        firstRowView.updateTrackingAreas()
+        #expect(hoverState() == false)
+
         var alphaByName: [String: CGFloat] = [:]
         for row in 0..<outlineView.numberOfRows {
             let node = try #require(outlineView.item(atRow: row) as? FileTreeNode)

@@ -836,6 +836,18 @@ private final class FileTreeRowView: NSTableRowView {
         addTrackingArea(area)
         hoverTrackingArea = area
         super.updateTrackingAreas()
+
+        let pointerIsInside: Bool
+        if let window, window.isKeyWindow {
+            let windowLocation = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+            pointerIsInside = visibleRect.contains(convert(windowLocation, from: nil))
+        } else {
+            pointerIsInside = false
+        }
+        if isHovering != pointerIsInside {
+            isHovering = pointerIsInside
+            needsDisplay = true
+        }
     }
 
     override func mouseEntered(with event: NSEvent) {
