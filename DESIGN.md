@@ -708,6 +708,8 @@ Persistence boundaries:
 - Stop commit-message generation after 30 seconds. Restore the idle Push state and show a
   retryable error without staging, committing, or pushing.
 - Open file diffs as center tabs, not inside the Git sidebar.
+- Omit raw Git file metadata such as `diff --git`, `index`, `---`, and `+++` from text
+  diff previews. Keep hunk dividers, line numbers, context, additions, deletions, and file notes.
 - Render image changes as fitted native image previews in their center diff tabs instead of
   showing binary diff metadata. Use index bytes for staged rows and working-tree bytes for
   unstaged or untracked rows.

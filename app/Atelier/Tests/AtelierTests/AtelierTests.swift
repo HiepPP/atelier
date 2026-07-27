@@ -964,7 +964,7 @@ struct AtelierTests {
         #expect(refreshedStatus.untracked.map(\.path) == expectedPaths)
     }
 
-    @Test("Unified diff parser tracks old and new line numbers")
+    @Test("Unified diff parser omits file metadata and tracks line numbers")
     func gitDiffParsing() throws {
         let document = GitDiffDocument(text: """
         diff --git a/main.swift b/main.swift
@@ -980,6 +980,8 @@ struct AtelierTests {
 
         #expect(document.additions == 2)
         #expect(document.deletions == 1)
+        #expect(document.lines.first?.kind == .hunk)
+        #expect(!document.lines.contains { $0.kind == .metadata })
 
         let context = try #require(document.lines.first { $0.kind == .context })
         let deletion = try #require(document.lines.first { $0.kind == .deletion })

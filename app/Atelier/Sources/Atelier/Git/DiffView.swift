@@ -109,7 +109,7 @@ nonisolated struct GitDiffDocument: Equatable, Sendable {
             ))
         }
 
-        self.lines = parsedLines
+        self.lines = parsedLines.filter { $0.kind != .metadata }
         self.additions = additions
         self.deletions = deletions
     }
