@@ -285,6 +285,30 @@ struct DisplaySizingTests {
         #expect(horizontal.midY == 300)
     }
 
+    @Test("Workspace sidebar width stays inside the shared global range")
+    func workspaceSidebarWidthPolicy() {
+        #expect(
+            WorkspaceSidebarWidthPolicy.clamped(100)
+                == AtelierMetrics.workspaceSidebarMinWidth
+        )
+        #expect(
+            WorkspaceSidebarWidthPolicy.clamped(900)
+                == AtelierMetrics.workspaceSidebarMaxWidth
+        )
+        #expect(
+            !WorkspaceSidebarWidthPolicy.differs(
+                AtelierMetrics.workspaceSidebarIdealWidth,
+                from: AtelierMetrics.workspaceSidebarIdealWidth + 0.25
+            )
+        )
+        #expect(
+            WorkspaceSidebarWidthPolicy.differs(
+                AtelierMetrics.workspaceSidebarIdealWidth,
+                from: AtelierMetrics.workspaceSidebarIdealWidth + 1
+            )
+        )
+    }
+
     @Test("Workspace sidebar and Watchtower widths stay independent")
     func workspacePanelDefaultWidths() {
         #expect(AtelierMetrics.workspaceSidebarIdealWidth == 370)
@@ -299,7 +323,7 @@ struct DisplaySizingTests {
             WorkspacePanelGeometryProbe
         >
 
-        let controller = NSSplitViewController()
+        let controller = WorkspaceSplitViewController()
         controller.splitView.isVertical = true
         controller.splitView.dividerStyle = .thin
 
@@ -380,6 +404,14 @@ struct DisplaySizingTests {
                 sidebarController.view.frame.width
                     - AtelierMetrics.workspaceSidebarIdealWidth
             ) < 1
+        )
+        coordinator.synchronizeSidebarWidth(300)
+        let synchronizedSidebar = await waitUntil {
+            abs(sidebarController.view.frame.width - 300) < 1
+        }
+        #expect(
+            synchronizedSidebar,
+            "Expected 300-point sidebar, got \(sidebarController.view.frame.width)"
         )
 
         func setSidebarPresentation(_ isPresented: Bool) {

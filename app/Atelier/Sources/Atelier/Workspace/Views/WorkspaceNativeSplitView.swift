@@ -50,7 +50,28 @@ nonisolated enum WorkspaceDividerInteractionPolicy {
     }
 }
 
-private final class WorkspaceSplitViewController: NSSplitViewController {
+enum WorkspaceSidebarWidthPolicy {
+    static let updateTolerance: CGFloat = 0.5
+
+    static func clamped(_ width: CGFloat) -> CGFloat {
+        min(
+            max(width, AtelierMetrics.workspaceSidebarMinWidth),
+            AtelierMetrics.workspaceSidebarMaxWidth
+        )
+    }
+
+    static func differs(_ lhs: CGFloat, from rhs: CGFloat) -> Bool {
+        abs(lhs - rhs) >= updateTolerance
+    }
+}
+
+final class WorkspaceSplitViewController: NSSplitViewController {
+    var onSidebarWidthChange: ((CGFloat) -> Void)?
+
+    private var isSynchronizingSidebarWidth = false
+    private var pendingSidebarWidth: CGFloat?
+    private var isSidebarWidthPublishScheduled = false
+
     override func splitView(
         _ splitView: NSSplitView,
         effectiveRect proposedEffectiveRect: NSRect,
@@ -68,6 +89,48 @@ private final class WorkspaceSplitViewController: NSSplitViewController {
             isVertical: splitView.isVertical,
             within: splitView.bounds
         )
+    }
+
+    override func splitView(
+        _ splitView: NSSplitView,
+        constrainSplitPosition proposedPosition: CGFloat,
+        ofSubviewAt dividerIndex: Int
+    ) -> CGFloat {
+        guard dividerIndex == 0, !isSynchronizingSidebarWidth else {
+            return proposedPosition
+        }
+        scheduleSidebarWidthPublish(proposedPosition)
+        return proposedPosition
+    }
+
+    func synchronizeSidebarWidth(_ proposedWidth: CGFloat) {
+        guard splitViewItems.indices.contains(0),
+              !splitViewItems[0].isCollapsed,
+              let sidebarView = splitViewItems[0].viewController.viewIfLoaded else {
+            return
+        }
+        let width = WorkspaceSidebarWidthPolicy.clamped(proposedWidth)
+        guard WorkspaceSidebarWidthPolicy.differs(sidebarView.frame.width, from: width) else {
+            return
+        }
+
+        isSynchronizingSidebarWidth = true
+        splitView.setPosition(width, ofDividerAt: 0)
+        isSynchronizingSidebarWidth = false
+    }
+
+    private func scheduleSidebarWidthPublish(_ proposedWidth: CGFloat) {
+        pendingSidebarWidth = WorkspaceSidebarWidthPolicy.clamped(proposedWidth)
+        guard !isSidebarWidthPublishScheduled else { return }
+        isSidebarWidthPublishScheduled = true
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            isSidebarWidthPublishScheduled = false
+            guard let width = pendingSidebarWidth else { return }
+            pendingSidebarWidth = nil
+            onSidebarWidthChange?(width)
+        }
     }
 }
 
@@ -97,6 +160,8 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
     let sidebar: Sidebar
     let detail: Detail
     let inspector: Inspector
+    let sidebarWidth: CGFloat
+    let onSidebarWidthChange: (CGFloat) -> Void
     let showsSidebar: Bool
     let showsInspector: Bool
     let sidebarAnimationRequestID: Int
@@ -111,6 +176,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         let controller = WorkspaceSplitViewController()
         controller.splitView.isVertical = true
         controller.splitView.dividerStyle = .thin
+        controller.onSidebarWidthChange = onSidebarWidthChange
 
         let sidebarController = NSHostingController(
             rootView: WorkspacePanelMotionContainer(
@@ -120,7 +186,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
                 reduceMotion: reduceMotion
             )
         )
-        sidebarController.view.frame.size.width = AtelierMetrics.workspaceSidebarIdealWidth
+        sidebarController.view.frame.size.width = WorkspaceSidebarWidthPolicy.clamped(sidebarWidth)
         let sidebarItem = NSSplitViewItem(viewController: sidebarController)
         sidebarItem.minimumThickness = AtelierMetrics.workspaceSidebarMinWidth
         sidebarItem.maximumThickness = AtelierMetrics.workspaceSidebarMaxWidth
@@ -165,7 +231,8 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             showsSidebar: showsSidebar,
             showsInspector: showsInspector,
             sidebarAnimationRequestID: sidebarAnimationRequestID,
-            inspectorAnimationRequestID: inspectorAnimationRequestID
+            inspectorAnimationRequestID: inspectorAnimationRequestID,
+            sidebarWidth: sidebarWidth
         )
         return controller
     }
@@ -174,6 +241,9 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         _ controller: NSSplitViewController,
         context: Context
     ) {
+        if let splitController = controller as? WorkspaceSplitViewController {
+            splitController.onSidebarWidthChange = onSidebarWidthChange
+        }
         context.coordinator.sidebarController?.rootView = WorkspacePanelMotionContainer(
             content: sidebar,
             isPresented: showsSidebar,
@@ -213,6 +283,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             animatesSidebar: animatesSidebar,
             animatesInspector: animatesInspector
         )
+        context.coordinator.synchronizeSidebarWidth(sidebarWidth)
     }
 
     // Fill the proposed size instead of the split view's Auto Layout fitting
@@ -244,6 +315,8 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         var inspectorAnimationRequestID = 0
         private var updateGeneration = 0
         private var pendingUpdateGeneration: Int?
+        private var desiredSidebarWidth = AtelierMetrics.workspaceSidebarIdealWidth
+        private var sidebarWidthUpdateGeneration = 0
 
         func install(
             controller: NSSplitViewController,
@@ -255,7 +328,8 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             showsSidebar: Bool,
             showsInspector: Bool,
             sidebarAnimationRequestID: Int,
-            inspectorAnimationRequestID: Int
+            inspectorAnimationRequestID: Int,
+            sidebarWidth: CGFloat = AtelierMetrics.workspaceSidebarIdealWidth
         ) {
             self.controller = controller
             self.sidebarController = sidebarController
@@ -267,6 +341,21 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             self.showsInspector = showsInspector
             self.sidebarAnimationRequestID = sidebarAnimationRequestID
             self.inspectorAnimationRequestID = inspectorAnimationRequestID
+            desiredSidebarWidth = WorkspaceSidebarWidthPolicy.clamped(sidebarWidth)
+        }
+
+        func synchronizeSidebarWidth(_ proposedWidth: CGFloat) {
+            desiredSidebarWidth = WorkspaceSidebarWidthPolicy.clamped(proposedWidth)
+            sidebarWidthUpdateGeneration += 1
+            let generation = sidebarWidthUpdateGeneration
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self, generation == sidebarWidthUpdateGeneration,
+                      let controller = controller as? WorkspaceSplitViewController else {
+                    return
+                }
+                controller.synchronizeSidebarWidth(desiredSidebarWidth)
+            }
         }
 
         func update(
@@ -316,7 +405,10 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
                     sidebarItem?.isCollapsed = !showsSidebar
                 }
                 guard (updatesSidebar && animatesSidebar)
-                    || (updatesInspector && animatesInspector) else { return }
+                    || (updatesInspector && animatesInspector) else {
+                    synchronizeSidebarWidth(desiredSidebarWidth)
+                    return
+                }
 
                 NSAnimationContext.runAnimationGroup { animationContext in
                     animationContext.duration = WorkspaceSplitAnimationPolicy.panelDuration
@@ -327,6 +419,12 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
                     if updatesSidebar && animatesSidebar {
                         sidebarItem?.animator().isCollapsed = !showsSidebar
                     }
+                }
+                DispatchQueue.main.asyncAfter(
+                    deadline: .now() + WorkspaceSplitAnimationPolicy.panelDuration
+                ) { [weak self] in
+                    guard let self else { return }
+                    synchronizeSidebarWidth(desiredSidebarWidth)
                 }
             }
         }

@@ -342,6 +342,7 @@ struct ContentView: View {
     @State private var presentedPaletteMode: AtelierPaletteMode?
     @State private var responderBeforePalette: NSResponder?
     @State private var responderBeforeWorkspaceSearch: NSResponder?
+    @State private var workspaceSidebarWidth = AtelierMetrics.workspaceSidebarIdealWidth
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -351,7 +352,11 @@ struct ContentView: View {
                 ZStack {
                     ForEach(app.liveSessions, id: \.state.id) { workspace in
                         let isActive = workspace.state.id == app.selectedWorkspaceID
-                        WorkspaceView(session: workspace, isActive: isActive)
+                        WorkspaceView(
+                            session: workspace,
+                            isActive: isActive,
+                            sidebarWidth: $workspaceSidebarWidth
+                        )
                             .opacity(isActive ? 1 : 0)
                             .allowsHitTesting(isActive)
                             .accessibilityHidden(!isActive)
@@ -798,6 +803,7 @@ private struct AtelierWelcomeBackdrop: View {
 struct WorkspaceView: View {
     let session: WorkspaceSession
     let isActive: Bool
+    @Binding var sidebarWidth: CGFloat
     @Environment(AppModel.self) private var app
     @Environment(AtelierZoomModel.self) private var zoom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -918,6 +924,8 @@ struct WorkspaceView: View {
                 .frame(idealWidth: AtelierMetrics.inspectorIdealWidth)
                 .environment(app)
                 .environment(zoom),
+            sidebarWidth: sidebarWidth,
+            onSidebarWidthChange: updateSidebarWidth,
             showsSidebar: chrome.panels.showsSidebar && !zoom.isFocusMode,
             showsInspector: chrome.panels.showsInspector && !zoom.isFocusMode,
             sidebarAnimationRequestID: chrome.sidebarAnimationRequestID,
@@ -925,6 +933,14 @@ struct WorkspaceView: View {
             reduceMotion: reduceMotion
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func updateSidebarWidth(_ proposedWidth: CGFloat) {
+        let width = WorkspaceSidebarWidthPolicy.clamped(proposedWidth)
+        guard WorkspaceSidebarWidthPolicy.differs(sidebarWidth, from: width) else {
+            return
+        }
+        sidebarWidth = width
     }
 
     private var workspaceDetail: some View {

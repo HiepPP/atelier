@@ -78,6 +78,8 @@ Rules:
 - Keep split items mounted and use native item collapse for panel visibility.
 - Animate sidebar and inspector collapse by changing allocated split width, not opacity.
 - Let the user drag the sidebar and inspector dividers to resize each pane within its width range; both open at their Ideal width.
+- Keep one app-wide sidebar width for Explorer and Git across every workspace. Dragging either
+  sidebar divider updates all mounted workspace sidebars.
 - Animate only the panel explicitly toggled. Keep companion policy changes atomic.
 - Keep side-panel holding priority above center so center absorbs reclaimed width.
 - Keep panel transitions atomic through `WorkspacePanelPresentation`.
