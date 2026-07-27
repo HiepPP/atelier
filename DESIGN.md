@@ -404,6 +404,11 @@ Interaction geometry rules:
   frames with the center-tab spring. Keep all row content stationary and clip it to the rail list.
   Do not add a checkmark, leading accent bar, duplicate glass, or floating-card treatment.
 - Show loading, unavailable, and error accessories without replacing project identity.
+- Show each live workspace's changed-file count as a trailing high-contrast
+  `workspaceRailForeground` badge when the count is above zero. Count each Git status path once
+  across staged, unstaged, untracked, and conflicted states. Keep the badge current through the
+  workspace's existing debounced Git status model. Preserve the badge's intrinsic width and
+  truncate the project name before compressing the count text.
 - Keep the full path in help and accessibility text without rendering it in the row.
 - Use rail-specific hover, pressed, focused, selected, and disabled fills so contrast stays stable.
 - Keep optional motion limited to quick opacity and scale feedback. Disable it under Reduce Motion.

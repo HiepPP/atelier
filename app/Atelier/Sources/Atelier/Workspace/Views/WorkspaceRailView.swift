@@ -174,12 +174,14 @@ struct WorkspaceRailView: View {
     private func workspaceGroup(index: Int, item: WorkspaceCatalogItem) -> some View {
         let threads = threadGroup(for: item.id)?.threads ?? []
         let runningCount = threads.reduce(0) { $0 + ($1.status == .running ? 1 : 0) }
+        let gitModel = app.liveSessions.first { $0.state.id == item.id }?.gitModel
         let isExpanded = expandedWorkspaceIDs.contains(item.id)
         let showThreads = !threads.isEmpty && isExpanded
         VStack(spacing: 0) {
             WorkspaceRailItemButton(
                 item: item,
                 index: index,
+                gitModel: gitModel,
                 hasThreads: !threads.isEmpty,
                 runningCount: runningCount,
                 isExpanded: isExpanded,
@@ -288,6 +290,7 @@ private struct WorkspaceRailAddButton: View {
 private struct WorkspaceRailItemButton: View {
     let item: WorkspaceCatalogItem
     let index: Int
+    let gitModel: GitWorkspaceModel?
     var hasThreads: Bool = false
     var runningCount: Int = 0
     var isExpanded: Bool = false
@@ -305,6 +308,8 @@ private struct WorkspaceRailItemButton: View {
     private static let chevronGutter: CGFloat = 14
 
     var body: some View {
+        let changeCount = gitModel?.snapshot.status.changes.count ?? 0
+
         Button {
             app.selectWorkspace(id: item.id)
         } label: {
@@ -337,6 +342,15 @@ private struct WorkspaceRailItemButton: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
+
+                if changeCount > 0 {
+                    AtelierCountBadge(
+                        value: changeCount,
+                        color: AtelierTheme.workspaceRailForeground
+                    )
+                        .accessibilityHidden(true)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
 
                 if runningCount > 0, !isExpanded {
                     runningBadge
@@ -504,17 +518,24 @@ private struct WorkspaceRailItemButton: View {
     }
 
     private var accessibilityDescription: String {
+        let changeDescription = changedFilesDescription.map { ", \($0)" } ?? ""
         guard let shortcutLabel else {
-            return "\(accessibilityValue), \(item.state.path)"
+            return "\(accessibilityValue)\(changeDescription), \(item.state.path)"
         }
-        return "\(accessibilityValue), shortcut \(shortcutLabel), \(item.state.path)"
+        return "\(accessibilityValue), shortcut \(shortcutLabel)\(changeDescription), \(item.state.path)"
     }
 
     private var helpText: String {
+        let changeDescription = changedFilesDescription.map { "\n\($0)" } ?? ""
         guard let shortcutLabel else {
-            return "\(workspaceName)\n\(item.state.path)\n\(accessibilityValue)"
+            return "\(workspaceName)\(changeDescription)\n\(item.state.path)\n\(accessibilityValue)"
         }
-        return "\(workspaceName)\n\(shortcutLabel)\n\(item.state.path)\n\(accessibilityValue)"
+        return "\(workspaceName)\n\(shortcutLabel)\(changeDescription)\n\(item.state.path)\n\(accessibilityValue)"
+    }
+
+    private var changedFilesDescription: String? {
+        guard let count = gitModel?.snapshot.status.changes.count, count > 0 else { return nil }
+        return "\(count) changed \(count == 1 ? "file" : "files")"
     }
 }
 
