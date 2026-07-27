@@ -832,7 +832,7 @@ Persistence boundaries:
   when the visible rail-pixel value changes. Do not animate passive updates or rebuild the document.
 - Put the Source/Preview toggle in the trailing editor action group. Keep find and word-wrap
   commands scoped to Source mode.
-- Use `Cmd-D` to toggle Source and Preview for the active `.md` or `.html` file. Disable it for
+- Use `Cmd-R` to toggle Source and Preview for the active `.md` or `.html` file. Disable it for
   other file types.
 - With a non-empty editor selection, `Cmd-Shift-C` inserts
   `@<workspace-relative-path>:<first-line>~<last-line> ` into the most recently selected terminal
@@ -954,10 +954,9 @@ The five background features, all read-only and cancellable:
 | `Cmd-Option-F` | Find and replace in active text file |
 | `Cmd-G` | Next file-search match |
 | `Cmd-Shift-G` | Previous file-search match |
-| `Cmd-E` | Show the Explorer sidebar tab |
-| `Cmd-R` | Show the Git sidebar tab |
+| `Cmd-E` | Toggle between the Explorer and Git sidebar tabs |
+| `Cmd-R` | Toggle Source and Preview for the active Markdown or HTML file |
 | `Cmd-Q` | Toggle Agent Responses at the default half width |
-| `Cmd-D` | Toggle Source and Preview for the active Markdown or HTML file |
 | `Cmd-Shift-C` | Insert selected editor line reference into terminal |
 | `Cmd-W` | Close active closable center tab |
 | `Ctrl--` | Back |

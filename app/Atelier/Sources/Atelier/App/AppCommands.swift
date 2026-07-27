@@ -101,14 +101,18 @@ struct AppCommands: Commands {
             Button(title(.showExplorer)) {
                 perform(.showExplorer)
             }
-            .keyboardShortcut("e", modifiers: .command)
             .disabled(!isEnabled(.showExplorer))
 
             Button(title(.showGit)) {
                 perform(.showGit)
             }
-            .keyboardShortcut("r", modifiers: .command)
             .disabled(!isEnabled(.showGit))
+
+            Button(title(.toggleExplorerGit)) {
+                perform(.toggleExplorerGit)
+            }
+            .keyboardShortcut("e", modifiers: .command)
+            .disabled(!isEnabled(.toggleExplorerGit))
 
             Button(title(.toggleAgentResponses)) {
                 perform(.toggleAgentResponses)

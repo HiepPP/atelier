@@ -24,6 +24,7 @@ struct AtelierActionRegistryTests {
             .openGemma,
             .showExplorer,
             .showGit,
+            .toggleExplorerGit,
             .toggleAgentResponses,
             .toggleLeftPanel,
             .toggleWorkspacePanels,
@@ -40,13 +41,11 @@ struct AtelierActionRegistryTests {
         )
         #expect(AtelierActionRegistry.descriptor(for: .toggleFocusMode).shortcutLabel == nil)
         #expect(AtelierActionRegistry.descriptor(for: .reopenClosedTab).shortcutLabel == nil)
+        #expect(AtelierActionRegistry.descriptor(for: .showExplorer).shortcutLabel == nil)
+        #expect(AtelierActionRegistry.descriptor(for: .showGit).shortcutLabel == nil)
         #expect(
-            AtelierActionRegistry.descriptor(for: .showExplorer).shortcutLabel
+            AtelierActionRegistry.descriptor(for: .toggleExplorerGit).shortcutLabel
                 == "Command-E"
-        )
-        #expect(
-            AtelierActionRegistry.descriptor(for: .showGit).shortcutLabel
-                == "Command-R"
         )
         #expect(
             AtelierActionRegistry.descriptor(for: .toggleAgentResponses).shortcutLabel
@@ -94,6 +93,7 @@ struct AtelierActionRegistryTests {
         #expect(!AtelierActionRegistry.isEnabled(.openGemma, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.showExplorer, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.showGit, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.toggleExplorerGit, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleAgentResponses, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleLeftPanel, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleWorkspacePanels, context: empty))
@@ -134,6 +134,7 @@ struct AtelierActionRegistryTests {
         #expect(AtelierActionRegistry.title(for: .toggleFocusMode, context: active) == "Exit Focus Mode")
         #expect(AtelierActionRegistry.isEnabled(.showExplorer, context: active))
         #expect(AtelierActionRegistry.isEnabled(.showGit, context: active))
+        #expect(AtelierActionRegistry.isEnabled(.toggleExplorerGit, context: active))
         #expect(!AtelierActionRegistry.isEnabled(.toggleLeftPanel, context: active))
     }
 
@@ -155,6 +156,7 @@ struct AtelierActionRegistryTests {
             openGemma: { recorded.append(.openGemma) },
             showExplorer: { recorded.append(.showExplorer) },
             showGit: { recorded.append(.showGit) },
+            toggleExplorerGit: { recorded.append(.toggleExplorerGit) },
             toggleAgentResponses: { recorded.append(.toggleAgentResponses) },
             toggleLeftPanel: { recorded.append(.toggleLeftPanel) },
             toggleWorkspacePanels: { recorded.append(.toggleWorkspacePanels) },
@@ -227,13 +229,13 @@ struct AtelierActionRegistryTests {
         workspace.chrome.toggleSidebar()
         #expect(!workspace.chrome.panels.showsSidebar)
 
-        AtelierActionRegistry.perform(.showGit, model: model)
+        AtelierActionRegistry.perform(.toggleExplorerGit, model: model)
         #expect(workspace.chrome.selectedSidebarTab == .sourceControl)
         #expect(workspace.chrome.panels.showsSidebar)
 
         model.zoom.toggleFocusMode()
         #expect(model.zoom.isFocusMode)
-        AtelierActionRegistry.perform(.showExplorer, model: model)
+        AtelierActionRegistry.perform(.toggleExplorerGit, model: model)
         #expect(!model.zoom.isFocusMode)
         #expect(workspace.chrome.selectedSidebarTab == .explorer)
         #expect(workspace.chrome.panels.showsSidebar)

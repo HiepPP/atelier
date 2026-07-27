@@ -1105,7 +1105,7 @@ struct AtelierTabCommands: Commands {
             Button(previewToggleTitle) {
                 renderedFilePreview?.wrappedValue.toggle()
             }
-            .keyboardShortcut("d", modifiers: .command)
+            .keyboardShortcut("r", modifiers: .command)
             .disabled(renderedFilePreview == nil)
 
             Button("Use Selection for Find") {

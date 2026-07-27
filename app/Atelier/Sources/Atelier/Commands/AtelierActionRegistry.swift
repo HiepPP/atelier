@@ -15,6 +15,7 @@ nonisolated enum AtelierActionID: String, CaseIterable, Identifiable, Sendable {
     case openGemma
     case showExplorer
     case showGit
+    case toggleExplorerGit
     case toggleAgentResponses
     case toggleLeftPanel
     case toggleWorkspacePanels
@@ -68,6 +69,7 @@ struct AtelierActionHandlers {
     let openGemma: () -> Void
     let showExplorer: () -> Void
     let showGit: () -> Void
+    let toggleExplorerGit: () -> Void
     let toggleAgentResponses: () -> Void
     let toggleLeftPanel: () -> Void
     let toggleWorkspacePanels: () -> Void
@@ -89,6 +91,11 @@ struct AtelierActionHandlers {
             }
         }
 
+        func toggleExplorerGit() {
+            guard let selectedTab = model.workspace?.chrome.selectedSidebarTab else { return }
+            showSidebarTab(selectedTab == .explorer ? .sourceControl : .explorer)
+        }
+
         return AtelierActionHandlers(
             openFolder: model.chooseWorkspace,
             searchWorkspace: {
@@ -107,6 +114,7 @@ struct AtelierActionHandlers {
             openGemma: { model.workspace?.openGemma() },
             showExplorer: { showSidebarTab(.explorer) },
             showGit: { showSidebarTab(.sourceControl) },
+            toggleExplorerGit: toggleExplorerGit,
             toggleAgentResponses: {
                 guard let workspace = model.workspace else { return }
                 workspace.chrome.toggleAgentResponses(
@@ -239,14 +247,21 @@ nonisolated enum AtelierActionRegistry {
             title: "Show Explorer",
             category: "View",
             systemImage: "folder",
-            shortcutLabel: "Command-E"
+            shortcutLabel: nil
         ),
         AtelierActionDescriptor(
             id: .showGit,
             title: "Show Git",
             category: "View",
             systemImage: "arrow.triangle.branch",
-            shortcutLabel: "Command-R"
+            shortcutLabel: nil
+        ),
+        AtelierActionDescriptor(
+            id: .toggleExplorerGit,
+            title: "Toggle Explorer and Git",
+            category: "View",
+            systemImage: "arrow.left.arrow.right",
+            shortcutLabel: "Command-E"
         ),
         AtelierActionDescriptor(
             id: .toggleAgentResponses,
@@ -351,7 +366,7 @@ nonisolated enum AtelierActionRegistry {
             context.canNavigateForward
         case .reopenClosedTab:
             context.canReopenClosedTab
-        case .showExplorer, .showGit:
+        case .showExplorer, .showGit, .toggleExplorerGit:
             context.canShowSidebarTab
         case .toggleLeftPanel:
             context.canToggleLeftPanel
@@ -426,6 +441,8 @@ nonisolated enum AtelierActionRegistry {
             handlers.showExplorer()
         case .showGit:
             handlers.showGit()
+        case .toggleExplorerGit:
+            handlers.toggleExplorerGit()
         case .toggleAgentResponses:
             handlers.toggleAgentResponses()
         case .toggleLeftPanel:
