@@ -125,7 +125,7 @@ actor WorkspaceToolExecutor: WorkspaceToolExecuting {
         guard Self.contains(resolved, in: workspaceRoot) else {
             throw WorkspaceToolError.outsideWorkspace
         }
-        guard !Self.isSensitive(resolved, relativeTo: workspaceRoot) else {
+        guard !WorkspaceToolPathPolicy.isSensitive(resolved, relativeTo: workspaceRoot) else {
             throw WorkspaceToolError.sensitivePath
         }
         var isDirectory: ObjCBool = false
@@ -209,7 +209,10 @@ actor WorkspaceToolExecutor: WorkspaceToolExecuting {
             let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
             guard values?.isRegularFile == true,
                   (values?.fileSize ?? Int.max) <= maximumSearchFileBytes,
-                  !isSensitive(url.resolvingSymlinksInPath(), relativeTo: root) else {
+                  !WorkspaceToolPathPolicy.isSensitive(
+                      url.resolvingSymlinksInPath(),
+                      relativeTo: root
+                  ) else {
                 continue
             }
             guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]),
@@ -245,21 +248,6 @@ actor WorkspaceToolExecutor: WorkspaceToolExecuting {
     private nonisolated static func relativePath(_ url: URL, root: URL) -> String {
         let rootComponents = root.pathComponents
         return url.pathComponents.dropFirst(rootComponents.count).joined(separator: "/")
-    }
-
-    private nonisolated static func isSensitive(_ url: URL, relativeTo root: URL) -> Bool {
-        let relative = relativePath(url, root: root).lowercased()
-        let components = relative.split(separator: "/").map(String.init)
-        if components.contains(".git") { return true }
-        return components.contains { component in
-            component == ".env" || component.hasPrefix(".env.") ||
-                component == "id_rsa" || component == "id_ed25519" ||
-                component == "credentials" || component == "credentials.json" ||
-                component == "client_secrets.json" || component == "secrets.json" ||
-                component == "token.json" || component == ".netrc" || component == ".npmrc" ||
-                component.hasSuffix(".pem") || component.hasSuffix(".p12") ||
-                component.hasSuffix(".key")
-        }
     }
 
     private nonisolated static func shouldSkipSearchPath(_ relative: String) -> Bool {

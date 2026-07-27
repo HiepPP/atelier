@@ -31,14 +31,33 @@ nonisolated struct WorkspaceReadTerminalInput: Codable, Equatable, Sendable {
     let lines: Int?
 }
 
+nonisolated struct WorkspaceToolReference: Identifiable, Equatable, Sendable {
+    let path: String
+    let lineNumber: Int
+    let excerpt: String
+
+    var id: String { "\(path):\(lineNumber)" }
+}
+
 nonisolated struct WorkspaceToolResult: Equatable, Sendable {
     let content: String
     let referencedFiles: [String]
+    let references: [WorkspaceToolReference]
     let truncated: Bool
 
-    init(content: String, referencedFiles: [String] = [], truncated: Bool = false) {
+    init(
+        content: String,
+        referencedFiles: [String] = [],
+        references: [WorkspaceToolReference] = [],
+        truncated: Bool = false
+    ) {
         self.content = content
-        self.referencedFiles = referencedFiles
+        var files = referencedFiles
+        for reference in references where !files.contains(reference.path) {
+            files.append(reference.path)
+        }
+        self.referencedFiles = files
+        self.references = references
         self.truncated = truncated
     }
 }
@@ -69,6 +88,30 @@ nonisolated enum WorkspaceToolError: LocalizedError, Equatable, Sendable {
         case .gitFailed: return "Git diff could not be read."
         case .noTerminalSelected: return "No terminal tab is selected to read output from."
         case .cancelled: return "Workspace tool cancelled."
+        }
+    }
+}
+
+nonisolated enum WorkspaceToolPathPolicy {
+    static func isSensitive(_ url: URL, relativeTo root: URL) -> Bool {
+        let rootComponents = root.standardizedFileURL.pathComponents
+        let components = url.standardizedFileURL.pathComponents
+        guard components.starts(with: rootComponents) else { return true }
+        let relative = components.dropFirst(rootComponents.count).joined(separator: "/")
+        return isSensitive(relativePath: relative)
+    }
+
+    static func isSensitive(relativePath: String) -> Bool {
+        let components = relativePath.lowercased().split(separator: "/").map(String.init)
+        if components.contains(".git") { return true }
+        return components.contains { component in
+            component == ".env" || component.hasPrefix(".env.") ||
+                component == "id_rsa" || component == "id_ed25519" ||
+                component == "credentials" || component == "credentials.json" ||
+                component == "client_secrets.json" || component == "secrets.json" ||
+                component == "token.json" || component == ".netrc" || component == ".npmrc" ||
+                component.hasSuffix(".pem") || component.hasSuffix(".p12") ||
+                component.hasSuffix(".key")
         }
     }
 }

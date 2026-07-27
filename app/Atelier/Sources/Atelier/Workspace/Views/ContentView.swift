@@ -593,6 +593,7 @@ struct ContentView: View {
             WorkspaceSearchView(
                 model: model,
                 onActivate: activateWorkspaceSearch,
+                onActivateGemmaSource: activateWorkspaceGemmaSource,
                 onDismiss: { dismissWorkspaceSearch(restoresResponder: true) }
             )
             .padding(
@@ -659,6 +660,19 @@ struct ContentView: View {
             match.candidate.url,
             line: match.lineNumber
         )
+    }
+
+    private func activateWorkspaceGemmaSource(_ source: WorkspaceGemmaSearchSource) {
+        guard let workspace = app.workspace else { return }
+        let proposed = source.path.hasPrefix("/")
+            ? URL(fileURLWithPath: source.path)
+            : workspace.rootURL.appending(path: source.path)
+        let resolved = proposed.standardizedFileURL.resolvingSymlinksInPath()
+        guard resolved.pathComponents.starts(with: workspace.rootURL.pathComponents) else {
+            return
+        }
+        dismissWorkspaceSearch(restoresResponder: false)
+        workspace.terminalTabs.openFile(resolved, line: source.lineNumber)
     }
 
     private func dismissWorkspaceSearch(restoresResponder: Bool) {

@@ -20,6 +20,8 @@ final class WorkspaceSession {
     private(set) var isWatchtowerPresented = false
 
     private let fileTreeService = FileTreeService()
+    private let workspaceSearchRuntimeContext: WorkspaceGemmaSearchRuntimeContext
+    private let gitNexusSearchClient: any GitNexusCodeIntelligence
     private var fileWatcher: FileWatcher?
     private(set) var isStarted = false
     private let workspaceAccess: WorkspaceAccessController?
@@ -35,6 +37,8 @@ final class WorkspaceSession {
         self.state = state
         self.rootURL = rootURL
         self.workspaceAccess = workspaceAccess
+        let searchRuntimeContext = WorkspaceGemmaSearchRuntimeContext()
+        workspaceSearchRuntimeContext = searchRuntimeContext
         let tabs = TerminalTabsModel(
             workspacePath: rootURL.path,
             restoring: state.session
@@ -51,17 +55,39 @@ final class WorkspaceSession {
             onRepositoryChange: tabs.invalidateGitDiffs
         )
         gitModel = git
+        let searchService = WorkspaceSearchService(fileIndex: fileIndex)
+        let workspaceTools = WorkspaceToolExecutor(workspaceRoot: rootURL)
+        let gitNexusSearchClient = GitNexusMCPClient(workspaceRoot: rootURL)
+        self.gitNexusSearchClient = gitNexusSearchClient
+        let gemmaSearchTools = WorkspaceGemmaToolExecutor(
+            workspaceRoot: rootURL,
+            searcher: searchService,
+            reader: workspaceTools,
+            gitNexus: gitNexusSearchClient,
+            context: {
+                WorkspaceGemmaSearchToolContext(
+                    revision: searchRuntimeContext.revision,
+                    ignoredPaths: git.snapshot.status.ignoredPaths
+                )
+            }
+        )
+        let gemmaSearch = WorkspaceGemmaSearchModel(
+            searcher: WorkspaceGemmaSearchRuntime(
+                client: OllamaCloudClient(),
+                tools: gemmaSearchTools
+            )
+        )
         workspaceSearchModel = WorkspaceSearchModel(
-            searcher: WorkspaceSearchService(fileIndex: fileIndex),
+            searcher: searchService,
+            gemmaSearch: gemmaSearch,
             ignoredPaths: { git.snapshot.status.ignoredPaths }
         )
         if let gemmaAgent {
             self.gemmaAgent = gemmaAgent
         } else {
             let client = OllamaCloudClient()
-            let toolExecutor = WorkspaceToolExecutor(workspaceRoot: rootURL)
             self.gemmaAgent = GemmaAgentModel(
-                runtime: GemmaAgentRuntime(client: client, tools: toolExecutor)
+                runtime: GemmaAgentRuntime(client: client, tools: workspaceTools)
             )
         }
         self.agentResponses = agentResponses ?? AgentResponsesModel(
@@ -122,6 +148,8 @@ final class WorkspaceSession {
             AppLogger.workspace.info("Stopped workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
         }
         workspaceAccess?.stop()
+        let gitNexusSearchClient = gitNexusSearchClient
+        Task { await gitNexusSearchClient.stop() }
     }
 
     func createFile(named name: String, in directory: URL) async throws {
@@ -198,6 +226,7 @@ final class WorkspaceSession {
 
     private func invalidateFileTree() {
         fileTreeRevision &+= 1
+        workspaceSearchRuntimeContext.revision = fileTreeRevision
         paletteModel.updateFileRevision(fileTreeRevision)
         workspaceSearchModel.updateFileRevision(fileTreeRevision)
     }

@@ -558,9 +558,11 @@ Persistence boundaries:
   outer insets. Use the palette's editor, raised, chrome, border, scrim, and shadow language.
 - Keep Quick Open and Command Palette at their current 640-point maximum width and 410-point
   height.
-- Keep one query field with Match Case, Match Whole Word, and Include Ignored Files controls.
-- Start a trailing project search one second after the latest query or option change. Cancel the
-  pending delay and any active stale search when another change arrives.
+- Keep one query field with Text and Gemma modes. Open in Text mode every time so
+  `Cmd-Shift-F` preserves its existing literal-search behavior.
+- Keep Match Case, Match Whole Word, and Include Ignored Files controls in Text mode only.
+- Start a trailing project search 300 milliseconds after the latest query or option change. Cancel
+  the pending delay and any active stale search when another change arrives.
 - Let Return bypass the delay and search immediately. When results are current, Return opens the
   selected result.
 - Reuse the workspace file index as the ordered candidate snapshot. Exclude hard build and
@@ -568,8 +570,11 @@ Persistence boundaries:
   and Git-ignored paths unless Include Ignored Files is active.
 - Keep one cancellable search task. Replacing, dismissing, or stopping a search cancels the prior
   task and rejects stale batches.
+- Cache decoded line slices for the current file-tree revision within a 64 MB storage cap. Clear
+  the cache when the revision changes so refined queries avoid repeated file reads and decoding.
 - Scan off the main actor. Check cancellation between files and lines, yield between batches, and
-  stream ordered batches back to the workspace-search model.
+  stream ordered batches back to the workspace-search model. Avoid copying every line into a new
+  string and precompute ignored-path prefixes and comparison options once per search.
 - Group results by workspace-relative path. Give each file name, path, and match count separate
   readable hierarchy. Show the line number and a bounded two-line monospaced excerpt, with the
   first matching range emphasized.
@@ -577,6 +582,38 @@ Persistence boundaries:
 - Limit one search to 1,000 matching lines. Surface truncation in the result count.
 - Opening a result selects a permanent source tab, reveals its line, and focuses the native editor.
 - Keep the latest query and results session-only so reopening Search All Files restores its context.
+- In Gemma mode, never search while typing. Return starts one explicit read-only Gemma run, and
+  submitting another query replaces the prior run.
+- Give workspace search a dedicated Gemma runtime. Do not share history, cancellation, or visible
+  state with the center Gemma tab or inspector sidecar.
+- Limit the search runtime to `search_workspace`, `read_file`, `query_codebase`, and
+  `context_symbol`. Keep `query_codebase` and `context_symbol` private to Search All Files; never
+  add them to the center Gemma tab or inspector sidecar tool surfaces.
+- Keep `search_workspace` as the literal working-tree search. Reuse the same workspace file index,
+  revision-scoped decoded-content cache, ignored-path policy, and cancellation checks as Text mode
+  instead of enumerating files again.
+- Route natural-language architecture and execution-flow questions through GitNexus MCP `query`.
+  Route callers, callees, and process membership through MCP `context`, preferably with the exact
+  symbol UID returned by `query`. Use `read_file` to verify graph conclusions against current source
+  before answering because the GitNexus index may not contain uncommitted changes.
+- Keep one lazy GitNexus stdio client per workspace-search runtime. Pin every MCP call to the active
+  workspace, keep source content disabled, bound process and symbol counts, propagate cancellation,
+  and stop the client with the workspace. Missing GitNexus, a missing index, or a failed MCP request
+  must return a recoverable tool result so Gemma can continue with literal search.
+- Convert GitNexus process and symbol locations into the existing structured path-line sources.
+  Reject paths outside the workspace and apply the sensitive-path guard before any result reaches
+  Gemma. Surface when graph search is BM25-only because the index has no embeddings; never claim
+  semantic search ran when the vector lane is unavailable.
+- Stream the Gemma answer without blocking the overlay. Coalesce answer deltas before mutating
+  observable presentation state.
+- Show structured sources below the answer. Each source includes a workspace-relative path, line,
+  and bounded excerpt. Select the first source; support Up, Down, Return, and direct pointer
+  activation to open its exact source line.
+- Keep Gemma work bounded to 100 displayed sources. Preserve current results until an explicit new
+  submission, and cancel the active run when its query changes, its mode changes, the overlay
+  dismisses, or the workspace stops.
+- Show a compact Stop action while Gemma runs and a retryable connection error when Ollama is
+  unavailable. Never fall back to an unbounded filesystem scan.
 
 ### Git
 

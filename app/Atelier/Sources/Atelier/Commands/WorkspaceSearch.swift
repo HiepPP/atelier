@@ -45,12 +45,41 @@ nonisolated protocol WorkspaceContentSearching: Sendable {
 actor WorkspaceSearchService: WorkspaceContentSearching {
     static let maximumResultLines = 1_000
     static let maximumFileBytes = FileLoader.defaultLimit
+    static let maximumCachedStorageBytes = 64 * 1_024 * 1_024
 
     private static let batchSize = 40
     private static let excerptLeadingCharacters = 120
     private static let excerptTrailingCharacters = 280
 
+    private struct IndexedDocument {
+        let lines: [Substring]
+        let storageByteCount: Int
+
+        init(text: String, fileByteCount: Int) {
+            lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            storageByteCount = fileByteCount + lines.count * MemoryLayout<Substring>.stride
+        }
+    }
+
+    private struct IgnoredPathMatcher {
+        let exactPaths: Set<String>
+        let directoryPrefixes: [String]
+
+        init(paths: Set<String>) {
+            exactPaths = paths
+            directoryPrefixes = paths.map { $0 + "/" }
+        }
+
+        func contains(_ relativePath: String) -> Bool {
+            exactPaths.contains(relativePath)
+                || directoryPrefixes.contains { relativePath.hasPrefix($0) }
+        }
+    }
+
     private let fileIndex: any WorkspaceFileIndexing
+    private var cachedRevision: Int?
+    private var cachedDocuments: [String: IndexedDocument] = [:]
+    private var cachedStorageBytes = 0
 
     init(fileIndex: any WorkspaceFileIndexing) {
         self.fileIndex = fileIndex
@@ -64,18 +93,21 @@ actor WorkspaceSearchService: WorkspaceContentSearching {
     ) async throws -> WorkspaceSearchSummary {
         let candidates = try await fileIndex.candidates(revision: revision)
         let normalizedIgnoredPaths = FileTreeGitIgnorePresentation.normalized(ignoredPaths)
-        return try await Self.scan(
+        prepareCache(for: revision)
+        return try await scan(
             candidates: candidates,
             query: query,
-            ignoredPaths: normalizedIgnoredPaths,
+            revision: revision,
+            ignoredPathMatcher: IgnoredPathMatcher(paths: normalizedIgnoredPaths),
             onBatch: onBatch
         )
     }
 
-    private nonisolated static func scan(
+    private func scan(
         candidates: [AtelierFileCandidate],
         query: WorkspaceSearchQuery,
-        ignoredPaths: Set<String>,
+        revision: Int,
+        ignoredPathMatcher: IgnoredPathMatcher,
         onBatch: @escaping @MainActor @Sendable ([WorkspaceSearchMatch]) -> Void
     ) async throws -> WorkspaceSearchSummary {
         var batch: [WorkspaceSearchMatch] = []
@@ -83,35 +115,39 @@ actor WorkspaceSearchService: WorkspaceContentSearching {
         var matchedFileCount = 0
         var matchCount = 0
         var resultLineCount = 0
+        let comparisonOptions: String.CompareOptions = query.isCaseSensitive
+            ? []
+            : [.caseInsensitive]
 
         for candidate in candidates {
             try Task.checkCancellation()
             if !query.includesIgnoredFiles,
-               isIgnored(candidate.relativePath, ignoredPaths: ignoredPaths) {
+               ignoredPathMatcher.contains(candidate.relativePath) {
                 continue
             }
 
-            let values = try? candidate.url.resourceValues(forKeys: [.fileSizeKey])
-            guard let fileSize = values?.fileSize,
-                  fileSize <= maximumFileBytes,
-                  let data = try? Data(contentsOf: candidate.url, options: [.mappedIfSafe]),
-                  !data.prefix(8_192).contains(0),
-                  let text = String(data: data, encoding: .utf8) else {
+            guard let document = document(for: candidate, revision: revision) else {
                 continue
             }
 
+            try Task.checkCancellation()
             searchedFileCount += 1
             var fileHasMatches = false
-            let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-            for (lineIndex, substring) in lines.enumerated() {
+            for (lineIndex, line) in document.lines.enumerated() {
                 try Task.checkCancellation()
-                let line = String(substring)
-                guard let lineMatches = lineMatches(in: line, query: query) else { continue }
+                guard let lineMatches = Self.lineMatches(
+                    in: line,
+                    queryText: query.text,
+                    comparisonOptions: comparisonOptions,
+                    matchesWholeWords: query.matchesWholeWords
+                ) else {
+                    continue
+                }
 
                 fileHasMatches = true
                 matchCount += lineMatches.count
                 resultLineCount += 1
-                let excerpt = excerpt(line: line, matchRange: lineMatches.firstRange)
+                let excerpt = Self.excerpt(line: line, matchRange: lineMatches.firstRange)
                 batch.append(
                     WorkspaceSearchMatch(
                         candidate: candidate,
@@ -123,13 +159,13 @@ actor WorkspaceSearchService: WorkspaceContentSearching {
                     )
                 )
 
-                if batch.count == batchSize {
+                if batch.count == Self.batchSize {
                     await onBatch(batch)
                     batch.removeAll(keepingCapacity: true)
                     await Task.yield()
                 }
 
-                if resultLineCount == maximumResultLines {
+                if resultLineCount == Self.maximumResultLines {
                     if !batch.isEmpty {
                         await onBatch(batch)
                     }
@@ -157,22 +193,57 @@ actor WorkspaceSearchService: WorkspaceContentSearching {
         )
     }
 
+    private func prepareCache(for revision: Int) {
+        guard cachedRevision != revision else { return }
+        cachedRevision = revision
+        cachedDocuments.removeAll(keepingCapacity: false)
+        cachedStorageBytes = 0
+    }
+
+    private func document(
+        for candidate: AtelierFileCandidate,
+        revision: Int
+    ) -> IndexedDocument? {
+        if cachedRevision == revision,
+           let cachedDocument = cachedDocuments[candidate.id] {
+            return cachedDocument
+        }
+
+        let values = try? candidate.url.resourceValues(forKeys: [.fileSizeKey])
+        guard let fileSize = values?.fileSize,
+              fileSize <= Self.maximumFileBytes,
+              let data = try? Data(contentsOf: candidate.url, options: [.mappedIfSafe]),
+              !data.prefix(8_192).contains(0),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        let document = IndexedDocument(text: text, fileByteCount: fileSize)
+        if cachedRevision == revision,
+           cachedStorageBytes + document.storageByteCount <= Self.maximumCachedStorageBytes {
+            cachedDocuments[candidate.id] = document
+            cachedStorageBytes += document.storageByteCount
+        }
+        return document
+    }
+
     private nonisolated static func lineMatches(
-        in line: String,
-        query: WorkspaceSearchQuery
-    ) -> (firstRange: Range<String.Index>, count: Int)? {
-        let options: String.CompareOptions = query.isCaseSensitive ? [] : [.caseInsensitive]
-        var firstRange: Range<String.Index>?
+        in line: Substring,
+        queryText: String,
+        comparisonOptions: String.CompareOptions,
+        matchesWholeWords: Bool
+    ) -> (firstRange: Range<Substring.Index>, count: Int)? {
+        var firstRange: Range<Substring.Index>?
         var count = 0
         var searchStart = line.startIndex
 
         while searchStart < line.endIndex,
               let range = line.range(
-                  of: query.text,
-                  options: options,
+                  of: queryText,
+                  options: comparisonOptions,
                   range: searchStart..<line.endIndex
               ) {
-            if !query.matchesWholeWords || isWholeWord(range, in: line) {
+            if !matchesWholeWords || isWholeWord(range, in: line) {
                 firstRange = firstRange ?? range
                 count += 1
             }
@@ -183,8 +254,8 @@ actor WorkspaceSearchService: WorkspaceContentSearching {
     }
 
     private nonisolated static func isWholeWord(
-        _ range: Range<String.Index>,
-        in line: String
+        _ range: Range<Substring.Index>,
+        in line: Substring
     ) -> Bool {
         let startsAtBoundary = range.lowerBound == line.startIndex
             || !isWordCharacter(line[line.index(before: range.lowerBound)])
@@ -197,17 +268,9 @@ actor WorkspaceSearchService: WorkspaceContentSearching {
         character == "_" || character.isLetter || character.isNumber
     }
 
-    private nonisolated static func isIgnored(
-        _ relativePath: String,
-        ignoredPaths: Set<String>
-    ) -> Bool {
-        if ignoredPaths.contains(relativePath) { return true }
-        return ignoredPaths.contains { relativePath.hasPrefix($0 + "/") }
-    }
-
     private nonisolated static func excerpt(
-        line: String,
-        matchRange: Range<String.Index>
+        line: Substring,
+        matchRange: Range<Substring.Index>
     ) -> (leading: String, match: String, trailing: String) {
         let excerptStart = line.index(
             matchRange.lowerBound,
@@ -222,9 +285,9 @@ actor WorkspaceSearchService: WorkspaceContentSearching {
         let prefix = excerptStart == line.startIndex ? "" : "..."
         let suffix = excerptEnd == line.endIndex ? "" : "..."
         return (
-            prefix + line[excerptStart..<matchRange.lowerBound],
+            prefix + String(line[excerptStart..<matchRange.lowerBound]),
             String(line[matchRange]),
-            line[matchRange.upperBound..<excerptEnd] + suffix
+            String(line[matchRange.upperBound..<excerptEnd]) + suffix
         )
     }
 }
@@ -232,6 +295,9 @@ actor WorkspaceSearchService: WorkspaceContentSearching {
 @MainActor
 @Observable
 final class WorkspaceSearchModel {
+    nonisolated static let defaultDebounceDuration: Duration = .milliseconds(300)
+
+    private(set) var mode: WorkspaceSearchMode = .text
     private(set) var query = ""
     private(set) var isCaseSensitive = false
     private(set) var matchesWholeWords = false
@@ -248,6 +314,7 @@ final class WorkspaceSearchModel {
     private(set) var errorMessage: String?
 
     private let searcher: any WorkspaceContentSearching
+    let gemmaSearch: WorkspaceGemmaSearchModel?
     private let ignoredPaths: @MainActor () -> Set<String>
     private let debounceDuration: Duration
     private var fileRevision = 0
@@ -259,13 +326,17 @@ final class WorkspaceSearchModel {
 
     init(
         searcher: any WorkspaceContentSearching,
+        gemmaSearch: WorkspaceGemmaSearchModel? = nil,
         ignoredPaths: @escaping @MainActor () -> Set<String> = { [] },
-        debounceDuration: Duration = .seconds(1)
+        debounceDuration: Duration = defaultDebounceDuration
     ) {
         self.searcher = searcher
+        self.gemmaSearch = gemmaSearch
         self.ignoredPaths = ignoredPaths
         self.debounceDuration = debounceDuration
     }
+
+    var supportsGemma: Bool { gemmaSearch != nil }
 
     var matches: [WorkspaceSearchMatch] {
         groups.flatMap(\.matches)
@@ -281,9 +352,21 @@ final class WorkspaceSearchModel {
         return pendingQuery != activeQuery || activeRevision != fileRevision
     }
 
+    var needsGemmaSearch: Bool {
+        gemmaSearch?.needsSearch(for: query) ?? false
+    }
+
     func present(revision: Int) {
+        let restoresTextMode = mode != .text
+        if restoresTextMode {
+            gemmaSearch?.close()
+            mode = .text
+        }
         fileRevision = revision
         isPresented = true
+        if restoresTextMode {
+            scheduleSearch()
+        }
     }
 
     func updateFileRevision(_ revision: Int) {
@@ -293,7 +376,24 @@ final class WorkspaceSearchModel {
     func updateQuery(_ query: String) {
         guard self.query != query else { return }
         self.query = query
-        scheduleSearch()
+        if mode == .text {
+            scheduleSearch()
+        } else if gemmaSearch?.isRunning == true {
+            gemmaSearch?.stop()
+        }
+    }
+
+    func setMode(_ mode: WorkspaceSearchMode) {
+        guard supportsGemma, self.mode != mode else { return }
+        self.mode = mode
+        switch mode {
+        case .text:
+            gemmaSearch?.close()
+            scheduleSearch()
+        case .gemma:
+            cancelDebounce()
+            cancelSearch()
+        }
     }
 
     func toggleCaseSensitivity() {
@@ -376,7 +476,22 @@ final class WorkspaceSearchModel {
         }
     }
 
+    func searchGemma() {
+        guard mode == .gemma, let gemmaSearch else { return }
+        cancelDebounce()
+        cancelSearch()
+        gemmaSearch.search(query)
+    }
+
+    func stopGemma() {
+        gemmaSearch?.stop()
+    }
+
     func moveSelection(by offset: Int) {
+        if mode == .gemma {
+            gemmaSearch?.moveSelection(by: offset)
+            return
+        }
         let ids = matches.map(\.id)
         guard !ids.isEmpty else {
             selectedID = nil
@@ -394,6 +509,7 @@ final class WorkspaceSearchModel {
     func settleSearch() async {
         await debounceTask?.value
         await searchTask?.value
+        await gemmaSearch?.settle()
     }
 
     func dismiss() {
@@ -402,6 +518,7 @@ final class WorkspaceSearchModel {
         }
         cancelDebounce()
         cancelSearch()
+        gemmaSearch?.close()
         isPresented = false
     }
 

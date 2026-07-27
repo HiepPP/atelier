@@ -3,6 +3,7 @@ import SwiftUI
 struct WorkspaceSearchView: View {
     @Bindable var model: WorkspaceSearchModel
     let onActivate: (WorkspaceSearchMatch) -> Void
+    let onActivateGemmaSource: (WorkspaceGemmaSearchSource) -> Void
     let onDismiss: () -> Void
 
     @FocusState private var queryIsFocused: Bool
@@ -50,12 +51,28 @@ struct WorkspaceSearchView: View {
 
     private var queryBar: some View {
         HStack(spacing: AtelierMetrics.spaceS) {
-            Image(systemName: "magnifyingglass")
+            if model.supportsGemma {
+                Picker("Search mode", selection: modeBinding) {
+                    ForEach(WorkspaceSearchMode.allCases, id: \.self) { mode in
+                        Text(mode.rawValue)
+                            .tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 132)
+                .atelierPointerCursor()
+                .accessibilityLabel("Search mode")
+            }
+
+            Image(systemName: model.mode == .text ? "magnifyingglass" : "sparkles")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
 
             TextField(
-                "Search workspace...",
+                model.mode == .text
+                    ? "Search workspace..."
+                    : "Ask where or how something works...",
                 text: Binding(
                     get: { model.query },
                     set: { value in model.updateQuery(value) }
@@ -67,32 +84,43 @@ struct WorkspaceSearchView: View {
             .onSubmit {
                 submit()
             }
-            .accessibilityLabel("Workspace search query")
+            .accessibilityLabel(
+                model.mode == .text ? "Workspace search query" : "Gemma workspace question"
+            )
 
-            if model.isSearching {
+            if model.isSearching || model.gemmaSearch?.isRunning == true {
                 ProgressView()
                     .controlSize(.small)
                     .accessibilityLabel("Searching workspace files")
             }
 
-            searchOption(
-                label: "Aa",
-                help: "Match Case",
-                isSelected: model.isCaseSensitive,
-                action: { model.toggleCaseSensitivity() }
-            )
-            searchOption(
-                label: "ab",
-                help: "Match Whole Word",
-                isSelected: model.matchesWholeWords,
-                action: { model.toggleWholeWords() }
-            )
-            searchOption(
-                label: "Ignored",
-                help: "Include Ignored Files",
-                isSelected: model.includesIgnoredFiles,
-                action: { model.toggleIncludesIgnoredFiles() }
-            )
+            if model.mode == .text {
+                searchOption(
+                    label: "Aa",
+                    help: "Match Case",
+                    isSelected: model.isCaseSensitive,
+                    action: { model.toggleCaseSensitivity() }
+                )
+                searchOption(
+                    label: "ab",
+                    help: "Match Whole Word",
+                    isSelected: model.matchesWholeWords,
+                    action: { model.toggleWholeWords() }
+                )
+                searchOption(
+                    label: "Ignored",
+                    help: "Include Ignored Files",
+                    isSelected: model.includesIgnoredFiles,
+                    action: { model.toggleIncludesIgnoredFiles() }
+                )
+            } else if model.gemmaSearch?.isRunning == true {
+                Button("Stop") {
+                    model.stopGemma()
+                    queryIsFocused = true
+                }
+                .buttonStyle(AtelierGhostButtonStyle())
+                .help("Stop Gemma search")
+            }
         }
         .padding(.horizontal, AtelierMetrics.spaceL)
         .frame(height: 52)
@@ -101,7 +129,12 @@ struct WorkspaceSearchView: View {
 
     @ViewBuilder
     private var results: some View {
-        if model.groups.isEmpty {
+        if model.mode == .gemma, let gemmaSearch = model.gemmaSearch {
+            WorkspaceGemmaSearchResultsView(
+                model: gemmaSearch,
+                onActivate: onActivateGemmaSource
+            )
+        } else if model.groups.isEmpty {
             emptyState
         } else {
             List(selection: selectionBinding) {
@@ -140,7 +173,7 @@ struct WorkspaceSearchView: View {
         HStack(spacing: AtelierMetrics.spaceM) {
             Text(statusText)
             Spacer()
-            Text(model.needsSearch || model.selection == nil ? "Return Search" : "Return Open")
+            Text(returnHint)
             Text("Up/Down Select")
             Text("Esc Close")
         }
@@ -253,7 +286,25 @@ struct WorkspaceSearchView: View {
         )
     }
 
+    private var modeBinding: Binding<WorkspaceSearchMode> {
+        Binding(
+            get: { model.mode },
+            set: { model.setMode($0) }
+        )
+    }
+
     private var statusText: String {
+        if model.mode == .gemma {
+            guard let gemmaSearch = model.gemmaSearch else { return "Gemma unavailable" }
+            if gemmaSearch.isRunning { return "Gemma is searching..." }
+            if gemmaSearch.status == .failed { return "Gemma search failed" }
+            if model.needsGemmaSearch { return "Press Return to ask Gemma" }
+            if !gemmaSearch.sources.isEmpty {
+                return "\(gemmaSearch.sources.count) sources"
+            }
+            if !gemmaSearch.answer.isEmpty { return "Gemma answer complete" }
+            return "Ask Gemma about this workspace"
+        }
         if model.isSearching {
             return "Searching..."
         }
@@ -270,6 +321,16 @@ struct WorkspaceSearchView: View {
             return "\(model.matchCount) matches in \(model.matchedFileCount) files"
         }
         return "\(model.searchedFileCount) files searched"
+    }
+
+    private var returnHint: String {
+        if model.mode == .gemma {
+            guard let gemmaSearch = model.gemmaSearch else { return "Return Ask" }
+            return model.needsGemmaSearch || gemmaSearch.selection == nil
+                ? "Return Ask"
+                : "Return Open"
+        }
+        return model.needsSearch || model.selection == nil ? "Return Search" : "Return Open"
     }
 
     private var emptyStateImage: String {
@@ -292,20 +353,30 @@ struct WorkspaceSearchView: View {
         if let errorMessage = model.errorMessage { return errorMessage }
         if model.isSearching { return "Scanning indexed workspace files." }
         if model.isWaitingToSearch {
-            return "Search starts one second after typing stops."
+            return "Search starts 300 milliseconds after typing stops."
         }
         if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "Type a query. Search starts after one second."
+            return "Type a query. Search starts after 300 milliseconds."
         }
         if model.needsSearch { return "Press Return to scan this workspace now." }
         return "Try another query or search option."
     }
 
     private func submit() {
-        if model.needsSearch || model.selection == nil {
-            model.search()
-        } else if let selection = model.selection {
-            onActivate(selection)
+        switch model.mode {
+        case .text:
+            if model.needsSearch || model.selection == nil {
+                model.search()
+            } else if let selection = model.selection {
+                onActivate(selection)
+            }
+        case .gemma:
+            guard let gemmaSearch = model.gemmaSearch else { return }
+            if model.needsGemmaSearch || gemmaSearch.selection == nil {
+                model.searchGemma()
+            } else if let selection = gemmaSearch.selection {
+                onActivateGemmaSource(selection)
+            }
         }
     }
 }

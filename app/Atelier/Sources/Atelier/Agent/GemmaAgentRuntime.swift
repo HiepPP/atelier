@@ -5,6 +5,7 @@ nonisolated struct GemmaToolActivity: Identifiable, Equatable, Sendable {
     let name: String
     let detail: String
     let referencedFiles: [String]
+    let references: [WorkspaceToolReference]
     let isComplete: Bool
 
     init(
@@ -12,12 +13,14 @@ nonisolated struct GemmaToolActivity: Identifiable, Equatable, Sendable {
         name: String,
         detail: String,
         referencedFiles: [String] = [],
+        references: [WorkspaceToolReference] = [],
         isComplete: Bool = false
     ) {
         self.id = id
         self.name = name
         self.detail = detail
         self.referencedFiles = referencedFiles
+        self.references = references
         self.isComplete = isComplete
     }
 }
@@ -50,7 +53,7 @@ nonisolated enum GemmaAgentRuntimeError: LocalizedError, Equatable, Sendable {
 }
 
 actor GemmaAgentRuntime {
-    private static let systemPrompt = """
+    private static let defaultSystemPrompt = """
         You are Atelier's read-only workspace assistant. Inspect the workspace using only the provided tools. Never claim to edit files or run commands. Prefer focused searches and bounded file reads. Cite workspace-relative paths and line numbers in the final answer.
         """
     private static let maximumToolIterations = 8
@@ -59,14 +62,26 @@ actor GemmaAgentRuntime {
 
     private let client: any OllamaChatStreaming
     private let tools: any WorkspaceToolExecuting
-    private var history: [OllamaChatMessage] = [
-        OllamaChatMessage(role: .system, content: systemPrompt)
-    ]
+    private let systemPrompt: String
+    private let toolDefinitions: [OllamaToolDefinition]
+    private let allowedToolNames: Set<String>
+    private var history: [OllamaChatMessage]
     private var activeTask: Task<Void, Never>?
 
-    init(client: any OllamaChatStreaming, tools: any WorkspaceToolExecuting) {
+    init(
+        client: any OllamaChatStreaming,
+        tools: any WorkspaceToolExecuting,
+        systemPrompt: String? = nil,
+        toolDefinitions: [OllamaToolDefinition]? = nil
+    ) {
+        let resolvedPrompt = systemPrompt ?? Self.defaultSystemPrompt
+        let resolvedDefinitions = toolDefinitions ?? WorkspaceToolName.definitions
         self.client = client
         self.tools = tools
+        self.systemPrompt = resolvedPrompt
+        self.toolDefinitions = resolvedDefinitions
+        allowedToolNames = Set(resolvedDefinitions.map(\.function.name))
+        history = [OllamaChatMessage(role: .system, content: resolvedPrompt)]
     }
 
     func events(for prompt: String) -> AsyncThrowingStream<GemmaAgentEvent, Error> {
@@ -95,7 +110,7 @@ actor GemmaAgentRuntime {
 
     func reset() async {
         await cancel()
-        history = [OllamaChatMessage(role: .system, content: Self.systemPrompt)]
+        history = [OllamaChatMessage(role: .system, content: systemPrompt)]
     }
 
     private func run(
@@ -115,7 +130,7 @@ actor GemmaAgentRuntime {
             try Task.checkCancellation()
             let request = OllamaChatRequest(
                 messages: runHistory,
-                tools: WorkspaceToolName.definitions
+                tools: toolDefinitions
             )
             let stream = await client.stream(request: request)
             var content = ""
@@ -155,7 +170,7 @@ actor GemmaAgentRuntime {
             }
             for call in toolCalls {
                 try Task.checkCancellation()
-                guard WorkspaceToolName(rawValue: call.function.name) != nil else {
+                guard allowedToolNames.contains(call.function.name) else {
                     throw WorkspaceToolError.unknownTool(call.function.name)
                 }
                 let activityID = UUID()
@@ -182,6 +197,7 @@ actor GemmaAgentRuntime {
                             name: call.function.name,
                             detail: result.truncated ? "\(detail) (bounded)" : detail,
                             referencedFiles: result.referencedFiles,
+                            references: result.references,
                             isComplete: true
                         )
                     )
