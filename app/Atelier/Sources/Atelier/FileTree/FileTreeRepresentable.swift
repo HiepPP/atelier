@@ -7,6 +7,7 @@ struct FileTreeRepresentable: NSViewRepresentable {
 
     let rootURL: URL
     let revision: Int
+    let revealRequest: FileTreeRevealRequest?
     let ignoredPaths: Set<String>
     let onTargetDirectoryChange: (URL) -> Void
     let onCreateItem: (FileTreeCreationKind, URL) -> Void
@@ -52,6 +53,7 @@ struct FileTreeRepresentable: NSViewRepresentable {
             onPreview: onPreview,
             onOpen: onOpen
         )
+        context.coordinator.reveal(revealRequest)
     }
 
     static func dismantleNSView(_ scrollView: NSScrollView, coordinator: FileTreeController) {

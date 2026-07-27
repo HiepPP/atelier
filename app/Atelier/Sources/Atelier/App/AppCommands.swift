@@ -114,6 +114,12 @@ struct AppCommands: Commands {
             .keyboardShortcut("e", modifiers: .command)
             .disabled(!isEnabled(.toggleExplorerGit))
 
+            Button(title(.revealActiveFileInExplorer)) {
+                perform(.revealActiveFileInExplorer)
+            }
+            .keyboardShortcut("b", modifiers: .command)
+            .disabled(!isEnabled(.revealActiveFileInExplorer))
+
             Button(title(.toggleAgentResponses)) {
                 perform(.toggleAgentResponses)
             }

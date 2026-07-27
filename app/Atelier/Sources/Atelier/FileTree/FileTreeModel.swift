@@ -22,6 +22,11 @@ struct FileTreeCreationRequest: Equatable, Identifiable {
     let parentURL: URL
 }
 
+nonisolated struct FileTreeRevealRequest: Equatable, Sendable {
+    let id = UUID()
+    let url: URL
+}
+
 nonisolated enum FileTreePathPolicy {
     static func relativePath(of url: URL, within rootURL: URL) -> String? {
         let rootComponents = rootURL.standardizedFileURL.pathComponents

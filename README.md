@@ -180,6 +180,7 @@ Terminal tabs restore as fresh shells. Missing files and unavailable workspaces 
 | `Command-Option-F` | Find and replace |
 | `Command-G` | Next search result |
 | `Command-Shift-G` | Previous search result |
+| `Command-B` | Reveal the active file in Explorer |
 | `Command-E` | Toggle between Explorer and Git |
 | `Command-R` | Toggle Source and Preview |
 | `Command-Q` | Toggle Agent Responses |

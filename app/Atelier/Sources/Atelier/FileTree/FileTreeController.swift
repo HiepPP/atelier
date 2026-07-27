@@ -18,6 +18,8 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     private var revision = 0
     private weak var outlineView: NSOutlineView?
     private var loadTasks: [URL: Task<Void, Never>] = [:]
+    private var revealTask: Task<Void, Never>?
+    private var lastRevealRequestID: UUID?
     private var fileIconImages: [URL: NSImage] = [:]
     private var folderIconImages: [URL: MaterialFolderImages] = [:]
     private var contextMenuTarget: URL?
@@ -161,6 +163,8 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
     }
 
     func stop() {
+        revealTask?.cancel()
+        revealTask = nil
         cancelLoads()
         RuntimeFileTreeMetricsStore.shared.unregister(rootPath: diagnosticRootPath)
         (outlineView as? FileTreeOutlineView)?.menuProvider = nil
@@ -169,6 +173,19 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         outlineView?.target = nil
         outlineView?.doubleAction = nil
         outlineView = nil
+    }
+
+    func reveal(_ request: FileTreeRevealRequest?) {
+        guard lastRevealRequestID != request?.id else { return }
+        lastRevealRequestID = request?.id
+        revealTask?.cancel()
+        guard let request else {
+            revealTask = nil
+            return
+        }
+        revealTask = Task { [weak self] in
+            await self?.revealFile(at: request.url)
+        }
     }
 
     func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
@@ -433,9 +450,11 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
         return item
     }
 
-    private func load(_ node: FileTreeNode) {
+    @discardableResult
+    private func load(_ node: FileTreeNode) -> Task<Void, Never>? {
+        if let task = loadTasks[node.url] { return task }
         let isInitialLoad = node.children == nil
-        guard node.beginLoading() else { return }
+        guard node.beginLoading() else { return nil }
         let url = node.url
         let isRootLoad = node === root
         let diagnosticRootPath = self.diagnosticRootPath
@@ -443,8 +462,7 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             RuntimeFileTreeMetricsStore.shared.loading(rootPath: diagnosticRootPath)
         }
         AppLogger.fileTree.debug("Loading directory: \(url.lastPathComponent, privacy: .public)")
-        loadTasks[url]?.cancel()
-        loadTasks[url] = Task { [weak self, weak node] in
+        let task = Task { [weak self, weak node] in
             guard let self, let node else { return }
             do {
                 let entries = try await service.children(of: url)
@@ -475,6 +493,54 @@ final class FileTreeController: NSObject, NSOutlineViewDataSource, NSOutlineView
             }
             loadTasks[url] = nil
         }
+        loadTasks[url] = task
+        return task
+    }
+
+    private func revealFile(at url: URL) async {
+        let targetURL = url.standardizedFileURL
+        let rootURL = root.url.standardizedFileURL
+        guard FileTreePathPolicy.contains(targetURL, within: rootURL),
+              targetURL != rootURL else { return }
+
+        let targetComponents = targetURL.pathComponents.dropFirst(rootURL.pathComponents.count)
+        var node = root
+        var expectedURL = rootURL
+
+        for component in targetComponents {
+            guard !Task.isCancelled else { return }
+            expectedURL.appendPathComponent(component)
+            await loadChildrenIfNeeded(node)
+            guard !Task.isCancelled else { return }
+
+            var child = node.children?.first {
+                $0.url.standardizedFileURL == expectedURL.standardizedFileURL
+            }
+            if child == nil, let refreshTask = load(node) {
+                await refreshTask.value
+                guard !Task.isCancelled else { return }
+                child = node.children?.first {
+                    $0.url.standardizedFileURL == expectedURL.standardizedFileURL
+                }
+            }
+            guard let child else { return }
+            node = child
+            if node.isDirectory {
+                outlineView?.expandItem(node)
+            }
+        }
+
+        guard !node.isDirectory, let outlineView else { return }
+        let row = outlineView.row(forItem: node)
+        guard row >= 0 else { return }
+        outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        outlineView.scrollRowToVisible(row)
+        outlineView.window?.makeFirstResponder(outlineView)
+    }
+
+    private func loadChildrenIfNeeded(_ node: FileTreeNode) async {
+        guard node.children == nil, let task = load(node) else { return }
+        await task.value
     }
 
     private func refreshExpandedDirectories() {

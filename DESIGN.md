@@ -480,7 +480,8 @@ Persistence boundaries:
 - Use zero outer horizontal padding and zero spacing between sidebar tab cells.
 - Separate tab cells with the pill insets themselves. Do not draw hairline dividers between tabs.
 - Put a compact contextual toolbar at the top of the selected tab body, directly below the tab bar.
-- Right-align New File and New Folder in the Explorer toolbar. Right-align Refresh in the Git toolbar.
+- Right-align Reveal Active File, New File, and New Folder in the Explorer toolbar. Right-align
+  Refresh in the Git toolbar.
 - Render only the selected body's actions. Keep the tab label, count, selection target, help, and accessibility text intact.
 - Keep every sidebar tab hit target aligned to all four edges of the header envelope.
 - Render the selected sidebar tab as an inset `rowRadius` rounded pill of translucent `chromeSelection` glass with a
@@ -508,6 +509,8 @@ Persistence boundaries:
 - Dispatch Explorer primary clicks on mouse-down so file previews and folder toggles start immediately.
 - Explorer single-click opens one replaceable preview.
 - Explorer double-click opens or promotes a permanent tab.
+- Reveal Active File selects the current file in Explorer, expands its parent folders, and scrolls
+  its row into view. The toolbar crosshair and `Cmd-B` use the same typed action.
 - Command-clicking a file or folder inserts its workspace-relative path into the selected terminal.
   Prefix the path with `@` and append one space. If a terminal is not selected, preserve the
   normal single-click behavior.
@@ -963,6 +966,7 @@ The five background features, all read-only and cancellable:
 | `Cmd-Option-F` | Find and replace in active text file |
 | `Cmd-G` | Next file-search match |
 | `Cmd-Shift-G` | Previous file-search match |
+| `Cmd-B` | Reveal the active file in Explorer |
 | `Cmd-E` | Toggle between the Explorer and Git sidebar tabs |
 | `Cmd-R` | Toggle Source and Preview for the active Markdown or HTML file |
 | `Cmd-Q` | Toggle Agent Responses at the default half width |

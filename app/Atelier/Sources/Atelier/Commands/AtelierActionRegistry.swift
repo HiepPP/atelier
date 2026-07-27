@@ -16,6 +16,7 @@ nonisolated enum AtelierActionID: String, CaseIterable, Identifiable, Sendable {
     case showExplorer
     case showGit
     case toggleExplorerGit
+    case revealActiveFileInExplorer
     case toggleAgentResponses
     case toggleLeftPanel
     case toggleWorkspacePanels
@@ -45,6 +46,7 @@ nonisolated struct AtelierActionContext: Equatable, Sendable {
     let canNavigateForward: Bool
     let canReopenClosedTab: Bool
     let canShowSidebarTab: Bool
+    let canRevealActiveFileInExplorer: Bool
     let canToggleLeftPanel: Bool
     let canToggleWorkspacePanels: Bool
     let canToggleRightPanel: Bool
@@ -70,6 +72,7 @@ struct AtelierActionHandlers {
     let showExplorer: () -> Void
     let showGit: () -> Void
     let toggleExplorerGit: () -> Void
+    let revealActiveFileInExplorer: () -> Void
     let toggleAgentResponses: () -> Void
     let toggleLeftPanel: () -> Void
     let toggleWorkspacePanels: () -> Void
@@ -96,6 +99,13 @@ struct AtelierActionHandlers {
             showSidebarTab(selectedTab == .explorer ? .sourceControl : .explorer)
         }
 
+        func revealActiveFileInExplorer() {
+            guard let workspace = model.workspace,
+                  let selectedFileURL = workspace.terminalTabs.selectedFileURL else { return }
+            showSidebarTab(.explorer)
+            workspace.chrome.requestExplorerReveal(selectedFileURL)
+        }
+
         return AtelierActionHandlers(
             openFolder: model.chooseWorkspace,
             searchWorkspace: {
@@ -115,6 +125,7 @@ struct AtelierActionHandlers {
             showExplorer: { showSidebarTab(.explorer) },
             showGit: { showSidebarTab(.sourceControl) },
             toggleExplorerGit: toggleExplorerGit,
+            revealActiveFileInExplorer: revealActiveFileInExplorer,
             toggleAgentResponses: {
                 guard let workspace = model.workspace else { return }
                 workspace.chrome.toggleAgentResponses(
@@ -264,6 +275,13 @@ nonisolated enum AtelierActionRegistry {
             shortcutLabel: "Command-E"
         ),
         AtelierActionDescriptor(
+            id: .revealActiveFileInExplorer,
+            title: "Reveal Active File in Explorer",
+            category: "View",
+            systemImage: "scope",
+            shortcutLabel: "Command-B"
+        ),
+        AtelierActionDescriptor(
             id: .toggleAgentResponses,
             title: "Toggle Agent Responses",
             category: "View",
@@ -368,6 +386,8 @@ nonisolated enum AtelierActionRegistry {
             context.canReopenClosedTab
         case .showExplorer, .showGit, .toggleExplorerGit:
             context.canShowSidebarTab
+        case .revealActiveFileInExplorer:
+            context.canRevealActiveFileInExplorer
         case .toggleLeftPanel:
             context.canToggleLeftPanel
         case .toggleWorkspacePanels:
@@ -392,6 +412,10 @@ nonisolated enum AtelierActionRegistry {
             canNavigateForward: model.workspace?.terminalTabs.canNavigateForward == true,
             canReopenClosedTab: model.workspace?.terminalTabs.canReopenClosedTab == true,
             canShowSidebarTab: model.workspace?.chrome.currentLayoutMode.docksSidebar == true,
+            canRevealActiveFileInExplorer: model.workspace.map { workspace in
+                workspace.chrome.currentLayoutMode.docksSidebar
+                    && workspace.terminalTabs.selectedFileURL != nil
+            } ?? false,
             canToggleLeftPanel: model.workspace.map { workspace in
                 !model.zoom.isFocusMode && workspace.chrome.currentLayoutMode.docksSidebar
             } ?? false,
@@ -443,6 +467,8 @@ nonisolated enum AtelierActionRegistry {
             handlers.showGit()
         case .toggleExplorerGit:
             handlers.toggleExplorerGit()
+        case .revealActiveFileInExplorer:
+            handlers.revealActiveFileInExplorer()
         case .toggleAgentResponses:
             handlers.toggleAgentResponses()
         case .toggleLeftPanel:

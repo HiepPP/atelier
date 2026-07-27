@@ -176,6 +176,7 @@ final class WorkspaceChromeModel {
     var panels = WorkspacePanelPresentation.initial(for: .standard)
     var currentLayoutMode = WorkspaceLayoutMode.standard
     var selectedSidebarTab = WorkspaceSidebarTab.explorer
+    var explorerRevealRequest: FileTreeRevealRequest?
     var agentResponseOverlayMode = AgentResponseOverlayMode.half
     var isProjectMenuPresented = false
     var sidebarAnimationRequestID = 0
@@ -226,6 +227,10 @@ final class WorkspaceChromeModel {
         selectedSidebarTab = tab
         guard currentLayoutMode.docksSidebar, !panels.showsSidebar else { return }
         toggleSidebar()
+    }
+
+    func requestExplorerReveal(_ url: URL) {
+        explorerRevealRequest = FileTreeRevealRequest(url: url)
     }
 
     func toggleAgentResponses(
@@ -1107,6 +1112,20 @@ struct WorkspaceView: View {
             case .explorer:
                 Group {
                     Button {
+                        AtelierActionRegistry.perform(.revealActiveFileInExplorer, model: app)
+                    } label: {
+                        Image(systemName: "scope")
+                    }
+                    .accessibilityLabel("Reveal active file in Explorer")
+                    .help("Reveal active file in Explorer (Command-B)")
+                    .disabled(
+                        !AtelierActionRegistry.isEnabled(
+                            .revealActiveFileInExplorer,
+                            context: AtelierActionRegistry.context(for: app)
+                        )
+                    )
+
+                    Button {
                         fileTreeCreationRequest = FileTreeCreationRequest(
                             kind: .file,
                             parentURL: fileTreeTargetDirectory ?? workspaceURL
@@ -1168,6 +1187,7 @@ struct WorkspaceView: View {
                 gitModel: gitModel,
                 rootURL: workspaceURL,
                 revision: session.fileTreeRevision,
+                revealRequest: chrome.explorerRevealRequest,
                 onTargetDirectoryChange: { fileTreeTargetDirectory = $0 },
                 onCreateItem: { kind, parentURL in
                     fileTreeCreationRequest = FileTreeCreationRequest(
@@ -1355,6 +1375,7 @@ private struct ExplorerFileTree: View {
     let gitModel: GitWorkspaceModel
     let rootURL: URL
     let revision: Int
+    let revealRequest: FileTreeRevealRequest?
     let onTargetDirectoryChange: (URL) -> Void
     let onCreateItem: (FileTreeCreationKind, URL) -> Void
     let onRenameItem: (URL, String) -> Void
@@ -1368,6 +1389,7 @@ private struct ExplorerFileTree: View {
         FileTreeView(
             rootURL: rootURL,
             revision: revision,
+            revealRequest: revealRequest,
             ignoredPaths: gitModel.snapshot.status.ignoredPaths,
             onTargetDirectoryChange: onTargetDirectoryChange,
             onCreateItem: onCreateItem,

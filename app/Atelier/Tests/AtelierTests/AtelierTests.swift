@@ -309,6 +309,62 @@ struct AtelierTests {
         #expect(outlineView.isItemExpanded(folder))
     }
 
+    @Test("Explorer reveals a nested active file")
+    @MainActor
+    func fileTreeRevealsNestedActiveFile() async throws {
+        let root = temporaryDirectory("file-tree-reveal")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let nestedFolder = root.appendingPathComponent("Sources/Feature", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: nestedFolder,
+            withIntermediateDirectories: true
+        )
+        let activeFile = nestedFolder.appendingPathComponent("Current.swift")
+        try Data().write(to: activeFile)
+
+        let controller = FileTreeController(
+            rootURL: root,
+            ignoredPaths: [],
+            onTargetDirectoryChange: { _ in },
+            onCreateItem: { _, _ in },
+            onRenameItem: { _, _ in },
+            onMoveItemToTrash: { _ in },
+            onAddItemToGitIgnore: { _ in },
+            onPasteRelativePath: { _ in false },
+            onPreview: { _ in },
+            onOpen: { _ in }
+        )
+        defer { controller.stop() }
+
+        let scrollView = controller.makeView(scale: 1, displayScale: 2)
+        scrollView.frame = NSRect(x: 0, y: 0, width: 320, height: 120)
+        let window = NSWindow(
+            contentRect: scrollView.frame,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = scrollView
+        let outlineView = try #require(scrollView.documentView as? NSOutlineView)
+
+        controller.reveal(FileTreeRevealRequest(url: activeFile))
+        for _ in 0..<500 {
+            if outlineView.selectedRow >= 0,
+               let node = outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode,
+               node.url.standardizedFileURL == activeFile.standardizedFileURL {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+
+        let selectedNode = try #require(
+            outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode
+        )
+        #expect(selectedNode.url.standardizedFileURL == activeFile.standardizedFileURL)
+        #expect(outlineView.isItemExpanded(outlineView.parent(forItem: selectedNode)))
+        #expect(outlineView.rows(in: outlineView.visibleRect).contains(outlineView.selectedRow))
+    }
+
     @Test("Inactive Git sidebar does not mount its native text editor")
     @MainActor
     func inactiveGitSidebarDoesNotMountTextEditor() {

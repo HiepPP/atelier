@@ -3,6 +3,7 @@ import SwiftUI
 struct FileTreeView: View {
     let rootURL: URL
     let revision: Int
+    let revealRequest: FileTreeRevealRequest?
     let ignoredPaths: Set<String>
     let onTargetDirectoryChange: (URL) -> Void
     let onCreateItem: (FileTreeCreationKind, URL) -> Void
@@ -17,6 +18,7 @@ struct FileTreeView: View {
         FileTreeRepresentable(
             rootURL: rootURL,
             revision: revision,
+            revealRequest: revealRequest,
             ignoredPaths: ignoredPaths,
             onTargetDirectoryChange: onTargetDirectoryChange,
             onCreateItem: onCreateItem,

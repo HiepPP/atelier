@@ -25,6 +25,7 @@ struct AtelierActionRegistryTests {
             .showExplorer,
             .showGit,
             .toggleExplorerGit,
+            .revealActiveFileInExplorer,
             .toggleAgentResponses,
             .toggleLeftPanel,
             .toggleWorkspacePanels,
@@ -46,6 +47,10 @@ struct AtelierActionRegistryTests {
         #expect(
             AtelierActionRegistry.descriptor(for: .toggleExplorerGit).shortcutLabel
                 == "Command-E"
+        )
+        #expect(
+            AtelierActionRegistry.descriptor(for: .revealActiveFileInExplorer).shortcutLabel
+                == "Command-B"
         )
         #expect(
             AtelierActionRegistry.descriptor(for: .toggleAgentResponses).shortcutLabel
@@ -72,6 +77,7 @@ struct AtelierActionRegistryTests {
             canNavigateForward: true,
             canReopenClosedTab: false,
             canShowSidebarTab: false,
+            canRevealActiveFileInExplorer: false,
             canToggleLeftPanel: false,
             canToggleWorkspacePanels: false,
             canToggleRightPanel: false,
@@ -94,6 +100,7 @@ struct AtelierActionRegistryTests {
         #expect(!AtelierActionRegistry.isEnabled(.showExplorer, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.showGit, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleExplorerGit, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.revealActiveFileInExplorer, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleAgentResponses, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleLeftPanel, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleWorkspacePanels, context: empty))
@@ -112,6 +119,7 @@ struct AtelierActionRegistryTests {
             canNavigateForward: false,
             canReopenClosedTab: false,
             canShowSidebarTab: false,
+            canRevealActiveFileInExplorer: false,
             canToggleLeftPanel: false,
             canToggleWorkspacePanels: false,
             canToggleRightPanel: false,
@@ -135,6 +143,7 @@ struct AtelierActionRegistryTests {
         #expect(AtelierActionRegistry.isEnabled(.showExplorer, context: active))
         #expect(AtelierActionRegistry.isEnabled(.showGit, context: active))
         #expect(AtelierActionRegistry.isEnabled(.toggleExplorerGit, context: active))
+        #expect(AtelierActionRegistry.isEnabled(.revealActiveFileInExplorer, context: active))
         #expect(!AtelierActionRegistry.isEnabled(.toggleLeftPanel, context: active))
     }
 
@@ -157,6 +166,7 @@ struct AtelierActionRegistryTests {
             showExplorer: { recorded.append(.showExplorer) },
             showGit: { recorded.append(.showGit) },
             toggleExplorerGit: { recorded.append(.toggleExplorerGit) },
+            revealActiveFileInExplorer: { recorded.append(.revealActiveFileInExplorer) },
             toggleAgentResponses: { recorded.append(.toggleAgentResponses) },
             toggleLeftPanel: { recorded.append(.toggleLeftPanel) },
             toggleWorkspacePanels: { recorded.append(.toggleWorkspacePanels) },
@@ -225,10 +235,21 @@ struct AtelierActionRegistryTests {
         let state = WorkspaceState(path: root.path, bookmark: nil, lastOpenedAt: .now)
         try model.openWorkspace(state)
         let workspace = try #require(model.workspace)
+        let activeFile = root.appendingPathComponent("Current.swift")
+        try Data().write(to: activeFile)
+        workspace.terminalTabs.openFile(activeFile)
 
         workspace.chrome.toggleSidebar()
         #expect(!workspace.chrome.panels.showsSidebar)
 
+        workspace.chrome.selectedSidebarTab = .sourceControl
+        AtelierActionRegistry.perform(.revealActiveFileInExplorer, model: model)
+        #expect(workspace.chrome.selectedSidebarTab == .explorer)
+        #expect(workspace.chrome.panels.showsSidebar)
+        #expect(workspace.chrome.explorerRevealRequest?.url == activeFile.standardizedFileURL)
+
+        workspace.chrome.toggleSidebar()
+        #expect(!workspace.chrome.panels.showsSidebar)
         AtelierActionRegistry.perform(.toggleExplorerGit, model: model)
         #expect(workspace.chrome.selectedSidebarTab == .sourceControl)
         #expect(workspace.chrome.panels.showsSidebar)
@@ -292,6 +313,7 @@ struct AtelierActionRegistryTests {
             canNavigateForward: true,
             canReopenClosedTab: true,
             canShowSidebarTab: true,
+            canRevealActiveFileInExplorer: true,
             canToggleLeftPanel: !isFocusMode,
             canToggleWorkspacePanels: true,
             canToggleRightPanel: !isFocusMode,
