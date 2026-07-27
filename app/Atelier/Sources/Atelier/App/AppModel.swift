@@ -1,3 +1,4 @@
+import CoreGraphics
 import Observation
 
 @MainActor
@@ -5,6 +6,7 @@ import Observation
 final class AppModel {
     let zoom: AtelierZoomModel
     let windowController: WindowController
+    let layoutProfiles: LayoutProfileStore
     let threadsPanel = ThreadsPanelModel()
 
     private(set) var workspaceStates: [WorkspaceState] = []
@@ -19,6 +21,9 @@ final class AppModel {
     }
     private(set) var loadingWorkspaceIDs = Set<String>()
     private(set) var workspaceFailures: [String: WorkspaceCatalogItemStatus] = [:]
+    private(set) var workspaceSidebarWidth = AtelierMetrics.workspaceSidebarIdealWidth
+    private(set) var workspaceInspectorWidth = AtelierMetrics.inspectorIdealWidth
+    private(set) var currentWindowContentSize: CGSize?
     var presentedError: AppError?
 
     private var sessionsByID: [String: WorkspaceSession] = [:]
@@ -59,6 +64,8 @@ final class AppModel {
     private var sessionPersistTask: Task<Void, Never>?
     private var pendingPersistence: WorkspaceCatalogState?
     private var catalogMutationRevision: UInt64 = 0
+    private var layoutProfileApplicationTask: Task<Void, Never>?
+    private var layoutProfileApplicationRevision: UInt64 = 0
     private var hasStarted = false
     private var hasStopped = false
     private var isStartupRestorePending = false
@@ -67,9 +74,120 @@ final class AppModel {
         self.environment = environment
         windowController = environment.windowController
         zoom = AtelierZoomModel(windowController: environment.windowController)
+        layoutProfiles = LayoutProfileStore(defaults: environment.layoutProfileDefaults)
+        let initialProfile = layoutProfiles.selectedProfile.snapshot
+        workspaceSidebarWidth = WorkspaceSidebarWidthPolicy.clamped(initialProfile.sidebarWidth)
+        workspaceInspectorWidth = WorkspaceInspectorWidthPolicy.clamped(
+            initialProfile.inspectorWidth
+        )
         environment.windowController.onScreenDidChange = { [weak zoom] in
             zoom?.updateForCurrentDisplay()
         }
+        environment.windowController.onContentSizeDidChange = { [weak self] size in
+            self?.updateCurrentWindowContentSize(size)
+        }
+    }
+
+    var selectedLayoutProfile: LayoutProfile {
+        layoutProfiles.selectedProfile
+    }
+
+    var isSelectedLayoutProfileModified: Bool {
+        guard !layoutProfiles.isApplying else { return false }
+        return layoutProfiles.isSelectedProfileModified(by: currentLayoutProfileSnapshot())
+    }
+
+    func saveCurrentLayoutProfile() {
+        let snapshot = currentLayoutProfileSnapshot()
+        layoutProfiles.save(snapshot, to: layoutProfiles.selectedID)
+        for session in liveSessions {
+            session.chrome.applyLayoutProfilePanels(snapshot.panels, requestsAnimation: false)
+        }
+    }
+
+    func applyLayoutProfile(_ id: LayoutProfileID) {
+        let profile = layoutProfiles.profile(for: id)
+        layoutProfiles.select(id)
+        layoutProfileApplicationRevision &+= 1
+        let revision = layoutProfileApplicationRevision
+        layoutProfileApplicationTask?.cancel()
+        layoutProfiles.beginApplying()
+        let responder = windowController.currentFirstResponder()
+        if let appliedSize = windowController.applyContentSize(
+            profile.snapshot.windowContentSize,
+            minimumSize: AtelierZoomModel.baseMinimumSize
+        ) {
+            updateCurrentWindowContentSize(appliedSize)
+        }
+
+        layoutProfileApplicationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if revision == layoutProfileApplicationRevision {
+                    layoutProfiles.endApplying()
+                    layoutProfileApplicationTask = nil
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled, revision == layoutProfileApplicationRevision else { return }
+
+            zoom.applyLayoutProfileState(profile.snapshot.zoom)
+            updateWorkspaceSidebarWidth(profile.snapshot.sidebarWidth)
+            updateWorkspaceInspectorWidth(profile.snapshot.inspectorWidth)
+
+            await Task.yield()
+            guard !Task.isCancelled, revision == layoutProfileApplicationRevision else { return }
+            for session in liveSessions {
+                session.chrome.applyLayoutProfilePanels(
+                    profile.snapshot.panels,
+                    requestsAnimation: false
+                )
+            }
+
+            await Task.yield()
+            guard !Task.isCancelled, revision == layoutProfileApplicationRevision else { return }
+            windowController.restoreFirstResponder(responder)
+        }
+    }
+
+    func updateWorkspaceSidebarWidth(_ proposedWidth: CGFloat) {
+        let width = WorkspaceSidebarWidthPolicy.clamped(proposedWidth)
+        guard WorkspaceSidebarWidthPolicy.differs(workspaceSidebarWidth, from: width) else {
+            return
+        }
+        workspaceSidebarWidth = width
+    }
+
+    func updateWorkspaceInspectorWidth(_ proposedWidth: CGFloat) {
+        let width = WorkspaceInspectorWidthPolicy.clamped(proposedWidth)
+        guard WorkspaceInspectorWidthPolicy.differs(workspaceInspectorWidth, from: width) else {
+            return
+        }
+        workspaceInspectorWidth = width
+    }
+
+    private func currentLayoutProfileSnapshot() -> LayoutProfileSnapshot {
+        let selectedSnapshot = layoutProfiles.selectedProfile.snapshot
+        let observedWindowSize = currentWindowContentSize
+        let windowSize = windowController.currentContentSize()
+            ?? observedWindowSize
+            ?? selectedSnapshot.windowContentSize
+        let panelState = workspace?.chrome.layoutProfilePanelState
+            ?? selectedSnapshot.panels
+        return LayoutProfileSnapshot(
+            windowWidth: windowSize.width,
+            windowHeight: windowSize.height,
+            zoom: zoom.layoutProfileState,
+            sidebarWidth: workspaceSidebarWidth,
+            inspectorWidth: workspaceInspectorWidth,
+            panels: panelState
+        ).normalized()
+    }
+
+    private func updateCurrentWindowContentSize(_ size: CGSize) {
+        let normalized = CGSize(width: size.width.rounded(), height: size.height.rounded())
+        guard currentWindowContentSize != normalized else { return }
+        currentWindowContentSize = normalized
     }
 
     func start() {
@@ -219,6 +337,10 @@ final class AppModel {
         hasStopped = true
         startupTask?.cancel()
         startupTask = nil
+        layoutProfileApplicationRevision &+= 1
+        layoutProfileApplicationTask?.cancel()
+        layoutProfileApplicationTask = nil
+        layoutProfiles.endApplying()
         sessionPersistTask?.cancel()
         sessionPersistTask = nil
         persistCatalog()
@@ -239,6 +361,10 @@ final class AppModel {
             rootURL: rootURL,
             workspaceAccess: workspaceAccess,
             onSessionChange: { [weak self] in self?.scheduleSessionPersist() }
+        )
+        session.chrome.applyLayoutProfilePanels(
+            layoutProfiles.selectedProfile.snapshot.panels,
+            requestsAnimation: false
         )
         sessionsByID[state.id] = session
         session.start(agentResponsesActive: state.id == selectedWorkspaceID)

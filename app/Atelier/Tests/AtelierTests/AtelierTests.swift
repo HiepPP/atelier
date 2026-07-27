@@ -394,12 +394,25 @@ struct AtelierTests {
         #expect(outlineView.rows(in: outlineView.visibleRect).contains(outlineView.selectedRow))
     }
 
-    @Test("Inactive Git sidebar does not mount its native text editor")
+    @Test("Inactive Git sidebar hides its native input and scroller")
     @MainActor
-    func inactiveGitSidebarDoesNotMountTextEditor() {
+    func inactiveGitSidebarDoesNotMountTextEditor() async {
         func nativeTextViews(in view: NSView) -> [NSTextView] {
             let current = (view as? NSTextView).map { [$0] } ?? []
             return current + view.subviews.flatMap { nativeTextViews(in: $0) }
+        }
+
+        func nativeScrollViews(in view: NSView) -> [NSScrollView] {
+            let current = (view as? NSScrollView).map { [$0] } ?? []
+            return current + view.subviews.flatMap { nativeScrollViews(in: $0) }
+        }
+
+        func waitUntil(_ condition: () -> Bool) async -> Bool {
+            for _ in 0..<50 {
+                if condition() { return true }
+                await Task.yield()
+            }
+            return false
         }
 
         let model = GitWorkspaceModel(
@@ -425,20 +438,32 @@ struct AtelierTests {
         window.contentView = inactiveView
         inactiveView.layoutSubtreeIfNeeded()
         #expect(nativeTextViews(in: inactiveView).isEmpty)
+        let inactiveScrollViews = nativeScrollViews(in: inactiveView)
+        #expect(!inactiveScrollViews.isEmpty)
+        let inactiveScrollersHidden = await waitUntil {
+            inactiveView.layoutSubtreeIfNeeded()
+            return nativeScrollViews(in: inactiveView).allSatisfy {
+                $0.verticalScroller?.isHidden != false
+            }
+        }
+        #expect(inactiveScrollersHidden)
 
-        let activeView = NSHostingView(
-            rootView: ChangesView(
-                model: model,
-                selectedDiff: nil,
-                onOpenDiff: { _ in },
-                isActive: true
-            )
-            .environment(zoom)
+        inactiveView.rootView = ChangesView(
+            model: model,
+            selectedDiff: nil,
+            onOpenDiff: { _ in },
+            isActive: true
         )
-        activeView.frame = inactiveView.frame
-        window.contentView = activeView
-        activeView.layoutSubtreeIfNeeded()
-        #expect(!nativeTextViews(in: activeView).isEmpty)
+            .environment(zoom)
+        inactiveView.layoutSubtreeIfNeeded()
+        #expect(!nativeTextViews(in: inactiveView).isEmpty)
+        let activeScrollerVisible = await waitUntil {
+            inactiveView.layoutSubtreeIfNeeded()
+            return nativeScrollViews(in: inactiveView).contains {
+                $0.hasVerticalScroller
+            }
+        }
+        #expect(activeScrollerVisible)
     }
 
     @Test("File tree service creates files and folders without overwriting")

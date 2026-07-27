@@ -255,6 +255,36 @@ Rules:
 - Store manual zoom per display during the app session.
 - Enter focus mode automatically when zoom exceeds the side-panel threshold.
 
+## Layout Profiles
+
+Atelier provides two fixed, app-wide layout profile slots: Laptop and Desktop.
+
+| Profile | Initial intent |
+|---|---|
+| Laptop | Standard layout, compact display sizing, sidebar visible, inspector hidden |
+| Desktop | Wide layout, large display sizing, sidebar and inspector visible |
+
+Rules:
+
+- Persist both profiles and the selected profile under versioned app settings keys.
+- Save only through an explicit "Save Current" action. Never auto-save profile changes.
+- Mark the selected profile as modified when current captured state differs from its saved snapshot.
+- Capture window content size, display sizing mode, manual zoom, focus mode, sidebar width,
+  inspector width, panel visibility, panel restoration intent, and selected sidebar tab.
+- Exclude window position, display identity, full-screen state, workspace identity, open tabs,
+  files, terminals, scroll positions, and transient overlays.
+- Clamp a saved window size to the current display's visible frame without changing the stored
+  profile.
+- Apply a profile to the current window and every mounted workspace. New workspace sessions use
+  the selected profile's panel preference.
+- Resize the window first. Defer zoom, pane widths, and panel state until responsive layout has
+  settled off the current AppKit layout pass.
+- Reconcile saved panel state through Compact, Standard, and Wide layout rules. Never force an
+  unsupported panel combination.
+- Restore the prior first responder only after the native split view has applied the profile.
+- Keep the profile switcher in the workspace status bar and include zoom percentage in its label.
+- Every profile switch and save action must use a native control with the pointer cursor.
+
 ## Motion
 
 | Token | Value | Use |
@@ -653,7 +683,7 @@ Persistence boundaries:
   descendant file count. Option-clicking a folder toggles its whole visible descendant branch.
 - Keep directory guide lines low contrast so file names and Git status remain the primary signals.
 - Use an overlay Git scroll indicator that fades away when scrolling stops. Never keep it
-  persistently visible.
+  persistently visible. Hide the indicator whenever the Git sidebar tab is inactive.
 - Keep the commit composer multiline and focused on direct text entry. Do not show a separate
   Gemma trigger, utility footer, or keyboard-hint row inside the composer card.
 - Render Push as one primary control without a trailing options segment. It runs the current

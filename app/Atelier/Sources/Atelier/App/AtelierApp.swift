@@ -148,6 +148,22 @@ final class AtelierZoomModel {
     var chromeScale: CGFloat { min(renderScale, Self.chromeMaximumScale) }
     var sidebarScale: CGFloat { min(renderScale, Self.sidebarMaximumScale) }
     var contentScale: CGFloat { renderScale }
+    var manualScale: CGFloat { requestedScale }
+    var layoutProfileState: LayoutProfileZoomState {
+        let focusMode: LayoutProfileFocusMode
+        if !isFocusMode {
+            focusMode = .off
+        } else if focusModeIsAutomatic {
+            focusMode = .automatic
+        } else {
+            focusMode = .manual
+        }
+        return LayoutProfileZoomState(
+            sizingMode: sizingMode,
+            manualScale: requestedScale,
+            focusMode: focusMode
+        )
+    }
 
     private var baseScale: CGFloat {
         (sizingMode.forcedTier ?? currentTier).baseScale
@@ -207,6 +223,28 @@ final class AtelierZoomModel {
             isFocusMode = true
             focusModeIsAutomatic = false
         }
+    }
+
+    func applyLayoutProfileState(_ state: LayoutProfileZoomState) {
+        settleTask?.cancel()
+        settleTask = nil
+        responderBeforeZoom = nil
+        if sizingMode != state.sizingMode {
+            sizingMode = state.sizingMode
+        }
+        let clamped = min(Self.maximumScale, max(Self.minimumScale, state.manualScale))
+        let nextScale = (clamped * 100).rounded() / 100
+        requestedScale = nextScale
+        manualScaleByDisplay[currentDisplayKey] = nextScale
+        if scale != nextScale {
+            scale = nextScale
+        }
+        let nextFocusMode = state.focusMode
+        let nextIsFocusMode = nextFocusMode.isFocused
+        if isFocusMode != nextIsFocusMode {
+            isFocusMode = nextIsFocusMode
+        }
+        focusModeIsAutomatic = nextFocusMode == .automatic
     }
 
     private func requestScale(_ value: CGFloat) {

@@ -19,7 +19,7 @@ enum DisplaySizeTier: String, CaseIterable, Sendable {
 }
 
 /// User-facing sizing choice. Automatic derives the tier from the display.
-enum DisplaySizingMode: String, CaseIterable, Sendable {
+enum DisplaySizingMode: String, CaseIterable, Codable, Sendable {
     case automatic
     case compact
     case comfortable

@@ -12,7 +12,7 @@ nonisolated enum WorkspaceLayoutMode: Equatable, Sendable {
     var keepsSidebarWithInspector: Bool { self == .wide }
 }
 
-nonisolated enum WorkspaceSidebarTab: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum WorkspaceSidebarTab: String, CaseIterable, Codable, Identifiable, Sendable {
     case explorer = "Explorer"
     case sourceControl = "Git"
 
@@ -183,16 +183,32 @@ final class WorkspaceChromeModel {
     var inspectorAnimationRequestID = 0
     var projectCommandToolbarOffset: CGFloat = 0
     private var hasAppliedInitialLayout = false
+    private var initialLayoutProfilePanels: LayoutProfilePanelState?
     private var projectMenuTransitionID = 0
     private var responderBeforeProjectMenu: NSResponder?
     private var responderBeforeInspector: NSResponder?
     private var responderBeforeAgentResponses: NSResponder?
 
+    var layoutProfilePanelState: LayoutProfilePanelState {
+        LayoutProfilePanelState(
+            showsSidebar: panels.showsSidebar,
+            showsInspector: panels.showsInspector,
+            restoresSidebarAfterInspector: panels.restoresSidebarAfterInspector,
+            selectedSidebarTab: selectedSidebarTab
+        )
+    }
+
     func applyInitialLayout(_ layout: WorkspaceLayoutMode) {
         guard !hasAppliedInitialLayout else { return }
         hasAppliedInitialLayout = true
         currentLayoutMode = layout
-        panels = .initial(for: layout)
+        if let initialLayoutProfilePanels {
+            selectedSidebarTab = initialLayoutProfilePanels.selectedSidebarTab
+            panels = initialLayoutProfilePanels.presentation(for: layout)
+            self.initialLayoutProfilePanels = nil
+        } else {
+            panels = .initial(for: layout)
+        }
     }
 
     func adaptPanels(
@@ -216,6 +232,21 @@ final class WorkspaceChromeModel {
             inspectorAnimationRequestID += 1
         }
         panels = nextPanels
+    }
+
+    func applyLayoutProfilePanels(
+        _ nextPanels: LayoutProfilePanelState,
+        requestsAnimation: Bool
+    ) {
+        selectedSidebarTab = nextPanels.selectedSidebarTab
+        guard hasAppliedInitialLayout else {
+            initialLayoutProfilePanels = nextPanels
+            return
+        }
+        applyPanelPresentation(
+            nextPanels.presentation(for: currentLayoutMode),
+            requestsAnimation: requestsAnimation
+        )
     }
 
     func toggleSidebar() {
@@ -342,7 +373,6 @@ struct ContentView: View {
     @State private var presentedPaletteMode: AtelierPaletteMode?
     @State private var responderBeforePalette: NSResponder?
     @State private var responderBeforeWorkspaceSearch: NSResponder?
-    @State private var workspaceSidebarWidth = AtelierMetrics.workspaceSidebarIdealWidth
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -355,7 +385,8 @@ struct ContentView: View {
                         WorkspaceView(
                             session: workspace,
                             isActive: isActive,
-                            sidebarWidth: $workspaceSidebarWidth
+                            sidebarWidth: app.workspaceSidebarWidth,
+                            inspectorWidth: app.workspaceInspectorWidth
                         )
                             .opacity(isActive ? 1 : 0)
                             .allowsHitTesting(isActive)
@@ -803,7 +834,8 @@ private struct AtelierWelcomeBackdrop: View {
 struct WorkspaceView: View {
     let session: WorkspaceSession
     let isActive: Bool
-    @Binding var sidebarWidth: CGFloat
+    let sidebarWidth: CGFloat
+    let inspectorWidth: CGFloat
     @Environment(AppModel.self) private var app
     @Environment(AtelierZoomModel.self) private var zoom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -925,7 +957,9 @@ struct WorkspaceView: View {
                 .environment(app)
                 .environment(zoom),
             sidebarWidth: sidebarWidth,
-            onSidebarWidthChange: updateSidebarWidth,
+            inspectorWidth: inspectorWidth,
+            onSidebarWidthChange: app.updateWorkspaceSidebarWidth,
+            onInspectorWidthChange: app.updateWorkspaceInspectorWidth,
             showsSidebar: chrome.panels.showsSidebar && !zoom.isFocusMode,
             showsInspector: chrome.panels.showsInspector && !zoom.isFocusMode,
             sidebarAnimationRequestID: chrome.sidebarAnimationRequestID,
@@ -933,14 +967,6 @@ struct WorkspaceView: View {
             reduceMotion: reduceMotion
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func updateSidebarWidth(_ proposedWidth: CGFloat) {
-        let width = WorkspaceSidebarWidthPolicy.clamped(proposedWidth)
-        guard WorkspaceSidebarWidthPolicy.differs(sidebarWidth, from: width) else {
-            return
-        }
-        sidebarWidth = width
     }
 
     private var workspaceDetail: some View {
@@ -1255,7 +1281,7 @@ struct WorkspaceView: View {
                 Text("Focus")
             }
             FileTokenCountLabel(editor: terminalTabs.selectedEditor)
-            Text("\(Int((zoom.scale * 100).rounded()))%")
+            LayoutProfileStatusMenu()
         }
         .atelierFont(size: AtelierTypography.caption, weight: .medium)
         .foregroundStyle(.secondary)
@@ -1269,6 +1295,58 @@ struct WorkspaceView: View {
                 .fill(AtelierTheme.border)
                 .frame(height: AtelierTheme.strokeHairline)
         }
+    }
+}
+
+private struct LayoutProfileStatusMenu: View {
+    @Environment(AppModel.self) private var app
+    @Environment(AtelierZoomModel.self) private var zoom
+
+    private var profile: LayoutProfile {
+        app.selectedLayoutProfile
+    }
+
+    private var isModified: Bool {
+        app.isSelectedLayoutProfileModified
+    }
+
+    private var zoomPercent: Int {
+        Int((zoom.scale * 100).rounded())
+    }
+
+    var body: some View {
+        Menu {
+            ForEach(app.layoutProfiles.profiles) { candidate in
+                Button {
+                    app.applyLayoutProfile(candidate.id)
+                } label: {
+                    Label(
+                        candidate.title,
+                        systemImage: candidate.id == profile.id
+                            ? "checkmark"
+                            : "rectangle"
+                    )
+                }
+                .disabled(app.layoutProfiles.isApplying)
+            }
+
+            Divider()
+
+            Button("Save Current to \(profile.title)") {
+                app.saveCurrentLayoutProfile()
+            }
+            .disabled(app.layoutProfiles.isApplying)
+        } label: {
+            Text("\(profile.title)\(isModified ? " *" : "") \(zoomPercent)%")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(isModified ? "Layout profile has unsaved changes" : "Layout profile")
+        .accessibilityLabel("Layout profile")
+        .accessibilityValue(
+            "\(profile.title), \(zoomPercent) percent\(isModified ? ", modified" : "")"
+        )
+        .atelierPointerCursor()
     }
 }
 

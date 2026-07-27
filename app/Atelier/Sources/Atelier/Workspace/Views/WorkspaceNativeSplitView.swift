@@ -65,12 +65,32 @@ enum WorkspaceSidebarWidthPolicy {
     }
 }
 
+enum WorkspaceInspectorWidthPolicy {
+    static let updateTolerance: CGFloat = 0.5
+
+    static func clamped(_ width: CGFloat) -> CGFloat {
+        min(
+            max(width, AtelierMetrics.inspectorMinWidth),
+            AtelierMetrics.inspectorMaxWidth
+        )
+    }
+
+    static func differs(_ lhs: CGFloat, from rhs: CGFloat) -> Bool {
+        abs(lhs - rhs) >= updateTolerance
+    }
+}
+
 final class WorkspaceSplitViewController: NSSplitViewController {
     var onSidebarWidthChange: ((CGFloat) -> Void)?
+    var onInspectorWidthChange: ((CGFloat) -> Void)?
 
     private var isSynchronizingSidebarWidth = false
+    private var isSynchronizingInspectorWidth = false
     private var pendingSidebarWidth: CGFloat?
+    private var pendingInspectorWidth: CGFloat?
     private var isSidebarWidthPublishScheduled = false
+    private var isInspectorWidthPublishScheduled = false
+    private var inspectorWidthConstraint: NSLayoutConstraint?
 
     override func splitView(
         _ splitView: NSSplitView,
@@ -96,11 +116,26 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         constrainSplitPosition proposedPosition: CGFloat,
         ofSubviewAt dividerIndex: Int
     ) -> CGFloat {
-        guard dividerIndex == 0, !isSynchronizingSidebarWidth else {
-            return proposedPosition
+        if dividerIndex == 0, !isSynchronizingSidebarWidth {
+            scheduleSidebarWidthPublish(proposedPosition)
+        } else if dividerIndex == 1, !isSynchronizingInspectorWidth {
+            let width = WorkspaceInspectorWidthPolicy.clamped(
+                splitView.bounds.maxX - proposedPosition - splitView.dividerThickness
+            )
+            inspectorWidthConstraint?.constant = width
+            scheduleInspectorWidthPublish(width)
         }
-        scheduleSidebarWidthPublish(proposedPosition)
         return proposedPosition
+    }
+
+    func installInspectorWidthConstraint(for inspectorView: NSView, width: CGFloat) {
+        inspectorWidthConstraint?.isActive = false
+        let constraint = inspectorView.widthAnchor.constraint(
+            equalToConstant: WorkspaceInspectorWidthPolicy.clamped(width)
+        )
+        constraint.priority = NSLayoutConstraint.Priority(rawValue: 999)
+        constraint.isActive = true
+        inspectorWidthConstraint = constraint
     }
 
     func synchronizeSidebarWidth(_ proposedWidth: CGFloat) {
@@ -119,6 +154,29 @@ final class WorkspaceSplitViewController: NSSplitViewController {
         isSynchronizingSidebarWidth = false
     }
 
+    func synchronizeInspectorWidth(_ proposedWidth: CGFloat) {
+        let width = WorkspaceInspectorWidthPolicy.clamped(proposedWidth)
+        if inspectorWidthConstraint?.constant != width {
+            inspectorWidthConstraint?.constant = width
+        }
+        guard splitViewItems.indices.contains(2),
+              !splitViewItems[2].isCollapsed,
+              let inspectorView = splitViewItems[2].viewController.viewIfLoaded else {
+            return
+        }
+        guard WorkspaceInspectorWidthPolicy.differs(inspectorView.frame.width, from: width) else {
+            return
+        }
+
+        isSynchronizingInspectorWidth = true
+        splitView.setPosition(
+            splitView.bounds.maxX - width - splitView.dividerThickness,
+            ofDividerAt: 1
+        )
+        splitView.layoutSubtreeIfNeeded()
+        isSynchronizingInspectorWidth = false
+    }
+
     private func scheduleSidebarWidthPublish(_ proposedWidth: CGFloat) {
         pendingSidebarWidth = WorkspaceSidebarWidthPolicy.clamped(proposedWidth)
         guard !isSidebarWidthPublishScheduled else { return }
@@ -130,6 +188,20 @@ final class WorkspaceSplitViewController: NSSplitViewController {
             guard let width = pendingSidebarWidth else { return }
             pendingSidebarWidth = nil
             onSidebarWidthChange?(width)
+        }
+    }
+
+    private func scheduleInspectorWidthPublish(_ proposedWidth: CGFloat) {
+        pendingInspectorWidth = WorkspaceInspectorWidthPolicy.clamped(proposedWidth)
+        guard !isInspectorWidthPublishScheduled else { return }
+        isInspectorWidthPublishScheduled = true
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            isInspectorWidthPublishScheduled = false
+            guard let width = pendingInspectorWidth else { return }
+            pendingInspectorWidth = nil
+            onInspectorWidthChange?(width)
         }
     }
 }
@@ -161,7 +233,9 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
     let detail: Detail
     let inspector: Inspector
     let sidebarWidth: CGFloat
+    let inspectorWidth: CGFloat
     let onSidebarWidthChange: (CGFloat) -> Void
+    let onInspectorWidthChange: (CGFloat) -> Void
     let showsSidebar: Bool
     let showsInspector: Bool
     let sidebarAnimationRequestID: Int
@@ -177,6 +251,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         controller.splitView.isVertical = true
         controller.splitView.dividerStyle = .thin
         controller.onSidebarWidthChange = onSidebarWidthChange
+        controller.onInspectorWidthChange = onInspectorWidthChange
 
         let sidebarController = NSHostingController(
             rootView: WorkspacePanelMotionContainer(
@@ -208,6 +283,9 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
                 reduceMotion: reduceMotion
             )
         )
+        inspectorController.view.frame.size.width = WorkspaceInspectorWidthPolicy.clamped(
+            inspectorWidth
+        )
         let inspectorItem = NSSplitViewItem(viewController: inspectorController)
         inspectorItem.minimumThickness = AtelierMetrics.inspectorMinWidth
         inspectorItem.maximumThickness = AtelierMetrics.inspectorMaxWidth
@@ -232,7 +310,8 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             showsInspector: showsInspector,
             sidebarAnimationRequestID: sidebarAnimationRequestID,
             inspectorAnimationRequestID: inspectorAnimationRequestID,
-            sidebarWidth: sidebarWidth
+            sidebarWidth: sidebarWidth,
+            inspectorWidth: inspectorWidth
         )
         return controller
     }
@@ -243,6 +322,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
     ) {
         if let splitController = controller as? WorkspaceSplitViewController {
             splitController.onSidebarWidthChange = onSidebarWidthChange
+            splitController.onInspectorWidthChange = onInspectorWidthChange
         }
         context.coordinator.sidebarController?.rootView = WorkspacePanelMotionContainer(
             content: sidebar,
@@ -284,6 +364,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             animatesInspector: animatesInspector
         )
         context.coordinator.synchronizeSidebarWidth(sidebarWidth)
+        context.coordinator.synchronizeInspectorWidth(inspectorWidth)
     }
 
     // Fill the proposed size instead of the split view's Auto Layout fitting
@@ -316,7 +397,9 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
         private var updateGeneration = 0
         private var pendingUpdateGeneration: Int?
         private var desiredSidebarWidth = AtelierMetrics.workspaceSidebarIdealWidth
+        private var desiredInspectorWidth = AtelierMetrics.inspectorIdealWidth
         private var sidebarWidthUpdateGeneration = 0
+        private var inspectorWidthUpdateGeneration = 0
 
         func install(
             controller: NSSplitViewController,
@@ -329,7 +412,8 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             showsInspector: Bool,
             sidebarAnimationRequestID: Int,
             inspectorAnimationRequestID: Int,
-            sidebarWidth: CGFloat = AtelierMetrics.workspaceSidebarIdealWidth
+            sidebarWidth: CGFloat = AtelierMetrics.workspaceSidebarIdealWidth,
+            inspectorWidth: CGFloat = AtelierMetrics.inspectorIdealWidth
         ) {
             self.controller = controller
             self.sidebarController = sidebarController
@@ -342,6 +426,11 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
             self.sidebarAnimationRequestID = sidebarAnimationRequestID
             self.inspectorAnimationRequestID = inspectorAnimationRequestID
             desiredSidebarWidth = WorkspaceSidebarWidthPolicy.clamped(sidebarWidth)
+            desiredInspectorWidth = WorkspaceInspectorWidthPolicy.clamped(inspectorWidth)
+            (controller as? WorkspaceSplitViewController)?.installInspectorWidthConstraint(
+                for: inspectorController.view,
+                width: desiredInspectorWidth
+            )
         }
 
         func synchronizeSidebarWidth(_ proposedWidth: CGFloat) {
@@ -355,6 +444,20 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
                     return
                 }
                 controller.synchronizeSidebarWidth(desiredSidebarWidth)
+            }
+        }
+
+        func synchronizeInspectorWidth(_ proposedWidth: CGFloat) {
+            desiredInspectorWidth = WorkspaceInspectorWidthPolicy.clamped(proposedWidth)
+            inspectorWidthUpdateGeneration += 1
+            let generation = inspectorWidthUpdateGeneration
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self, generation == inspectorWidthUpdateGeneration,
+                      let controller = controller as? WorkspaceSplitViewController else {
+                    return
+                }
+                controller.synchronizeInspectorWidth(desiredInspectorWidth)
             }
         }
 
@@ -407,6 +510,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
                 guard (updatesSidebar && animatesSidebar)
                     || (updatesInspector && animatesInspector) else {
                     synchronizeSidebarWidth(desiredSidebarWidth)
+                    synchronizeInspectorWidth(desiredInspectorWidth)
                     return
                 }
 
@@ -425,6 +529,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
                 ) { [weak self] in
                     guard let self else { return }
                     synchronizeSidebarWidth(desiredSidebarWidth)
+                    synchronizeInspectorWidth(desiredInspectorWidth)
                 }
             }
         }

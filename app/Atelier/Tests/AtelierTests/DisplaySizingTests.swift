@@ -345,6 +345,7 @@ struct DisplaySizingTests {
         sidebarItem.maximumThickness = AtelierMetrics.workspaceSidebarMaxWidth
         sidebarItem.canCollapse = true
         sidebarItem.collapseBehavior = WorkspaceSplitLayoutPolicy.panelCollapseBehavior
+        sidebarItem.holdingPriority = WorkspaceSplitLayoutPolicy.sidePanelHoldingPriority
 
         let detailController = NSHostingController(rootView: EmptyView())
         let detailItem = NSSplitViewItem(viewController: detailController)
@@ -362,11 +363,13 @@ struct DisplaySizingTests {
                 reduceMotion: false
             )
         )
+        inspectorController.view.frame.size.width = AtelierMetrics.inspectorIdealWidth
         let inspectorItem = NSSplitViewItem(viewController: inspectorController)
         inspectorItem.minimumThickness = AtelierMetrics.inspectorMinWidth
         inspectorItem.maximumThickness = AtelierMetrics.inspectorMaxWidth
         inspectorItem.canCollapse = true
         inspectorItem.collapseBehavior = WorkspaceSplitLayoutPolicy.panelCollapseBehavior
+        inspectorItem.holdingPriority = WorkspaceSplitLayoutPolicy.sidePanelHoldingPriority
         inspectorItem.isCollapsed = true
 
         #expect(sidebarItem.behavior != .sidebar)
@@ -387,7 +390,9 @@ struct DisplaySizingTests {
             showsSidebar: true,
             showsInspector: false,
             sidebarAnimationRequestID: 0,
-            inspectorAnimationRequestID: 0
+            inspectorAnimationRequestID: 0,
+            sidebarWidth: AtelierMetrics.workspaceSidebarIdealWidth,
+            inspectorWidth: AtelierMetrics.inspectorIdealWidth
         )
 
         let window = NSWindow(
@@ -397,6 +402,7 @@ struct DisplaySizingTests {
             defer: false
         )
         window.contentViewController = controller
+        controller.view.frame = CGRect(x: 0, y: 0, width: 920, height: 700)
         controller.view.layoutSubtreeIfNeeded()
         controller.splitView.adjustSubviews()
         #expect(
@@ -413,7 +419,6 @@ struct DisplaySizingTests {
             synchronizedSidebar,
             "Expected 300-point sidebar, got \(sidebarController.view.frame.width)"
         )
-
         func setSidebarPresentation(_ isPresented: Bool) {
             sidebarController.rootView = WorkspacePanelMotionContainer(
                 content: WorkspacePanelGeometryProbe(
@@ -533,6 +538,15 @@ struct DisplaySizingTests {
                 && abs(inspectorContentView.frame.minX) < 1
         }
         #expect(didShowStandardInspector)
+
+        controller.synchronizeInspectorWidth(320)
+        let synchronizedInspector = await waitUntil {
+            abs(inspectorController.view.frame.width - 320) < 1
+        }
+        #expect(
+            synchronizedInspector,
+            "Expected 320-point inspector, got \(inspectorController.view.frame.width)"
+        )
 
         setSidebarPresentation(true)
         setInspectorPresentation(false)

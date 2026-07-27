@@ -40,10 +40,13 @@ nonisolated enum WorkspaceTitlebarInteractionPolicy {
 @MainActor
 final class WindowController {
     var onScreenDidChange: (() -> Void)?
+    var onContentSizeDidChange: ((CGSize) -> Void)?
 
     private weak var workspaceWindow: NSWindow?
     private var shortcutInstalled = false
     private var titlebarEventMonitor: Any?
+    private var windowResizeObserver: Any?
+    private var contentSizePublishTask: Task<Void, Never>?
     private var activeWorkspaceID: String?
     private var responderRevision: UInt64 = 0
     private let responderOwners = NSMapTable<NSResponder, NSString>(
@@ -68,10 +71,36 @@ final class WindowController {
         guard changed else { return }
         configure(window)
         onScreenDidChange?()
+        publishCurrentContentSize()
     }
 
     func currentScreen() -> NSScreen? {
         workspaceWindow?.screen ?? NSScreen.main
+    }
+
+    func currentContentSize() -> CGSize? {
+        workspaceWindow?.contentLayoutRect.size
+    }
+
+    @discardableResult
+    func applyContentSize(_ requestedSize: CGSize, minimumSize: CGSize) -> CGSize? {
+        guard let workspaceWindow else { return nil }
+        let currentContentSize = workspaceWindow.contentLayoutRect.size
+        let visibleFrame = workspaceWindow.screen?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? workspaceWindow.frame
+        let targetFrame = LayoutProfileWindowPolicy.targetFrame(
+            currentFrame: workspaceWindow.frame,
+            currentContentSize: currentContentSize,
+            requestedContentSize: requestedSize,
+            minimumContentSize: minimumSize,
+            visibleFrame: visibleFrame
+        )
+        guard targetFrame != workspaceWindow.frame else { return currentContentSize }
+        workspaceWindow.setFrame(targetFrame, display: true, animate: false)
+        let appliedSize = workspaceWindow.contentLayoutRect.size
+        onContentSizeDidChange?(appliedSize)
+        return appliedSize
     }
 
     func showWorkspaceWindow() {
@@ -149,8 +178,42 @@ final class WindowController {
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .line
+        installWindowResizeObserver(for: window)
         installTitlebarEventMonitor()
         AppLogger.window.debug("Configured workspace window")
+    }
+
+    private func installWindowResizeObserver(for window: NSWindow) {
+        let center = NotificationCenter.default
+        if let windowResizeObserver {
+            center.removeObserver(windowResizeObserver)
+        }
+        windowResizeObserver = center.addObserver(
+            forName: NSWindow.didResizeNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.scheduleContentSizePublish()
+            }
+        }
+    }
+
+    private func scheduleContentSizePublish() {
+        contentSizePublishTask?.cancel()
+        contentSizePublishTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(80))
+            } catch {
+                return
+            }
+            self?.publishCurrentContentSize()
+        }
+    }
+
+    private func publishCurrentContentSize() {
+        guard let size = currentContentSize() else { return }
+        onContentSizeDidChange?(size)
     }
 
     private func installTitlebarEventMonitor() {

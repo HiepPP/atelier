@@ -704,6 +704,7 @@ struct ChangesView: View {
                 .environment(\.atelierZoomScale, zoom.sidebarScale)
             }
             .scrollContentBackground(.hidden)
+            .scrollIndicators(isActive ? .automatic : .hidden)
             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.sidebar)
             .background(AtelierTheme.sidebar)
         }
