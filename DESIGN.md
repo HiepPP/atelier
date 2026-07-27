@@ -556,10 +556,12 @@ Persistence boundaries:
 - Open a dedicated floating workspace-search panel with `Cmd-Shift-F`.
 - Fit the panel to the available workspace editor area beside the workspace rail, with `spaceL`
   outer insets. Use the palette's editor, raised, chrome, border, scrim, and shadow language.
+- Keep the workspace-search panel mounted for the active workspace. Hide it with opacity, hit
+  testing, focus, and accessibility state so reopening does not rebuild retained Gemma results.
 - Keep Quick Open and Command Palette at their current 640-point maximum width and 410-point
   height.
-- Keep one query field with Text and Gemma modes. Open in Text mode every time so
-  `Cmd-Shift-F` preserves its existing literal-search behavior.
+- Keep one query field with Text and Gemma modes. Start a new workspace session in Text mode, then
+  preserve the selected mode when Search All Files closes and reopens.
 - Keep Match Case, Match Whole Word, and Include Ignored Files controls in Text mode only.
 - Start a trailing project search 300 milliseconds after the latest query or option change. Cancel
   the pending delay and any active stale search when another change arrives.
@@ -578,6 +580,8 @@ Persistence boundaries:
 - Group results by workspace-relative path. Give each file name, path, and match count separate
   readable hierarchy. Show the line number and a bounded two-line monospaced excerpt, with the
   first matching range emphasized.
+- Render literal match excerpts, Gemma answers, and Gemma source excerpts at `editorSize`. Keep
+  file names, paths, line numbers, counts, and status labels on their compact metadata tokens.
 - Select the first result of a new search. Support Up, Down, Return, Escape, and double-click.
 - Limit one search to 1,000 matching lines. Surface truncation in the result count.
 - Opening a result selects a permanent source tab, reveals its line, and focuses the native editor.
@@ -609,6 +613,11 @@ Persistence boundaries:
 - Show structured sources below the answer. Each source includes a workspace-relative path, line,
   and bounded excerpt. Select the first source; support Up, Down, Return, and direct pointer
   activation to open its exact source line.
+- Detect workspace-relative `path:line` mentions in Gemma answers. Show file-only mentions as
+  pointer-backed links. Open answer file links only with Cmd-click, through the same guarded source
+  activation route; a plain click must not navigate.
+- Let Gemma source rows use the available editor width instead of the transcript prose width. Keep
+  the answer itself on the readable `transcriptMaxWidth` measure.
 - Keep Gemma work bounded to 100 displayed sources. Preserve current results until an explicit new
   submission, and cancel the active run when its query changes, its mode changes, the overlay
   dismisses, or the workspace stops.

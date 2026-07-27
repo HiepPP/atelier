@@ -357,16 +357,8 @@ final class WorkspaceSearchModel {
     }
 
     func present(revision: Int) {
-        let restoresTextMode = mode != .text
-        if restoresTextMode {
-            gemmaSearch?.close()
-            mode = .text
-        }
         fileRevision = revision
         isPresented = true
-        if restoresTextMode {
-            scheduleSearch()
-        }
     }
 
     func updateFileRevision(_ revision: Int) {

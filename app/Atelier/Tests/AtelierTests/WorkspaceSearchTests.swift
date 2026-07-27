@@ -229,8 +229,33 @@ struct WorkspaceSearchTests {
 
         model.dismiss()
         model.present(revision: 0)
-        #expect(model.mode == .text)
+        #expect(model.mode == .gemma)
         model.dismiss()
+    }
+
+    @Test("Gemma answer file references open their exact source line")
+    func gemmaAnswerSourceLinks() {
+        let path = "app/Atelier/Sources/Atelier/App/AtelierApp.swift"
+        let markdown = WorkspaceGemmaSourceLinkPolicy.linkifiedMarkdown(
+            "Open `\(path):5` for the entry point."
+        )
+        let attributed = AgentMarkdownInlinePolicy.attributedString(markdown)
+        let url = attributed.runs.compactMap(\.link).first
+
+        #expect(String(attributed.characters) == "Open \(path):5 for the entry point.")
+        #expect(url != nil)
+        let source = url.flatMap(WorkspaceGemmaSourceLinkPolicy.source(from:))
+        #expect(source?.path == path)
+        #expect(source?.lineNumber == 5)
+        #expect(source?.excerpt.isEmpty == true)
+
+        let blocks = WorkspaceGemmaSourceLinkPolicy.answerBlocks(
+            "Entry point:\n\n`\(path):5`\n\nContains @main."
+        )
+        #expect(blocks.count == 3)
+        #expect(blocks[1].sourceDisplay == "\(path):5")
+        #expect(blocks[1].source?.path == path)
+        #expect(blocks[1].source?.lineNumber == 5)
     }
 
     @Test("Stopping Gemma search cancels its dedicated runtime")
@@ -537,6 +562,27 @@ struct WorkspaceSearchTests {
         #expect(context.content.contains("selected symbol"))
         #expect(context.content.contains("UID: Class:Sources/Search.swift:SearchRuntime"))
         #expect(context.content.contains("Open Search to Gemma, step 2 of 3"))
+    }
+
+    @Test("GitNexus vector-index metadata enables hybrid search mode")
+    func gitNexusHybridSearchMode() {
+        let hybrid = GitNexusMCPClient.searchMode(
+            embeddings: 9_715,
+            vectorSearchStatus: "vector-index"
+        )
+        let missingEmbeddings = GitNexusMCPClient.searchMode(
+            embeddings: 0,
+            vectorSearchStatus: "vector-index"
+        )
+        let unavailableVectorSearch = GitNexusMCPClient.searchMode(
+            embeddings: 9_715,
+            vectorSearchStatus: "unavailable"
+        )
+
+        #expect(hybrid.contains("Hybrid BM25 and vector search"))
+        #expect(hybrid.contains("reciprocal rank fusion"))
+        #expect(missingEmbeddings.contains("BM25 only"))
+        #expect(unavailableVectorSearch.contains("BM25 only"))
     }
 
     @Test(

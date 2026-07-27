@@ -256,9 +256,21 @@ actor GitNexusMCPClient: GitNexusCodeIntelligence {
     private func searchMode() -> String {
         let metaURL = workspaceRoot.appending(path: ".gitnexus/meta.json")
         guard let data = try? Data(contentsOf: metaURL),
-              let meta = try? JSONDecoder().decode(GitNexusMeta.self, from: data),
-              meta.stats.embeddings > 0,
-              meta.capabilities?.vectorSearch?.status == "available" else {
+              let meta = try? JSONDecoder().decode(GitNexusMeta.self, from: data) else {
+            return Self.searchMode(embeddings: 0, vectorSearchStatus: nil)
+        }
+        return Self.searchMode(
+            embeddings: meta.stats.embeddings,
+            vectorSearchStatus: meta.capabilities?.vectorSearch?.status
+        )
+    }
+
+    nonisolated static func searchMode(
+        embeddings: Int,
+        vectorSearchStatus: String?
+    ) -> String {
+        guard embeddings > 0,
+              vectorSearchStatus == "available" || vectorSearchStatus == "vector-index" else {
             return "BM25 only; semantic vector search is unavailable."
         }
         return "Hybrid BM25 and vector search ranked by reciprocal rank fusion."

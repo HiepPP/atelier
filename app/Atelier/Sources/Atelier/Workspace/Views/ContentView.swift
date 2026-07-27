@@ -375,9 +375,12 @@ struct ContentView: View {
                     .zIndex(10)
             }
 
-            if let workspace = app.workspace, workspace.workspaceSearchModel.isPresented {
+            if let workspace = app.workspace {
                 workspaceSearchOverlay(model: workspace.workspaceSearchModel)
-                    .zIndex(11)
+                    .opacity(workspace.workspaceSearchModel.isPresented ? 1 : 0)
+                    .allowsHitTesting(workspace.workspaceSearchModel.isPresented)
+                    .accessibilityHidden(!workspace.workspaceSearchModel.isPresented)
+                    .zIndex(workspace.workspaceSearchModel.isPresented ? 11 : -1)
             }
         }
         .background(AtelierTheme.canvas)
@@ -592,6 +595,7 @@ struct ContentView: View {
 
             WorkspaceSearchView(
                 model: model,
+                isPresented: model.isPresented,
                 onActivate: activateWorkspaceSearch,
                 onActivateGemmaSource: activateWorkspaceGemmaSource,
                 onDismiss: { dismissWorkspaceSearch(restoresResponder: true) }
@@ -603,7 +607,6 @@ struct ContentView: View {
             .padding(.trailing, AtelierMetrics.spaceL)
             .padding(.vertical, AtelierMetrics.spaceL)
         }
-        .transition(.opacity)
         .accessibilityAddTraits(.isModal)
     }
 

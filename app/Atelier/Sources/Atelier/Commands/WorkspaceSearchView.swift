@@ -2,6 +2,7 @@ import SwiftUI
 
 struct WorkspaceSearchView: View {
     @Bindable var model: WorkspaceSearchModel
+    let isPresented: Bool
     let onActivate: (WorkspaceSearchMatch) -> Void
     let onActivateGemmaSource: (WorkspaceGemmaSearchSource) -> Void
     let onDismiss: () -> Void
@@ -24,10 +25,10 @@ struct WorkspaceSearchView: View {
         }
         .shadow(color: AtelierTheme.shadowFloating, radius: 24, y: 12)
         .onAppear {
-            Task { @MainActor in
-                await Task.yield()
-                queryIsFocused = true
-            }
+            updateQueryFocus(isPresented)
+        }
+        .onChange(of: isPresented) { _, isPresented in
+            updateQueryFocus(isPresented)
         }
         .onKeyPress(.upArrow) {
             model.moveSelection(by: -1)
@@ -47,6 +48,16 @@ struct WorkspaceSearchView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Search All Files")
+    }
+
+    private func updateQueryFocus(_ shouldFocus: Bool) {
+        Task { @MainActor in
+            if shouldFocus {
+                await Task.yield()
+            }
+            guard model.isPresented == shouldFocus else { return }
+            queryIsFocused = shouldFocus
+        }
     }
 
     private var queryBar: some View {
@@ -261,7 +272,7 @@ struct WorkspaceSearchView: View {
                 \(Text(verbatim: match.trailingText).foregroundStyle(.secondary))
                 """
             )
-            .atelierFont(size: AtelierTypography.caption, design: .monospaced)
+            .atelierFont(size: AtelierTypography.editorSize, design: .monospaced)
             .lineLimit(2)
             .frame(maxWidth: .infinity, alignment: .leading)
 
