@@ -549,8 +549,23 @@ nonisolated final class GitService: Sendable {
         }
     }
 
-    func discard(path: String, workspacePath: String) async throws {
-        _ = try await run(arguments: ["restore", "--", path], workspacePath: workspacePath)
+    func discard(changes: [GitChange], workspacePath: String) async throws {
+        let trackedPaths = changes
+            .filter { $0.kind != .untracked }
+            .map(\.path)
+        if !trackedPaths.isEmpty {
+            _ = try await run(
+                arguments: ["restore", "--"] + trackedPaths,
+                workspacePath: workspacePath
+            )
+        }
+
+        let workspaceURL = URL(fileURLWithPath: workspacePath, isDirectory: true)
+        for change in changes where change.kind == .untracked {
+            let url = workspaceURL.appendingPathComponent(change.path).standardizedFileURL
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        }
     }
 
     func commit(message: String, workspacePath: String) async throws {

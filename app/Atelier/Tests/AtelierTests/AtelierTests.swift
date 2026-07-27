@@ -793,6 +793,40 @@ struct AtelierTests {
         #expect(stagedPaths == ["tracked.txt", "untracked.txt"])
     }
 
+    @Test("Git service discards tracked and untracked folder changes")
+    func gitDiscardFolderChanges() async throws {
+        let repository = temporaryDirectory("git-discard-folder-changes")
+        let folder = repository.appendingPathComponent("config/webpack", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let command = GitCommand()
+        func git(_ arguments: [String]) throws -> Data {
+            try command.run(arguments: arguments, workspacePath: repository.path)
+        }
+
+        _ = try git(["init", "-q"])
+        let tracked = folder.appendingPathComponent("webpack.config.js")
+        let untracked = folder.appendingPathComponent("certificate.pem")
+        try Data("before\n".utf8).write(to: tracked)
+        _ = try git(["add", "--", "config/webpack/webpack.config.js"])
+        _ = try git([
+            "-c", "user.name=Atelier Tests",
+            "-c", "user.email=atelier-tests@example.invalid",
+            "commit", "-qm", "initial"
+        ])
+        try Data("after\n".utf8).write(to: tracked)
+        try Data("certificate\n".utf8).write(to: untracked)
+
+        let service = GitService()
+        let changes = try await service.status(workspacePath: repository.path).changes
+        #expect(changes.count == 2)
+
+        try await service.discard(changes: changes, workspacePath: repository.path)
+
+        #expect(try Data(contentsOf: tracked) == Data("before\n".utf8))
+        #expect(!FileManager.default.fileExists(atPath: untracked.path))
+        #expect(try await service.status(workspacePath: repository.path).changes.isEmpty)
+    }
+
     @Test("Git service lists files inside untracked directories")
     func gitNestedUntrackedFiles() async throws {
         let repository = temporaryDirectory("git-nested-untracked-files")

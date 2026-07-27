@@ -31,6 +31,13 @@ nonisolated struct GitChangeTreeNode: Identifiable, Equatable, Sendable {
     var isFolder: Bool {
         change == nil
     }
+
+    var descendantChanges: [GitChange] {
+        if let change {
+            return [change]
+        }
+        return children.flatMap(\.descendantChanges)
+    }
 }
 
 nonisolated enum GitChangeTreeBuilder {
@@ -467,9 +474,10 @@ final class GitWorkspaceModel {
         }
     }
 
-    func discard(_ change: GitChange) {
+    func discard(_ changes: [GitChange]) {
+        guard !changes.isEmpty else { return }
         perform { service, path in
-            try await service.discard(path: change.path, workspacePath: path)
+            try await service.discard(changes: changes, workspacePath: path)
         }
     }
 
@@ -588,6 +596,34 @@ private struct SourceControlFolderID: Hashable {
     let path: String
 }
 
+private struct GitDiscardCandidate {
+    let path: String
+    let changes: [GitChange]
+    let isFolder: Bool
+
+    var confirmationTitle: String {
+        isFolder
+            ? "Discard changes in \(path)?"
+            : "Discard changes to \(path)?"
+    }
+
+    var confirmationMessage: String {
+        let untrackedCount = changes.count { $0.kind == .untracked }
+        if untrackedCount == changes.count {
+            return untrackedCount == 1
+                ? "The untracked file will be moved to Trash."
+                : "\(untrackedCount) untracked files will be moved to Trash."
+        }
+        if untrackedCount > 0 {
+            return "Tracked files will be restored from Git. "
+                + "\(untrackedCount) untracked files will be moved to Trash."
+        }
+        return changes.count == 1
+            ? "This restores the file from Git. This action cannot be undone in Atelier."
+            : "This restores \(changes.count) files from Git. This action cannot be undone in Atelier."
+    }
+}
+
 private struct GitChangeTreeVisibleRow: Identifiable {
     let node: GitChangeTreeNode
     let guideDepths: [Int]
@@ -605,7 +641,7 @@ struct ChangesView: View {
 
     @Environment(AtelierZoomModel.self) private var zoom
     @State private var commitMessage = ""
-    @State private var discardCandidate: GitChange?
+    @State private var discardCandidate: GitDiscardCandidate?
     @State private var showsAllRecentCommits = false
     @State private var collapsedGroups = Set<SourceControlGroup>()
     @State private var collapsedFolders = Set<SourceControlFolderID>()
@@ -616,7 +652,7 @@ struct ChangesView: View {
         sourceControlPanel
             .background(AtelierTheme.sidebar)
             .confirmationDialog(
-                "Discard changes to \(discardCandidate?.path ?? "this file")?",
+                discardCandidate?.confirmationTitle ?? "Discard changes?",
                 isPresented: Binding(
                     get: { discardCandidate != nil },
                     set: { if !$0 { discardCandidate = nil } }
@@ -624,12 +660,14 @@ struct ChangesView: View {
                 titleVisibility: .visible
             ) {
                 Button("Discard Changes", role: .destructive) {
-                    if let change = discardCandidate { model.discard(change) }
+                    if let candidate = discardCandidate {
+                        model.discard(candidate.changes)
+                    }
                     discardCandidate = nil
                 }
                 Button("Cancel", role: .cancel) { discardCandidate = nil }
             } message: {
-                Text("This restores the file from Git. This action cannot be undone in Atelier.")
+                Text(discardCandidate?.confirmationMessage ?? "")
             }
             .onModifierKeysChanged(mask: .option) { _, newKeys in
                 guard modifierKeys != newKeys else { return }
@@ -916,12 +954,19 @@ struct ChangesView: View {
                                 },
                                 onStage: { model.stage(change) },
                                 onUnstage: { model.unstage(change) },
-                                onDiscard: { discardCandidate = change }
+                                onDiscard: {
+                                    discardCandidate = GitDiscardCandidate(
+                                        path: change.path,
+                                        changes: [change],
+                                        isFolder: false
+                                    )
+                                }
                             )
                         } else {
                             let folderID = SourceControlFolderID(group: group, path: row.node.path)
                             GitChangeFolderRow(
                                 node: row.node,
+                                staged: group == .staged,
                                 guideDepths: row.guideDepths,
                                 isExpanded: !collapsedFolders.contains(folderID),
                                 onToggle: {
@@ -929,6 +974,13 @@ struct ChangesView: View {
                                         folderID,
                                         node: row.node,
                                         recursively: modifierKeys.contains(.option)
+                                    )
+                                },
+                                onDiscard: {
+                                    discardCandidate = GitDiscardCandidate(
+                                        path: row.node.path,
+                                        changes: row.node.descendantChanges,
+                                        isFolder: true
                                     )
                                 }
                             )
@@ -1258,9 +1310,7 @@ private struct GitChangeRow: View {
                 Button("Unstage", action: onUnstage)
             } else {
                 Button("Stage", action: onStage)
-                if change.kind != .untracked {
-                    Button("Discard Changes...", role: .destructive, action: onDiscard)
-                }
+                Button("Discard Changes...", role: .destructive, action: onDiscard)
             }
         }
     }
@@ -1282,14 +1332,12 @@ private struct GitChangeRow: View {
                     help: "Stage",
                     action: onStage
                 )
-                if change.kind != .untracked {
-                    actionButton(
-                        systemImage: "arrow.uturn.backward",
-                        label: "Discard changes to \(change.path)",
-                        help: "Discard changes",
-                        action: onDiscard
-                    )
-                }
+                actionButton(
+                    systemImage: "arrow.uturn.backward",
+                    label: "Discard changes to \(change.path)",
+                    help: "Discard changes",
+                    action: onDiscard
+                )
             }
         }
     }
@@ -1321,7 +1369,7 @@ private struct GitChangeRow: View {
     }
 
     private var actionWidth: CGFloat {
-        staged || change.kind == .untracked
+        staged
             ? AtelierMetrics.compactControlHeight
             : AtelierMetrics.compactControlHeight * 2 + AtelierMetrics.spaceXS
     }
@@ -1364,77 +1412,112 @@ private struct GitChangeRow: View {
 
 private struct GitChangeFolderRow: View {
     let node: GitChangeTreeNode
+    let staged: Bool
     let guideDepths: [Int]
     let isExpanded: Bool
     let onToggle: () -> Void
+    let onDiscard: () -> Void
 
     @State private var isHovering = false
+    @FocusState private var isActionFocused: Bool
 
     var body: some View {
-        Button(action: onToggle) {
-            HStack(spacing: 0) {
-                GitTreeGuideColumns(depths: guideDepths)
+        HStack(spacing: 0) {
+            Button(action: onToggle) {
+                HStack(spacing: 0) {
+                    GitTreeGuideColumns(depths: guideDepths)
 
-                HStack(spacing: AtelierMetrics.spaceS) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .atelierFont(size: AtelierTypography.micro, weight: .semibold)
-                        .frame(width: AtelierMetrics.spaceM)
+                    HStack(spacing: AtelierMetrics.spaceS) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .atelierFont(size: AtelierTypography.micro, weight: .semibold)
+                            .frame(width: AtelierMetrics.spaceM)
 
-                    Image(
-                        nsImage: MaterialFileIconStore.shared.cachedFolderImage(
-                            forPath: node.path,
-                            isExpanded: isExpanded
-                        )
-                    )
-                        .resizable()
-                        .scaledToFit()
-                        .frame(
-                            width: AtelierTypography.uiSize,
-                            height: AtelierTypography.uiSize
-                        )
-                        .accessibilityHidden(true)
-
-                    Text(node.name)
-                        .atelierFont(size: AtelierTypography.label, weight: .medium)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    if !isExpanded {
-                        Text(node.changeCount.formatted())
-                            .atelierFont(
-                                size: AtelierTypography.micro,
-                                weight: .medium,
-                                design: .monospaced
+                        Image(
+                            nsImage: MaterialFileIconStore.shared.cachedFolderImage(
+                                forPath: node.path,
+                                isExpanded: isExpanded
                             )
-                            .foregroundStyle(.secondary)
+                        )
+                            .resizable()
+                            .scaledToFit()
+                            .frame(
+                                width: AtelierTypography.uiSize,
+                                height: AtelierTypography.uiSize
+                            )
+                            .accessibilityHidden(true)
+
+                        Text(node.name)
+                            .atelierFont(size: AtelierTypography.label, weight: .medium)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if !isExpanded {
+                            Text(node.changeCount.formatted())
+                                .atelierFont(
+                                    size: AtelierTypography.micro,
+                                    weight: .medium,
+                                    design: .monospaced
+                                )
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .padding(.trailing, AtelierMetrics.spaceXS)
                 }
-                .padding(.trailing, AtelierMetrics.spaceXS)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: AtelierMetrics.rowHeight)
-            .background {
-                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
-                    .fill(isHovering ? AtelierTheme.hoverFill : Color.clear)
-            }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityLabel("Folder \(node.path)")
+            .accessibilityValue(
+                "\(isExpanded ? "Expanded" : "Collapsed"), \(node.changeCount) files"
+            )
+            .accessibilityHint("Option-click toggles the entire branch")
+            .help(
+                "\(isExpanded ? "Collapse" : "Expand") \(node.path). "
+                    + "Option-click toggles the entire branch."
+            )
         }
-        .buttonStyle(.plain)
+        .frame(height: AtelierMetrics.rowHeight)
+        .background {
+            RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+                .fill(rowFill)
+        }
+        .overlay(alignment: .trailing) {
+            if !staged {
+                Button(action: onDiscard) {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .buttonStyle(AtelierRowIconButtonStyle())
+                .focused($isActionFocused)
+                .accessibilityLabel("Discard changes in \(node.path)")
+                .help("Discard folder changes")
+                .padding(.horizontal, AtelierMetrics.spaceXS)
+                .frame(height: AtelierMetrics.rowHeight)
+                .background(rowFill)
+                .opacity(showsActions ? 1 : 0)
+                .allowsHitTesting(showsActions)
+            }
+        }
+        .contentShape(Rectangle())
         .atelierPointerCursor()
         .onHover { hovering in
             guard isHovering != hovering else { return }
             isHovering = hovering
         }
-        .accessibilityLabel("Folder \(node.path)")
-        .accessibilityValue(
-            "\(isExpanded ? "Expanded" : "Collapsed"), \(node.changeCount) files"
-        )
-        .accessibilityHint("Option-click toggles the entire branch")
-        .help(
-            "\(isExpanded ? "Collapse" : "Expand") \(node.path). "
-                + "Option-click toggles the entire branch."
-        )
+        .contextMenu {
+            if !staged {
+                Button("Discard Changes...", role: .destructive, action: onDiscard)
+            }
+        }
+    }
+
+    private var showsActions: Bool {
+        isHovering || isActionFocused
+    }
+
+    private var rowFill: Color {
+        showsActions ? AtelierTheme.hoverFill : Color.clear
     }
 }
 

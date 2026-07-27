@@ -641,6 +641,9 @@ Persistence boundaries:
   chains into one workspace-relative path while keeping changed files as actionable leaf rows.
 - Keep each change row at `rowHeight` 28. Show Git status in the trailing slot at rest, then
   overlay row actions in that slot on hover or keyboard focus without reserving extra width.
+- Show Discard Changes for every unstaged file and folder on hover or keyboard focus. Folder
+  actions cover every descendant change.
+- Confirm every discard. Restore tracked files from Git and move untracked files to Trash.
 - Highlight the leaf matching the selected center diff tab. When a folder is collapsed, show its
   descendant file count. Option-clicking a folder toggles its whole visible descendant branch.
 - Keep directory guide lines low contrast so file names and Git status remain the primary signals.
