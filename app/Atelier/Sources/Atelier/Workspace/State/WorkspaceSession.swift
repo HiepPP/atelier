@@ -8,6 +8,7 @@ final class WorkspaceSession {
     let rootURL: URL
     let terminalTabs: TerminalTabsModel
     let paletteModel: AtelierPaletteModel
+    let workspaceSearchModel: WorkspaceSearchModel
     let gitModel: GitWorkspaceModel
     let gemmaAgent: GemmaAgentModel
     let gemmaSidecar: GemmaSidecarModel
@@ -40,13 +41,19 @@ final class WorkspaceSession {
         )
         tabs.onSessionChange = onSessionChange
         terminalTabs = tabs
+        let fileIndex = WorkspaceFileIndex(rootURL: rootURL)
         paletteModel = AtelierPaletteModel(
-            fileIndex: WorkspaceFileIndex(rootURL: rootURL),
+            fileIndex: fileIndex,
             recentFiles: { tabs.recentFileURLs }
         )
-        gitModel = GitWorkspaceModel(
+        let git = GitWorkspaceModel(
             workspacePath: rootURL.path,
             onRepositoryChange: tabs.invalidateGitDiffs
+        )
+        gitModel = git
+        workspaceSearchModel = WorkspaceSearchModel(
+            searcher: WorkspaceSearchService(fileIndex: fileIndex),
+            ignoredPaths: { git.snapshot.status.ignoredPaths }
         )
         if let gemmaAgent {
             self.gemmaAgent = gemmaAgent
@@ -110,6 +117,7 @@ final class WorkspaceSession {
             gemmaSidecar.stop()
             agentResponses.stop()
             paletteModel.stop()
+            workspaceSearchModel.stop()
             terminalTabs.closeAll()
             AppLogger.workspace.info("Stopped workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
         }
@@ -191,6 +199,7 @@ final class WorkspaceSession {
     private func invalidateFileTree() {
         fileTreeRevision &+= 1
         paletteModel.updateFileRevision(fileTreeRevision)
+        workspaceSearchModel.updateFileRevision(fileTreeRevision)
     }
 
     isolated deinit {

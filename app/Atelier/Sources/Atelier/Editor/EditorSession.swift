@@ -9,11 +9,14 @@ final class EditorSession {
     private(set) var content: FileContent = .loading
     private(set) var selectedLineRange: ClosedRange<Int>?
     var isWordWrapEnabled = true
+    private(set) var prefersSourceForNavigation = false
+    private(set) var navigationRevealRequest: FileViewerRevealRequest?
     private(set) var diagnosticLoadedBytes = 0
     private(set) var diagnosticLineCount = 0
     private(set) var diagnosticLoadState = "loading"
     private var loadTask: Task<Void, Never>?
     private weak var surface: (any EditorSurface)?
+    private var revealGeneration = 0
 
     init(url: URL) {
         document = EditorDocument(url: url.standardizedFileURL)
@@ -75,6 +78,8 @@ final class EditorSession {
         loadTask = nil
         surface = nil
         selectedLineRange = nil
+        navigationRevealRequest = nil
+        prefersSourceForNavigation = false
     }
 
     func toggleWordWrap() {
@@ -85,6 +90,19 @@ final class EditorSession {
             metadata: ["enabled": .boolean(isWordWrapEnabled)],
             correlationID: runtimeControllerID
         )
+    }
+
+    func reveal(line: Int) {
+        revealGeneration &+= 1
+        navigationRevealRequest = FileViewerRevealRequest(
+            line: max(1, line),
+            generation: revealGeneration
+        )
+        prefersSourceForNavigation = true
+    }
+
+    func allowRenderedPreview() {
+        prefersSourceForNavigation = false
     }
 
     func attach(surface: any EditorSurface) {

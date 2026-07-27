@@ -47,15 +47,15 @@ AtelierApp
     |       |   |-- Center: terminal, file, diff, or Gemma tabs
     |       |   `-- Inspector: Gemma sidecar assistant
     |       `-- Status bar
-    `-- Quick Open or Command Palette overlay
+    `-- Quick Open, Command Palette, or Search All Files overlay
 ```
 
 | Layer | Owns |
 |---|---|
 | SwiftUI | App shell, workspace catalog, active selection, layout, tabs, commands, settings, visible state |
 | AppKit | File outline, editor, terminal, window focus, cursor, native tracking |
-| Models | Ordered live sessions, tab lifecycle, navigation history, Git state, palette state, zoom state |
-| Services | Catalog and session persistence, file loading, watching, Git, terminal processes, per-session workspace access |
+| Models | Ordered live sessions, tab lifecycle, navigation history, Git state, palette state, workspace-search state, zoom state |
+| Services | Catalog and session persistence, file loading, indexed workspace search, watching, Git, terminal processes, per-session workspace access |
 | Theme bridge | Shared colors and native view chrome across SwiftUI and AppKit |
 
 ## Layout System
@@ -508,7 +508,7 @@ Persistence boundaries:
 - Right-clicking a file or folder exposes Rename, Move to Trash, Copy Path, and Add to `.gitignore`.
 - Rename requires a new-name prompt. Move to Trash requires destructive confirmation.
 - Disable Add to `.gitignore` when the item is already ignored or is the `.gitignore` file itself.
-- Quick Open and every non-Explorer route open permanent tabs.
+- Quick Open, Search All Files, and every non-Explorer route open permanent tabs.
 
 ### Center Tabs
 
@@ -550,6 +550,33 @@ Persistence boundaries:
 - Show command title, category, shortcut, and live availability.
 - Support Up, Down, Return, Escape, and double-click.
 - `Cmd-P` opens Quick Open. `Cmd-Shift-P` opens the Command Palette.
+
+### Search All Files
+
+- Open a dedicated floating workspace-search panel with `Cmd-Shift-F`.
+- Fit the panel to the available workspace editor area beside the workspace rail, with `spaceL`
+  outer insets. Use the palette's editor, raised, chrome, border, scrim, and shadow language.
+- Keep Quick Open and Command Palette at their current 640-point maximum width and 410-point
+  height.
+- Keep one query field with Match Case, Match Whole Word, and Include Ignored Files controls.
+- Start a trailing project search one second after the latest query or option change. Cancel the
+  pending delay and any active stale search when another change arrives.
+- Let Return bypass the delay and search immediately. When results are current, Return opens the
+  selected result.
+- Reuse the workspace file index as the ordered candidate snapshot. Exclude hard build and
+  dependency directories, symlinks, binary files, files above the shared 2 MB text-loading limit,
+  and Git-ignored paths unless Include Ignored Files is active.
+- Keep one cancellable search task. Replacing, dismissing, or stopping a search cancels the prior
+  task and rejects stale batches.
+- Scan off the main actor. Check cancellation between files and lines, yield between batches, and
+  stream ordered batches back to the workspace-search model.
+- Group results by workspace-relative path. Give each file name, path, and match count separate
+  readable hierarchy. Show the line number and a bounded two-line monospaced excerpt, with the
+  first matching range emphasized.
+- Select the first result of a new search. Support Up, Down, Return, Escape, and double-click.
+- Limit one search to 1,000 matching lines. Surface truncation in the result count.
+- Opening a result selects a permanent source tab, reveals its line, and focuses the native editor.
+- Keep the latest query and results session-only so reopening Search All Files restores its context.
 
 ### Git
 
@@ -877,6 +904,7 @@ The five background features, all read-only and cancellable:
 | `Cmd-P` | Quick Open |
 | `Cmd-Shift-P` | Command Palette |
 | `Cmd-F` | Find in active text file |
+| `Cmd-Shift-F` | Search All Files |
 | `Cmd-Option-F` | Find and replace in active text file |
 | `Cmd-G` | Next file-search match |
 | `Cmd-Shift-G` | Previous file-search match |
@@ -893,7 +921,6 @@ The five background features, all read-only and cancellable:
 | `Cmd-+` | Zoom In |
 | `Cmd--` | Zoom Out |
 | `Cmd-0` | Actual Size |
-| `Cmd-Shift-F` | Toggle Focus Mode |
 | ``Cmd-` `` | Next Workspace (cycles, wraps to first) |
 | `Option-Z` | Toggle Word Wrap |
 
@@ -906,6 +933,7 @@ Rules:
 - `Cmd-W` asks for confirmation only when Claude Code or Codex is the detected foreground agent.
 - Keep Reopen Closed Tab available through menus and the command palette without a default shortcut.
 - Keep Quit available in the application menu without a default shortcut. Reserve `Cmd-Q` for Agent Responses.
+- Keep Focus Mode available through menus and the command palette without a default shortcut.
 - Show live enabled state in every action surface.
 - Do not reuse an existing shortcut for a new action.
 - Keep shortcut labels monospaced in the command palette.

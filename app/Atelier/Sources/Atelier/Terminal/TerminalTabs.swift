@@ -704,6 +704,10 @@ final class TerminalTabsModel {
         openFile(url, disposition: .permanent)
     }
 
+    func openFile(_ url: URL, line: Int) {
+        openFile(url, disposition: .permanent, revealLine: line)
+    }
+
     func previewFile(_ url: URL) {
         openFile(url, disposition: .preview)
     }
@@ -736,7 +740,8 @@ final class TerminalTabsModel {
     private func openFile(
         _ url: URL,
         disposition: FileTabDisposition,
-        recordsNavigation: Bool = true
+        recordsNavigation: Bool = true,
+        revealLine: Int? = nil
     ) {
         let standardizedURL = url.standardizedFileURL
 
@@ -754,6 +759,9 @@ final class TerminalTabsModel {
                 }
             }
             file.reload()
+            if let revealLine {
+                file.reveal(line: revealLine)
+            }
             selectedID = tab.id
             if recordsNavigation,
                let target = navigationTarget(for: tabs[index]) {
@@ -767,8 +775,12 @@ final class TerminalTabsModel {
             removeTab(at: previewIndex, recordsClosedFile: false)
         }
 
+        let editor = EditorSession(url: standardizedURL)
+        if let revealLine {
+            editor.reveal(line: revealLine)
+        }
         let tab = CenterTab(
-            content: .file(EditorSession(url: standardizedURL)),
+            content: .file(editor),
             fileDisposition: disposition
         )
         tabs.append(tab)
@@ -1428,7 +1440,7 @@ struct TerminalTabs: View {
                             isActive: isActive,
                             showsPreview: showsRenderedPreview(
                                 tabID: tab.id,
-                                fileURL: file.document.url
+                                editor: file
                             )
                         ) {
                             model.promotePreview(for: file.document.url)
@@ -1531,13 +1543,14 @@ struct TerminalTabs: View {
     private var isRenderedPreviewVisible: Bool {
         guard let selectedID = model.selectedID,
               let editor = model.selectedEditor else { return false }
-        return showsRenderedPreview(tabID: selectedID, fileURL: editor.document.url)
+        return showsRenderedPreview(tabID: selectedID, editor: editor)
     }
 
-    private func showsRenderedPreview(tabID: UUID, fileURL: URL) -> Bool {
+    private func showsRenderedPreview(tabID: UUID, editor: EditorSession) -> Bool {
+        if editor.prefersSourceForNavigation { return false }
         if renderedSourceTabIDs.contains(tabID) { return false }
         if renderedPreviewTabIDs.contains(tabID) { return true }
-        return FilePreviewPolicy.showsPreviewByDefault(for: fileURL)
+        return FilePreviewPolicy.showsPreviewByDefault(for: editor.document.url)
     }
 
     private var renderedFilePreviewBinding: Binding<Bool>? {
@@ -1545,13 +1558,13 @@ struct TerminalTabs: View {
               let selectedID = model.selectedID,
               let editor = model.selectedEditor,
               FilePreviewPolicy.kind(for: editor.document.url) != nil else { return nil }
-        let fileURL = editor.document.url
         return Binding(
             get: {
-                showsRenderedPreview(tabID: selectedID, fileURL: fileURL)
+                showsRenderedPreview(tabID: selectedID, editor: editor)
             },
             set: { showsPreview in
                 if showsPreview {
+                    editor.allowRenderedPreview()
                     renderedSourceTabIDs.remove(selectedID)
                     renderedPreviewTabIDs.insert(selectedID)
                 } else {
@@ -1747,6 +1760,7 @@ private struct FileTabView: View {
                     isActive: isActive && !showsPreview,
                     isWordWrapEnabled: file.isWordWrapEnabled,
                     surfaceOwner: file,
+                    revealRequest: file.navigationRevealRequest,
                     onEdit: onEdit
                 )
                 .opacity(showsPreview ? 0 : 1)
@@ -1772,6 +1786,7 @@ private struct FileTabView: View {
                 isActive: isActive,
                 isWordWrapEnabled: file.isWordWrapEnabled,
                 surfaceOwner: file,
+                revealRequest: file.navigationRevealRequest,
                 onEdit: onEdit
             )
         }

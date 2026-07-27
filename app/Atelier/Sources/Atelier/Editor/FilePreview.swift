@@ -174,6 +174,14 @@ struct MarkdownFileTabView: View {
                 selectedOutlineID = document.outline.first?.id
             }
         }
+        .onChange(of: file.navigationRevealRequest, initial: true) { _, request in
+            guard let request else { return }
+            jumpGeneration &+= 1
+            sourceRevealRequest = FileViewerRevealRequest(
+                line: request.line,
+                generation: jumpGeneration
+            )
+        }
     }
 
     private func jumpToOutlineEntry(_ entry: MarkdownOutlineEntry) {

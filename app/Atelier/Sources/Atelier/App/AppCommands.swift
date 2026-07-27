@@ -149,7 +149,6 @@ struct AppCommands: Commands {
             Button(title(.toggleFocusMode)) {
                 perform(.toggleFocusMode)
             }
-            .keyboardShortcut("f", modifiers: [.command, .shift])
         }
     }
 
@@ -197,6 +196,7 @@ struct AppCommands: Commands {
 
 struct AtelierPaletteCommands: Commands {
     @FocusedValue(\.showQuickOpen) private var showQuickOpen
+    @FocusedValue(\.showWorkspaceSearch) private var showWorkspaceSearch
     @FocusedValue(\.showCommandPalette) private var showCommandPalette
 
     var body: some Commands {
@@ -206,6 +206,12 @@ struct AtelierPaletteCommands: Commands {
             }
             .keyboardShortcut("p", modifiers: .command)
             .disabled(showQuickOpen == nil)
+
+            Button("Search All Files...") {
+                showWorkspaceSearch?()
+            }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+            .disabled(showWorkspaceSearch == nil)
 
             Button("Command Palette...") {
                 showCommandPalette?()
@@ -220,6 +226,10 @@ private struct ShowQuickOpenKey: FocusedValueKey {
     typealias Value = () -> Void
 }
 
+private struct ShowWorkspaceSearchKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
 private struct ShowCommandPaletteKey: FocusedValueKey {
     typealias Value = () -> Void
 }
@@ -228,6 +238,11 @@ extension FocusedValues {
     var showQuickOpen: (() -> Void)? {
         get { self[ShowQuickOpenKey.self] }
         set { self[ShowQuickOpenKey.self] = newValue }
+    }
+
+    var showWorkspaceSearch: (() -> Void)? {
+        get { self[ShowWorkspaceSearchKey.self] }
+        set { self[ShowWorkspaceSearchKey.self] = newValue }
     }
 
     var showCommandPalette: (() -> Void)? {

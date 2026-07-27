@@ -359,11 +359,17 @@ struct FileViewer: NSViewRepresentable {
                 renderedLanguage = language?.rawValue
                 render(content: content, language: language)
             }
-            if appliedRevealRequest != revealRequest {
+            if content.isEditableText,
+               appliedRevealRequest != revealRequest {
                 appliedRevealRequest = revealRequest
                 if let revealRequest {
                     reveal(line: revealRequest.line, column: 1)
+                    if isActive {
+                        focus()
+                    }
                 }
+            } else if revealRequest == nil {
+                appliedRevealRequest = nil
             }
         }
 

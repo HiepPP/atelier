@@ -11,6 +11,7 @@ struct AtelierActionRegistryTests {
 
         #expect(ids == [
             .openFolder,
+            .searchWorkspace,
             .closeWorkspace,
             .nextWorkspace,
             .newTerminal,
@@ -33,6 +34,11 @@ struct AtelierActionRegistryTests {
             .toggleFocusMode
         ])
         #expect(Set(ids).count == ids.count)
+        #expect(
+            AtelierActionRegistry.descriptor(for: .searchWorkspace).shortcutLabel
+                == "Command-Shift-F"
+        )
+        #expect(AtelierActionRegistry.descriptor(for: .toggleFocusMode).shortcutLabel == nil)
         #expect(AtelierActionRegistry.descriptor(for: .reopenClosedTab).shortcutLabel == nil)
         #expect(
             AtelierActionRegistry.descriptor(for: .showExplorer).shortcutLabel
@@ -76,6 +82,7 @@ struct AtelierActionRegistryTests {
         )
 
         #expect(AtelierActionRegistry.isEnabled(.openFolder, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.searchWorkspace, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.closeWorkspace, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.newTerminal, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.newClaudeCodeTerminal, context: empty))
@@ -135,6 +142,7 @@ struct AtelierActionRegistryTests {
         var recorded: [AtelierActionID] = []
         let handlers = AtelierActionHandlers(
             openFolder: { recorded.append(.openFolder) },
+            searchWorkspace: { recorded.append(.searchWorkspace) },
             closeWorkspace: { recorded.append(.closeWorkspace) },
             nextWorkspace: { recorded.append(.nextWorkspace) },
             newTerminal: { recorded.append(.newTerminal) },

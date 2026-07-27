@@ -2,6 +2,7 @@ import Foundation
 
 nonisolated enum AtelierActionID: String, CaseIterable, Identifiable, Sendable {
     case openFolder
+    case searchWorkspace
     case closeWorkspace
     case nextWorkspace
     case newTerminal
@@ -54,6 +55,7 @@ nonisolated struct AtelierActionContext: Equatable, Sendable {
 @MainActor
 struct AtelierActionHandlers {
     let openFolder: () -> Void
+    let searchWorkspace: () -> Void
     let closeWorkspace: () -> Void
     let nextWorkspace: () -> Void
     let newTerminal: () -> Void
@@ -89,6 +91,10 @@ struct AtelierActionHandlers {
 
         return AtelierActionHandlers(
             openFolder: model.chooseWorkspace,
+            searchWorkspace: {
+                guard let workspace = model.workspace else { return }
+                workspace.workspaceSearchModel.present(revision: workspace.fileTreeRevision)
+            },
             closeWorkspace: model.closeWorkspace,
             nextWorkspace: model.selectNextWorkspace,
             newTerminal: { model.workspace?.terminalTabs.add() },
@@ -150,6 +156,13 @@ nonisolated enum AtelierActionRegistry {
             category: "Workspace",
             systemImage: "folder",
             shortcutLabel: "Command-O"
+        ),
+        AtelierActionDescriptor(
+            id: .searchWorkspace,
+            title: "Search All Files...",
+            category: "Workspace",
+            systemImage: "doc.text.magnifyingglass",
+            shortcutLabel: "Command-Shift-F"
         ),
         AtelierActionDescriptor(
             id: .closeWorkspace,
@@ -289,7 +302,7 @@ nonisolated enum AtelierActionRegistry {
             title: "Enter Focus Mode",
             category: "View",
             systemImage: "rectangle.center.inset.filled",
-            shortcutLabel: "Command-Shift-F"
+            shortcutLabel: nil
         )
     ]
 
@@ -318,6 +331,8 @@ nonisolated enum AtelierActionRegistry {
         switch id {
         case .openFolder, .actualSize, .toggleFocusMode:
             true
+        case .searchWorkspace:
+            context.hasWorkspace
         case .closeWorkspace:
             context.canCloseWorkspace
         case .nextWorkspace:
@@ -385,6 +400,8 @@ nonisolated enum AtelierActionRegistry {
         switch id {
         case .openFolder:
             handlers.openFolder()
+        case .searchWorkspace:
+            handlers.searchWorkspace()
         case .closeWorkspace:
             handlers.closeWorkspace()
         case .nextWorkspace:

@@ -336,6 +336,7 @@ struct ContentView: View {
     @State private var commandPaletteModel = AtelierPaletteModel()
     @State private var presentedPaletteMode: AtelierPaletteMode?
     @State private var responderBeforePalette: NSResponder?
+    @State private var responderBeforeWorkspaceSearch: NSResponder?
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -373,6 +374,11 @@ struct ContentView: View {
                 paletteOverlay(mode: presentedPaletteMode)
                     .zIndex(10)
             }
+
+            if let workspace = app.workspace, workspace.workspaceSearchModel.isPresented {
+                workspaceSearchOverlay(model: workspace.workspaceSearchModel)
+                    .zIndex(11)
+            }
         }
         .background(AtelierTheme.canvas)
         .tint(AtelierTheme.accent)
@@ -383,6 +389,7 @@ struct ContentView: View {
         }
         .navigationTitle(app.workspace.map(Self.folderName) ?? "")
         .focusedSceneValue(\.showQuickOpen, quickOpenAction)
+        .focusedSceneValue(\.showWorkspaceSearch, workspaceSearchAction)
         .focusedSceneValue(\.showCommandPalette) {
             presentPalette(.commands)
         }
@@ -390,6 +397,10 @@ struct ContentView: View {
             if presentedPaletteMode != nil {
                 dismissPalette(restoresResponder: false)
             }
+            for session in app.liveSessions where session.workspaceSearchModel.isPresented {
+                session.workspaceSearchModel.dismiss()
+            }
+            responderBeforeWorkspaceSearch = nil
         }
     }
 
@@ -534,6 +545,11 @@ struct ContentView: View {
         return { presentPalette(.files) }
     }
 
+    private var workspaceSearchAction: (() -> Void)? {
+        guard app.workspace != nil else { return nil }
+        return { presentWorkspaceSearch() }
+    }
+
     private var activePaletteModel: AtelierPaletteModel {
         if presentedPaletteMode == .files, let workspace = app.workspace {
             return workspace.paletteModel
@@ -564,8 +580,39 @@ struct ContentView: View {
         .accessibilityAddTraits(.isModal)
     }
 
+    private func workspaceSearchOverlay(model: WorkspaceSearchModel) -> some View {
+        ZStack(alignment: .top) {
+            AtelierTheme.scrim
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    dismissWorkspaceSearch(restoresResponder: true)
+                }
+                .atelierPointerCursor()
+
+            WorkspaceSearchView(
+                model: model,
+                onActivate: activateWorkspaceSearch,
+                onDismiss: { dismissWorkspaceSearch(restoresResponder: true) }
+            )
+            .padding(
+                .leading,
+                AtelierMetrics.workspaceRailWidth + AtelierMetrics.spaceL
+            )
+            .padding(.trailing, AtelierMetrics.spaceL)
+            .padding(.vertical, AtelierMetrics.spaceL)
+        }
+        .transition(.opacity)
+        .accessibilityAddTraits(.isModal)
+    }
+
     private func presentPalette(_ mode: AtelierPaletteMode) {
-        responderBeforePalette = app.windowController.currentFirstResponder()
+        let priorResponder = responderBeforeWorkspaceSearch
+        if app.workspace?.workspaceSearchModel.isPresented == true {
+            dismissWorkspaceSearch(restoresResponder: false)
+        }
+        responderBeforePalette = priorResponder
+            ?? app.windowController.currentFirstResponder()
         switch mode {
         case .files:
             guard let workspace = app.workspace else { return }
@@ -577,15 +624,49 @@ struct ContentView: View {
     }
 
     private func activate(_ selection: AtelierPaletteSelection) {
-        dismissPalette(restoresResponder: false)
         switch selection {
         case .file(let url):
+            dismissPalette(restoresResponder: false)
             app.workspace?.terminalTabs.openFile(url)
         case .action(let action):
             let context = AtelierActionRegistry.context(for: app)
             guard AtelierActionRegistry.isEnabled(action, context: context) else { return }
+            if action == .searchWorkspace {
+                let responder = responderBeforePalette
+                dismissPalette(restoresResponder: false)
+                presentWorkspaceSearch(responder: responder)
+                return
+            }
+            dismissPalette(restoresResponder: false)
             AtelierActionRegistry.perform(action, model: app)
         }
+    }
+
+    private func presentWorkspaceSearch(responder: NSResponder? = nil) {
+        guard app.workspace != nil else { return }
+        let priorResponder = responder ?? responderBeforePalette
+        if presentedPaletteMode != nil {
+            dismissPalette(restoresResponder: false)
+        }
+        responderBeforeWorkspaceSearch = priorResponder
+            ?? app.windowController.currentFirstResponder()
+        AtelierActionRegistry.perform(.searchWorkspace, model: app)
+    }
+
+    private func activateWorkspaceSearch(_ match: WorkspaceSearchMatch) {
+        dismissWorkspaceSearch(restoresResponder: false)
+        app.workspace?.terminalTabs.openFile(
+            match.candidate.url,
+            line: match.lineNumber
+        )
+    }
+
+    private func dismissWorkspaceSearch(restoresResponder: Bool) {
+        app.workspace?.workspaceSearchModel.dismiss()
+        if restoresResponder {
+            app.windowController.restoreFirstResponder(responderBeforeWorkspaceSearch)
+        }
+        responderBeforeWorkspaceSearch = nil
     }
 
     private func dismissPalette(restoresResponder: Bool) {

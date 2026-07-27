@@ -176,6 +176,7 @@ Terminal tabs restore as fresh shells. Missing files and unavailable workspaces 
 | `Command-P` | Quick Open |
 | `Command-Shift-P` | Command Palette |
 | `Command-F` | Find in active source file |
+| `Command-Shift-F` | Search All Files |
 | `Command-Option-F` | Find and replace |
 | `Command-G` | Next search result |
 | `Command-Shift-G` | Previous search result |
@@ -193,7 +194,6 @@ Terminal tabs restore as fresh shells. Missing files and unavailable workspaces 
 | `Command--` | Zoom out |
 | `Command-0` | Open a new workspace |
 | `Command-1` through `Command-9` | Select workspace by rail position |
-| `Command-Shift-F` | Toggle Focus Mode |
 | ``Command-` `` | Select next workspace |
 | `Option-Z` | Toggle word wrap |
 
