@@ -120,6 +120,7 @@ struct WorkspaceNativeSplitView<Sidebar: View, Detail: View, Inspector: View>:
                 reduceMotion: reduceMotion
             )
         )
+        sidebarController.view.frame.size.width = AtelierMetrics.workspaceSidebarIdealWidth
         let sidebarItem = NSSplitViewItem(viewController: sidebarController)
         sidebarItem.minimumThickness = AtelierMetrics.workspaceSidebarMinWidth
         sidebarItem.maximumThickness = AtelierMetrics.workspaceSidebarMaxWidth

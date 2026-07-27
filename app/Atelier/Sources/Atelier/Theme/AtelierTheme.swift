@@ -145,8 +145,9 @@ enum AtelierMetrics {
     static let sourceControlIdealWidth: CGFloat = 380
     static let sourceControlMaxWidth: CGFloat = 540
     static let workspaceSidebarMinWidth: CGFloat = 240
-    static let workspaceSidebarIdealWidth: CGFloat = 340
+    static let workspaceSidebarIdealWidth: CGFloat = 370
     static let workspaceSidebarMaxWidth: CGFloat = 560
+    static let watchtowerPanelWidth: CGFloat = 340
     static let inspectorMinWidth: CGFloat = 260
     static let inspectorIdealWidth: CGFloat = 360
     static let inspectorMaxWidth: CGFloat = 640

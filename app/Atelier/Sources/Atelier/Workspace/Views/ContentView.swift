@@ -993,7 +993,7 @@ struct WorkspaceView: View {
                 onOpenFile: { terminalTabs.previewFile($0) },
                 onClose: { closeWatchtower() }
             )
-                .frame(width: AtelierMetrics.workspaceSidebarIdealWidth, alignment: .leading)
+                .frame(width: AtelierMetrics.watchtowerPanelWidth, alignment: .leading)
                 .frame(maxHeight: .infinity)
                 .background(AtelierTheme.panel)
                 .overlay(alignment: .leading) {

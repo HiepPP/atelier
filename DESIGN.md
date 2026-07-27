@@ -94,9 +94,10 @@ Rules:
 | Surface | Minimum | Ideal | Maximum |
 |---|---:|---:|---:|
 | Workspace rail | 176 | 176 | 176 |
-| Workspace sidebar | 240 | 340 | 560 |
+| Workspace sidebar | 240 | 370 | 560 |
 | Center | 420 | 660 | Flexible |
 | Inspector | 260 | 360 | 640 |
+| Watchtower overlay | 340 | 340 | 340 |
 | Agent response overlay | 50% of center | 100% of center | 100% of center |
 | Explorer legacy range | 220 | 280 | 400 |
 | Source Control legacy range | 320 | 380 | 540 |

@@ -285,6 +285,12 @@ struct DisplaySizingTests {
         #expect(horizontal.midY == 300)
     }
 
+    @Test("Workspace sidebar and Watchtower widths stay independent")
+    func workspacePanelDefaultWidths() {
+        #expect(AtelierMetrics.workspaceSidebarIdealWidth == 370)
+        #expect(AtelierMetrics.watchtowerPanelWidth == 340)
+    }
+
     @Test("Workspace native split restores panels without owning window chrome")
     func workspaceNativeSplitRestoresPanelGeometry() async {
         typealias NativeSplit = WorkspaceNativeSplitView<
@@ -309,6 +315,7 @@ struct DisplaySizingTests {
                 reduceMotion: false
             )
         )
+        sidebarController.view.frame.size.width = AtelierMetrics.workspaceSidebarIdealWidth
         let sidebarItem = NSSplitViewItem(viewController: sidebarController)
         sidebarItem.minimumThickness = AtelierMetrics.workspaceSidebarMinWidth
         sidebarItem.maximumThickness = AtelierMetrics.workspaceSidebarMaxWidth
@@ -368,6 +375,12 @@ struct DisplaySizingTests {
         window.contentViewController = controller
         controller.view.layoutSubtreeIfNeeded()
         controller.splitView.adjustSubviews()
+        #expect(
+            abs(
+                sidebarController.view.frame.width
+                    - AtelierMetrics.workspaceSidebarIdealWidth
+            ) < 1
+        )
 
         func setSidebarPresentation(_ isPresented: Bool) {
             sidebarController.rootView = WorkspacePanelMotionContainer(
