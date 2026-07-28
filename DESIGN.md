@@ -592,6 +592,19 @@ Persistence boundaries:
 - Use editor fill for the 52-point query field.
 - Use raised fill for results and chrome fill for the keyboard footer.
 - Show file name first and a monospaced relative path second.
+- Treat a Quick Open query that starts with `/` or `~/` as an absolute filesystem path. Expand `~`
+  to the home directory, standardize the path, and resolve symlinks.
+- When that path is an existing file outside the workspace root, show it as the first Quick Open
+  result, above ranked index matches, with its file name first and its full absolute path second in
+  the same monospaced style. Return opens it as a permanent tab through the normal file route.
+- Add no row when the path is missing, is a directory, or already resolves inside the workspace
+  root. Indexed results stay the single source for in-workspace files, and the workspace file index
+  never walks outside the workspace root.
+- Resolve the external path off the main actor inside the existing search task so typing never
+  blocks the panel.
+- Walk the workspace file index only while Quick Open is open. A file-tree revision that arrives
+  while the panel is closed records the revision and defers the walk, and opening the panel walks
+  once against the recorded revision. A closed panel never re-indexes the workspace.
 - Show command title, category, shortcut, and live availability.
 - Support Up, Down, Return, Escape, and double-click.
 - `Cmd-P` opens Quick Open. `Cmd-Shift-P` opens the Command Palette.
@@ -1058,6 +1071,11 @@ The five background features, all read-only and cancellable:
   running after activation, including while another workspace is selected.
 - Bound startup discovery to the 100 newest transcript files per source root and 16 MiB of
   uncached transcript data per refresh.
+- Debounce transcript watcher events. A burst of filesystem events must collapse into one refresh
+  after the burst goes quiet. Never start a full transcript re-scan on each individual event: an
+  agent writing its own transcript emits a continuous event stream, and a per-event refresh
+  re-walks and re-parses every transcript file. Keep the existing longer trailing refresh that
+  covers files created inside the source's discovery throttle window.
 - Keep status, navigation, refresh, copy, and close actions keyboard accessible.
 - Keep the transcript Markdown treatment consistent with the file-preview surface: pull-quote block
   quotes with an accent left rule and serif italic secondary text, completed task items in secondary

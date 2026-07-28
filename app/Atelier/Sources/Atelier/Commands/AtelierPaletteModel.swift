@@ -23,6 +23,7 @@ final class AtelierPaletteModel {
     private(set) var isPresented = false
 
     private let fileIndex: (any WorkspaceFileIndexing)?
+    private let workspaceRoot: URL?
     private let recentFiles: @MainActor () -> [URL]
     private var fileRevision = 0
     private var searchGeneration = 0
@@ -30,9 +31,11 @@ final class AtelierPaletteModel {
 
     init(
         fileIndex: (any WorkspaceFileIndexing)? = nil,
+        workspaceRoot: URL? = nil,
         recentFiles: @escaping @MainActor () -> [URL] = { [] }
     ) {
         self.fileIndex = fileIndex
+        self.workspaceRoot = workspaceRoot
         self.recentFiles = recentFiles
     }
 
@@ -66,7 +69,11 @@ final class AtelierPaletteModel {
     func updateFileRevision(_ revision: Int) {
         guard fileRevision != revision else { return }
         fileRevision = revision
-        if mode == .files { refreshFiles() }
+        // A closed panel shows no results, so walking the workspace here is pure
+        // waste; every filesystem change would re-index the whole root. Record the
+        // revision and let `showFiles(revision:)` walk once when the panel opens.
+        guard isPresented, mode == .files else { return }
+        refreshFiles()
     }
 
     func moveSelection(by offset: Int) {
@@ -150,17 +157,26 @@ final class AtelierPaletteModel {
         let query = query
         let revision = fileRevision
         let recentURLs = recentFiles()
+        let workspaceRoot = workspaceRoot
         isSearching = true
         searchTask = Task { [weak self] in
             do {
                 let candidates = try await fileIndex.candidates(revision: revision)
                 try Task.checkCancellation()
+                // Ranking and the external-path filesystem check both run off the main actor.
                 let matches = await Task.detached(priority: .userInitiated) {
-                    AtelierPaletteSearch.rankFiles(
+                    let ranked = AtelierPaletteSearch.rankFiles(
                         candidates,
                         query: query,
                         recentURLs: recentURLs
                     )
+                    guard let external = AtelierPaletteSearch.externalFileMatch(
+                        query: query,
+                        workspaceRoot: workspaceRoot
+                    ) else {
+                        return ranked
+                    }
+                    return [external] + ranked.filter { $0.id != external.id }
                 }.value
                 try Task.checkCancellation()
                 guard let self, self.searchGeneration == generation else { return }

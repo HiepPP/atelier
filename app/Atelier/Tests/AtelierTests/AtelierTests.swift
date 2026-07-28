@@ -1359,6 +1359,123 @@ struct AtelierTests {
         ) == nil)
     }
 
+    @Test("Quick Open resolves an absolute path only outside the workspace root")
+    func quickOpenExternalPathPolicy() throws {
+        let root = temporaryDirectory("quick-open-root")
+        let outside = temporaryDirectory("quick-open-outside")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let insideURL = root.appendingPathComponent("inside.md")
+        let outsideURL = outside.appendingPathComponent("outside.md")
+        try Data("inside".utf8).write(to: insideURL)
+        try Data("outside".utf8).write(to: outsideURL)
+        let resolvedOutsideURL = outsideURL.standardizedFileURL.resolvingSymlinksInPath()
+
+        // An existing file outside the root resolves, with or without surrounding whitespace.
+        #expect(AtelierPaletteSearch.externalFileURL(
+            query: outsideURL.path,
+            workspaceRoot: root
+        ) == resolvedOutsideURL)
+        #expect(AtelierPaletteSearch.externalFileURL(
+            query: "  \(outsideURL.path)  ",
+            workspaceRoot: root
+        ) == resolvedOutsideURL)
+
+        // A file inside the root stays owned by the workspace index.
+        #expect(AtelierPaletteSearch.externalFileURL(
+            query: insideURL.path,
+            workspaceRoot: root
+        ) == nil)
+
+        // Missing paths, directories, and non-path queries add no row.
+        #expect(AtelierPaletteSearch.externalFileURL(
+            query: outside.appendingPathComponent("missing.md").path,
+            workspaceRoot: root
+        ) == nil)
+        #expect(AtelierPaletteSearch.externalFileURL(
+            query: outside.path,
+            workspaceRoot: root
+        ) == nil)
+        #expect(AtelierPaletteSearch.externalFileURL(query: "outside.md", workspaceRoot: root) == nil)
+        #expect(AtelierPaletteSearch.externalFileURL(query: "", workspaceRoot: root) == nil)
+
+        // The match carries the absolute path so the panel renders it in place of a relative path.
+        let match = try #require(AtelierPaletteSearch.externalFileMatch(
+            query: outsideURL.path,
+            workspaceRoot: root
+        ))
+        #expect(match.candidate.url == resolvedOutsideURL)
+        #expect(match.candidate.relativePath == resolvedOutsideURL.path)
+        #expect(match.candidate.fileName == "outside.md")
+        #expect(match.score == AtelierPaletteSearch.externalPathScore)
+    }
+
+    @Test("Quick Open expands a tilde path to the home directory")
+    func quickOpenExternalTildePath() throws {
+        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let fileURL = home.appendingPathComponent("atelier-tests-tilde-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        try Data("tilde".utf8).write(to: fileURL)
+        let root = temporaryDirectory("quick-open-tilde-root")
+
+        #expect(AtelierPaletteSearch.externalFileURL(
+            query: "~/\(fileURL.lastPathComponent)",
+            workspaceRoot: root
+        ) == fileURL.standardizedFileURL.resolvingSymlinksInPath())
+        // The home directory itself is a directory, so it never becomes a result.
+        #expect(AtelierPaletteSearch.externalFileURL(query: "~/", workspaceRoot: root) == nil)
+        // A tilde path inside the workspace root is still owned by the index.
+        #expect(AtelierPaletteSearch.externalFileURL(
+            query: "~/\(fileURL.lastPathComponent)",
+            workspaceRoot: home
+        ) == nil)
+    }
+
+    @Test("Quick Open puts an external path above ranked workspace matches")
+    @MainActor
+    func quickOpenExternalPathLeadsResults() async throws {
+        let root = temporaryDirectory("quick-open-results-root")
+        let outside = temporaryDirectory("quick-open-results-outside")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let insideURL = root.appendingPathComponent("inside.md")
+        let outsideURL = outside.appendingPathComponent("outside.md")
+        try Data("inside".utf8).write(to: insideURL)
+        try Data("outside".utf8).write(to: outsideURL)
+        let model = AtelierPaletteModel(
+            fileIndex: WorkspaceFileIndex(rootURL: root),
+            workspaceRoot: root
+        )
+
+        model.showFiles(revision: 0)
+        model.updateQuery(outsideURL.path)
+        await model.settleSearch()
+        let externalURL = outsideURL.standardizedFileURL.resolvingSymlinksInPath()
+        #expect(model.fileResults.first?.candidate.relativePath == externalURL.path)
+        #expect(model.selection == .file(externalURL))
+
+        // An in-workspace path adds no absolute-path row; the index stays the only source.
+        model.updateQuery(insideURL.path)
+        await model.settleSearch()
+        #expect(model.fileResults.allSatisfy { !$0.candidate.relativePath.hasPrefix("/") })
+
+        // A missing path adds no row and reports no error state.
+        model.updateQuery(outside.appendingPathComponent("missing.md").path)
+        await model.settleSearch()
+        #expect(model.fileResults.isEmpty)
+        #expect(!model.isSearching)
+    }
+
     private func temporaryDirectory(_ name: String) -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("atelier-tests-\(name)-\(UUID().uuidString)", isDirectory: true)

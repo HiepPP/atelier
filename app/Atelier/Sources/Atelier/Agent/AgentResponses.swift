@@ -751,6 +751,7 @@ final class AgentResponsesModel {
     private var readResponseIDs: Set<AgentResponseReadIdentity> = []
     private var monitorTask: Task<Void, Never>?
     private var watcher: TranscriptDirectoryWatcher?
+    private var debouncedRefreshTask: Task<Void, Never>?
     private var trailingRefreshTask: Task<Void, Never>?
     private var isRefreshInFlight = false
 
@@ -820,7 +821,13 @@ final class AgentResponsesModel {
 
     private func handleWatcherEvent() {
         guard isMonitoring else { return }
-        Task { [weak self] in
+        // Collapse the burst before refreshing. A running agent writes its own
+        // transcript continuously, and refreshing per event re-walked and
+        // re-parsed every transcript file back to back.
+        debouncedRefreshTask?.cancel()
+        debouncedRefreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
             await self?.refresh(showProgress: false, markLoadedResponsesRead: false)
         }
         // Transcript discovery inside the source is throttled; a trailing
@@ -837,6 +844,8 @@ final class AgentResponsesModel {
     func stop() {
         monitorTask?.cancel()
         monitorTask = nil
+        debouncedRefreshTask?.cancel()
+        debouncedRefreshTask = nil
         trailingRefreshTask?.cancel()
         trailingRefreshTask = nil
         watcher?.stop()

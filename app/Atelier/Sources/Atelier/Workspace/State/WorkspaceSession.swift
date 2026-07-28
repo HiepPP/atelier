@@ -48,6 +48,7 @@ final class WorkspaceSession {
         let fileIndex = WorkspaceFileIndex(rootURL: rootURL)
         paletteModel = AtelierPaletteModel(
             fileIndex: fileIndex,
+            workspaceRoot: rootURL,
             recentFiles: { tabs.recentFileURLs }
         )
         let git = GitWorkspaceModel(

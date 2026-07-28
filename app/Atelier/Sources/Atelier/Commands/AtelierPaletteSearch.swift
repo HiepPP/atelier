@@ -59,6 +59,45 @@ nonisolated struct RecentFileHistory: Equatable, Sendable {
 
 nonisolated enum AtelierPaletteSearch {
     static let maximumResults = 100
+    // Ranked above the exact-file-name tier so an explicit path always leads.
+    static let externalPathScore = 50_000
+
+    /// Resolves a query that names an absolute filesystem path to a file outside the workspace.
+    /// Returns nil unless the query starts with `/` or `~/` and resolves to an existing regular
+    /// file outside `workspaceRoot`; indexed results stay the single source for in-workspace files.
+    static func externalFileURL(query: String, workspaceRoot: URL?) -> URL? {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedQuery.hasPrefix("/") || trimmedQuery.hasPrefix("~/") else { return nil }
+
+        let expandedPath = (trimmedQuery as NSString).expandingTildeInPath
+        guard !expandedPath.isEmpty, expandedPath.hasPrefix("/") else { return nil }
+
+        let url = URL(fileURLWithPath: expandedPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else {
+            return nil
+        }
+        if let workspaceRoot {
+            let root = workspaceRoot.standardizedFileURL.resolvingSymlinksInPath()
+            guard !FileTreePathPolicy.contains(url, within: root) else { return nil }
+        }
+        return url
+    }
+
+    /// Wraps an external path result so it can lead `fileResults` alongside ranked index matches.
+    /// The candidate carries the absolute path so the panel renders it in place of a relative path.
+    static func externalFileMatch(query: String, workspaceRoot: URL?) -> AtelierPaletteFileMatch? {
+        guard let url = externalFileURL(query: query, workspaceRoot: workspaceRoot) else {
+            return nil
+        }
+        return AtelierPaletteFileMatch(
+            candidate: AtelierFileCandidate(url: url, relativePath: url.path),
+            score: externalPathScore
+        )
+    }
 
     static func rankFiles(
         _ candidates: [AtelierFileCandidate],
