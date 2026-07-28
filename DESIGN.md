@@ -963,7 +963,7 @@ The five background features, all read-only and cancellable:
   overlay never becomes a split peer or consumes terminal, editor, diff, or Gemma layout space.
 - Open the response overlay at a trailing half-width below the tab strip.
 - Provide one header control that toggles between full width and a trailing half-width mode.
-- Opening the overlay from the Response action or `Cmd-Q` always restores half-width mode.
+- Opening the overlay from the Response action or `Cmd-Shift-E` always restores half-width mode.
 - Restore at most 100 newest final responses for the current workspace at startup.
 - Treat restored responses as read, then count only newly monitored responses as unread.
 - Start transcript restore only when a workspace first becomes active. Keep live monitoring
@@ -1003,13 +1003,14 @@ The five background features, all read-only and cancellable:
 | `Cmd-B` | Reveal the active file in Explorer |
 | `Cmd-E` | Toggle between the Explorer and Git sidebar tabs |
 | `Cmd-R` | Toggle Source and Preview for the active Markdown or HTML file |
-| `Cmd-Q` | Toggle Agent Responses at the default half width |
+| `Cmd-Q` | Close active closable center tab |
+| `Cmd-W` | Toggle Watchtower Panel |
+| `Cmd-Shift-E` | Toggle Agent Responses at the default half width |
+| `Cmd-Shift-R` | Toggle Left Panel |
+| `Cmd-Shift-T` | Toggle Right Panel |
 | `Cmd-Shift-C` | Insert selected editor line reference into terminal |
-| `Cmd-W` | Close active closable center tab |
 | `Ctrl--` | Back |
 | `Ctrl-Shift--` | Forward |
-| `Cmd-Shift-E` | Toggle Left Panel |
-| `Cmd-Shift-R` | Toggle Right Panel |
 | `Cmd-+` | Zoom In |
 | `Cmd--` | Zoom Out |
 | `Cmd-0` | Actual Size |
@@ -1021,10 +1022,10 @@ Rules:
 - Menu items, palette actions, and toolbar controls must call the same typed action.
 - Agent terminal shortcuts create a fresh terminal in the active workspace, type the exact alias,
   and submit it once.
-- `Cmd-W` never closes the workspace window. With no active tab or only the final terminal active, it does nothing.
-- `Cmd-W` asks for confirmation only when Claude Code or Codex is the detected foreground agent.
+- `Cmd-Q` never closes the workspace window. With no active tab or only the final terminal active, it does nothing.
+- `Cmd-Q` asks for confirmation only when Claude Code or Codex is the detected foreground agent.
 - Keep Reopen Closed Tab available through menus and the command palette without a default shortcut.
-- Keep Quit available in the application menu without a default shortcut. Reserve `Cmd-Q` for Agent Responses.
+- Keep Quit available in the application menu without a default shortcut. Reserve `Cmd-Q` for Close Tab.
 - Keep Focus Mode available through menus and the command palette without a default shortcut.
 - Show live enabled state in every action surface.
 - Do not reuse an existing shortcut for a new action.

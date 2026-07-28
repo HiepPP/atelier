@@ -524,7 +524,7 @@ struct ContentView: View {
                     reduceMotion: reduceMotion
                 )
                 withAnimation(reduceMotion ? nil : AtelierMotionTokens.panel) {
-                    session.toggleWatchtower()
+                    AtelierActionRegistry.perform(.toggleWatchtower, model: app)
                 }
             } label: {
                 Image(systemName: "binoculars")

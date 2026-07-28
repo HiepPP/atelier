@@ -1118,7 +1118,6 @@ struct AtelierTabCommands: Commands {
             Button("Rename Tab...") {
                 renameActiveTab?()
             }
-            .keyboardShortcut("r", modifiers: [.command, .shift])
             .disabled(renameActiveTab == nil)
 
             Button("Toggle Word Wrap") {

@@ -18,6 +18,7 @@ nonisolated enum AtelierActionID: String, CaseIterable, Identifiable, Sendable {
     case toggleExplorerGit
     case revealActiveFileInExplorer
     case toggleAgentResponses
+    case toggleWatchtower
     case toggleLeftPanel
     case toggleWorkspacePanels
     case toggleRightPanel
@@ -74,6 +75,7 @@ struct AtelierActionHandlers {
     let toggleExplorerGit: () -> Void
     let revealActiveFileInExplorer: () -> Void
     let toggleAgentResponses: () -> Void
+    let toggleWatchtower: () -> Void
     let toggleLeftPanel: () -> Void
     let toggleWorkspacePanels: () -> Void
     let toggleRightPanel: () -> Void
@@ -133,6 +135,7 @@ struct AtelierActionHandlers {
                     windowController: model.windowController
                 )
             },
+            toggleWatchtower: { model.workspace?.toggleWatchtower() },
             toggleLeftPanel: {
                 guard let chrome = model.workspace?.chrome,
                       !model.zoom.isFocusMode,
@@ -223,7 +226,7 @@ nonisolated enum AtelierActionRegistry {
             title: "Close Tab",
             category: "Tabs",
             systemImage: "xmark",
-            shortcutLabel: "Command-W"
+            shortcutLabel: "Command-Q"
         ),
         AtelierActionDescriptor(
             id: .navigateBack,
@@ -286,14 +289,21 @@ nonisolated enum AtelierActionRegistry {
             title: "Toggle Agent Responses",
             category: "View",
             systemImage: "text.bubble",
-            shortcutLabel: "Command-Q"
+            shortcutLabel: "Command-Shift-E"
+        ),
+        AtelierActionDescriptor(
+            id: .toggleWatchtower,
+            title: "Toggle Watchtower Panel",
+            category: "View",
+            systemImage: "binoculars",
+            shortcutLabel: "Command-W"
         ),
         AtelierActionDescriptor(
             id: .toggleLeftPanel,
             title: "Toggle Left Panel",
             category: "View",
             systemImage: "sidebar.leading",
-            shortcutLabel: "Command-Shift-E"
+            shortcutLabel: "Command-Shift-R"
         ),
         AtelierActionDescriptor(
             id: .toggleWorkspacePanels,
@@ -307,7 +317,7 @@ nonisolated enum AtelierActionRegistry {
             title: "Toggle Right Panel",
             category: "View",
             systemImage: "sidebar.trailing",
-            shortcutLabel: "Command-Shift-R"
+            shortcutLabel: "Command-Shift-T"
         ),
         AtelierActionDescriptor(
             id: .zoomIn,
@@ -374,7 +384,8 @@ nonisolated enum AtelierActionRegistry {
              .newClaudeCodeTerminal,
              .newCodexTerminal,
              .openGemma,
-             .toggleAgentResponses:
+             .toggleAgentResponses,
+             .toggleWatchtower:
             context.hasWorkspace
         case .closeTab:
             context.canCloseTab
@@ -471,6 +482,8 @@ nonisolated enum AtelierActionRegistry {
             handlers.revealActiveFileInExplorer()
         case .toggleAgentResponses:
             handlers.toggleAgentResponses()
+        case .toggleWatchtower:
+            handlers.toggleWatchtower()
         case .toggleLeftPanel:
             handlers.toggleLeftPanel()
         case .toggleWorkspacePanels:

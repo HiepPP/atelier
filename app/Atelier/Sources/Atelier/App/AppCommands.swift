@@ -15,7 +15,7 @@ struct AppCommands: Commands {
             Button(title(.closeTab)) {
                 perform(.closeTab)
             }
-            .keyboardShortcut("w", modifiers: .command)
+            .keyboardShortcut("q", modifiers: .command)
             .disabled(!isEnabled(.closeTab))
         }
 
@@ -123,19 +123,25 @@ struct AppCommands: Commands {
             Button(title(.toggleAgentResponses)) {
                 perform(.toggleAgentResponses)
             }
-            .keyboardShortcut("q", modifiers: .command)
+            .keyboardShortcut("e", modifiers: [.command, .shift])
             .disabled(!isEnabled(.toggleAgentResponses))
+
+            Button(title(.toggleWatchtower)) {
+                perform(.toggleWatchtower)
+            }
+            .keyboardShortcut("w", modifiers: .command)
+            .disabled(!isEnabled(.toggleWatchtower))
 
             Button(title(.toggleLeftPanel)) {
                 perform(.toggleLeftPanel)
             }
-            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .keyboardShortcut("r", modifiers: [.command, .shift])
             .disabled(!isEnabled(.toggleLeftPanel))
 
             Button(title(.toggleRightPanel)) {
                 perform(.toggleRightPanel)
             }
-            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .keyboardShortcut("t", modifiers: [.command, .shift])
             .disabled(!isEnabled(.toggleRightPanel))
 
             Divider()

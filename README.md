@@ -183,13 +183,14 @@ Terminal tabs restore as fresh shells. Missing files and unavailable workspaces 
 | `Command-B` | Reveal the active file in Explorer |
 | `Command-E` | Toggle between Explorer and Git |
 | `Command-R` | Toggle Source and Preview |
-| `Command-Q` | Toggle Agent Responses |
+| `Command-Q` | Close active closable tab |
+| `Command-W` | Toggle Watchtower panel |
+| `Command-Shift-E` | Toggle Agent Responses |
+| `Command-Shift-R` | Toggle left panel |
+| `Command-Shift-T` | Toggle right panel |
 | `Command-Shift-C` | Send selected line reference to terminal |
-| `Command-W` | Close active closable tab |
 | `Control--` | Back |
 | `Control-Shift--` | Forward |
-| `Command-Shift-E` | Toggle left panel |
-| `Command-Shift-R` | Toggle right panel |
 | `Command-+` | Zoom in |
 | `Command--` | Zoom out |
 | `Command-0` | Open a new workspace |

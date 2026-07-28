@@ -27,6 +27,7 @@ struct AtelierActionRegistryTests {
             .toggleExplorerGit,
             .revealActiveFileInExplorer,
             .toggleAgentResponses,
+            .toggleWatchtower,
             .toggleLeftPanel,
             .toggleWorkspacePanels,
             .toggleRightPanel,
@@ -39,6 +40,14 @@ struct AtelierActionRegistryTests {
         #expect(
             AtelierActionRegistry.descriptor(for: .searchWorkspace).shortcutLabel
                 == "Command-Shift-F"
+        )
+        #expect(
+            AtelierActionRegistry.descriptor(for: .newTerminal).shortcutLabel
+                == "Command-T"
+        )
+        #expect(
+            AtelierActionRegistry.descriptor(for: .closeTab).shortcutLabel
+                == "Command-Q"
         )
         #expect(AtelierActionRegistry.descriptor(for: .toggleFocusMode).shortcutLabel == nil)
         #expect(AtelierActionRegistry.descriptor(for: .reopenClosedTab).shortcutLabel == nil)
@@ -54,15 +63,19 @@ struct AtelierActionRegistryTests {
         )
         #expect(
             AtelierActionRegistry.descriptor(for: .toggleAgentResponses).shortcutLabel
-                == "Command-Q"
-        )
-        #expect(
-            AtelierActionRegistry.descriptor(for: .toggleLeftPanel).shortcutLabel
                 == "Command-Shift-E"
         )
         #expect(
-            AtelierActionRegistry.descriptor(for: .toggleRightPanel).shortcutLabel
+            AtelierActionRegistry.descriptor(for: .toggleWatchtower).shortcutLabel
+                == "Command-W"
+        )
+        #expect(
+            AtelierActionRegistry.descriptor(for: .toggleLeftPanel).shortcutLabel
                 == "Command-Shift-R"
+        )
+        #expect(
+            AtelierActionRegistry.descriptor(for: .toggleRightPanel).shortcutLabel
+                == "Command-Shift-T"
         )
     }
 
@@ -102,6 +115,7 @@ struct AtelierActionRegistryTests {
         #expect(!AtelierActionRegistry.isEnabled(.toggleExplorerGit, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.revealActiveFileInExplorer, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleAgentResponses, context: empty))
+        #expect(!AtelierActionRegistry.isEnabled(.toggleWatchtower, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleLeftPanel, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleWorkspacePanels, context: empty))
         #expect(!AtelierActionRegistry.isEnabled(.toggleRightPanel, context: empty))
@@ -168,6 +182,7 @@ struct AtelierActionRegistryTests {
             toggleExplorerGit: { recorded.append(.toggleExplorerGit) },
             revealActiveFileInExplorer: { recorded.append(.revealActiveFileInExplorer) },
             toggleAgentResponses: { recorded.append(.toggleAgentResponses) },
+            toggleWatchtower: { recorded.append(.toggleWatchtower) },
             toggleLeftPanel: { recorded.append(.toggleLeftPanel) },
             toggleWorkspacePanels: { recorded.append(.toggleWorkspacePanels) },
             toggleRightPanel: { recorded.append(.toggleRightPanel) },
@@ -273,6 +288,12 @@ struct AtelierActionRegistryTests {
         AtelierActionRegistry.perform(.toggleAgentResponses, model: model)
         #expect(workspace.isAgentSidecarPresented)
         #expect(workspace.chrome.agentResponseOverlayMode == .half)
+
+        #expect(!workspace.isWatchtowerPresented)
+        AtelierActionRegistry.perform(.toggleWatchtower, model: model)
+        #expect(workspace.isWatchtowerPresented)
+        AtelierActionRegistry.perform(.toggleWatchtower, model: model)
+        #expect(!workspace.isWatchtowerPresented)
     }
 
     @Test("Close Workspace removes a selected unavailable catalog item")
