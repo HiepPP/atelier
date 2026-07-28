@@ -86,6 +86,59 @@ struct AtelierTests {
         #expect(ParsedMarkdownDocument.empty.blocks.isEmpty)
     }
 
+    @Test("Sticky section bar covers only hidden-outline layouts")
+    func markdownStickySectionPolicy() {
+        #expect(MarkdownStickySectionPolicy.showsBar(
+            headingCount: 2,
+            showsOutline: false
+        ))
+        #expect(!MarkdownStickySectionPolicy.showsBar(
+            headingCount: 2,
+            showsOutline: true
+        ))
+        #expect(!MarkdownStickySectionPolicy.showsBar(
+            headingCount: 1,
+            showsOutline: false
+        ))
+    }
+
+    @Test("Markdown figures keep their own aspect ratio inside the measure")
+    func markdownFigureFitPolicy() {
+        let landscape = MarkdownFigureFitPolicy.fittedSize(
+            contentWidth: 1_440,
+            contentHeight: 810,
+            measure: 720,
+            maximumHeight: 864
+        )
+        #expect(landscape == NSSize(width: 720, height: 405))
+
+        // Smaller than the measure: keep native size instead of upscaling.
+        let small = MarkdownFigureFitPolicy.fittedSize(
+            contentWidth: 300,
+            contentHeight: 200,
+            measure: 720,
+            maximumHeight: 864
+        )
+        #expect(small == NSSize(width: 300, height: 200))
+
+        // Tall portrait: the height cap binds and width shrinks to hold aspect.
+        let portrait = MarkdownFigureFitPolicy.fittedSize(
+            contentWidth: 600,
+            contentHeight: 1_800,
+            measure: 720,
+            maximumHeight: 864
+        )
+        #expect(portrait == NSSize(width: 288, height: 864))
+
+        let degenerate = MarkdownFigureFitPolicy.fittedSize(
+            contentWidth: 0,
+            contentHeight: 0,
+            measure: 720,
+            maximumHeight: 864
+        )
+        #expect(degenerate == NSSize(width: 720, height: 864))
+    }
+
     @Test("Editor session routes every file find action to its surface")
     func editorFindActions() async throws {
         let root = temporaryDirectory("editor-find")

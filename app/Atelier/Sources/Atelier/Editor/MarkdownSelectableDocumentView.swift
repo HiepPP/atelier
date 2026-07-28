@@ -31,7 +31,14 @@ struct MarkdownImageFigureRegion {
     let id: String
     let url: URL
     let attachment: NSTextAttachment
-    let bounds: NSRect
+    let range: NSRange
+}
+
+struct MarkdownMermaidFigureRegion {
+    let id: String
+    let source: String
+    let attachment: NSTextAttachment
+    let range: NSRange
 }
 
 struct MarkdownAttributedDocument {
@@ -40,13 +47,15 @@ struct MarkdownAttributedDocument {
     let codeHighlights: [MarkdownCodeHighlightRequest]
     let codeBlocks: [MarkdownCodeBlockRegion]
     let imageFigures: [MarkdownImageFigureRegion]
+    let mermaidFigures: [MarkdownMermaidFigureRegion]
 
     static let empty = MarkdownAttributedDocument(
         attributedString: NSAttributedString(),
         headings: [],
         codeHighlights: [],
         codeBlocks: [],
-        imageFigures: []
+        imageFigures: [],
+        mermaidFigures: []
     )
 }
 
@@ -128,18 +137,93 @@ nonisolated struct MarkdownRhythm: Equatable, Sendable {
     var lede: CGFloat { unit * 0.75 }
 }
 
+/// Fits decoded figure content to the prose measure without letterboxing it.
+nonisolated enum MarkdownFigureFitPolicy {
+    static func fittedSize(
+        contentWidth: CGFloat,
+        contentHeight: CGFloat,
+        measure: CGFloat,
+        maximumHeight: CGFloat
+    ) -> NSSize {
+        guard contentWidth > 0, contentHeight > 0, measure > 0 else {
+            return NSSize(width: max(1, measure), height: max(1, maximumHeight))
+        }
+        var width = min(measure, contentWidth)
+        var height = width * contentHeight / contentWidth
+        if maximumHeight > 0, height > maximumHeight {
+            height = maximumHeight
+            width = height * contentWidth / contentHeight
+        }
+        return NSSize(
+            width: max(1, width.rounded()),
+            height: max(1, height.rounded())
+        )
+    }
+}
+
 nonisolated enum MarkdownImageFigureLayout {
+    /// Placeholder shape only. A decoded image adopts its own aspect ratio.
     static let aspectRatio: CGFloat = 16 / 9
+    static let maximumHeightScale: CGFloat = 1.2
 
     @MainActor
-    static func bounds(scale: CGFloat) -> NSRect {
+    static func reservedBounds() -> NSRect {
         let width = AtelierMetrics.documentMaxWidth
         return NSRect(
             x: 0,
             y: 0,
             width: width,
-            height: width / aspectRatio
+            height: (width / aspectRatio).rounded()
         )
+    }
+
+    @MainActor
+    static func fittedBounds(pixelWidth: Int, pixelHeight: Int) -> NSRect {
+        let measure = AtelierMetrics.documentMaxWidth
+        let size = MarkdownFigureFitPolicy.fittedSize(
+            contentWidth: CGFloat(pixelWidth),
+            contentHeight: CGFloat(pixelHeight),
+            measure: measure,
+            maximumHeight: measure * maximumHeightScale
+        )
+        return NSRect(origin: .zero, size: size)
+    }
+}
+
+nonisolated enum MarkdownMermaidFigureLayout {
+    static let placeholderAspectRatio: CGFloat = 16 / 9
+    static let maximumHeightScale: CGFloat = 1.4
+    static let loadingMessage = "Rendering Mermaid diagram..."
+    static let failureMessage = "Mermaid diagram could not be rendered."
+
+    @MainActor
+    static var renderWidth: CGFloat {
+        MermaidRenderingPolicy.widthBucket(
+            containerWidth: AtelierMetrics.documentMaxWidth
+        )
+    }
+
+    @MainActor
+    static func reservedBounds() -> NSRect {
+        let width = AtelierMetrics.documentMaxWidth
+        return NSRect(
+            x: 0,
+            y: 0,
+            width: width,
+            height: (width / placeholderAspectRatio).rounded()
+        )
+    }
+
+    @MainActor
+    static func fittedBounds(imageSize: NSSize) -> NSRect {
+        let measure = AtelierMetrics.documentMaxWidth
+        let size = MarkdownFigureFitPolicy.fittedSize(
+            contentWidth: imageSize.width,
+            contentHeight: imageSize.height,
+            measure: measure,
+            maximumHeight: measure * maximumHeightScale
+        )
+        return NSRect(origin: .zero, size: size)
     }
 }
 
@@ -563,6 +647,7 @@ enum MarkdownAttributedDocumentBuilder {
         var codeHighlights: [MarkdownCodeHighlightRequest] = []
         var codeBlocks: [MarkdownCodeBlockRegion] = []
         var imageFigures: [MarkdownImageFigureRegion] = []
+        var mermaidFigures: [MarkdownMermaidFigureRegion] = []
         let bodySize = AtelierFontScaling.snapped(
             AtelierTypography.editorSize * scale,
             displayScale: displayScale
@@ -801,12 +886,13 @@ enum MarkdownAttributedDocumentBuilder {
                 )
 
             case .mermaid(let source):
-                appendMermaid(
+                appendMermaidFigure(
+                    id: AgentMarkdownBlock.blockAnchorID(index),
                     source: source,
-                    error: nil,
                     to: output,
                     bodyFont: bodyFont,
-                    codeFont: codeFont
+                    rhythm: rhythm,
+                    mermaidFigures: &mermaidFigures
                 )
 
             case .invalidMermaid(let source, let error):
@@ -839,7 +925,6 @@ enum MarkdownAttributedDocumentBuilder {
                     sourceDirectoryURL: document.sourceDirectoryURL,
                     to: output,
                     bodyFont: bodyFont,
-                    scale: scale,
                     rhythm: rhythm,
                     imageFigures: &imageFigures
                 )
@@ -885,7 +970,8 @@ enum MarkdownAttributedDocumentBuilder {
             headings: headings,
             codeHighlights: codeHighlights,
             codeBlocks: codeBlocks,
-            imageFigures: imageFigures
+            imageFigures: imageFigures,
+            mermaidFigures: mermaidFigures
         )
     }
 
@@ -1428,11 +1514,11 @@ enum MarkdownAttributedDocumentBuilder {
         sourceDirectoryURL: URL?,
         to output: NSMutableAttributedString,
         bodyFont: NSFont,
-        scale: CGFloat,
         rhythm: MarkdownRhythm,
         imageFigures: inout [MarkdownImageFigureRegion]
     ) {
-        let bounds = MarkdownImageFigureLayout.bounds(scale: scale)
+        // Reserve a stable placeholder box; the decoded image adopts its own aspect.
+        let bounds = MarkdownImageFigureLayout.reservedBounds()
         let attachment = NSTextAttachment()
         attachment.bounds = bounds
         attachment.image = MarkdownImageFigureRenderer.image(
@@ -1445,6 +1531,7 @@ enum MarkdownAttributedDocumentBuilder {
             after: altText.isEmpty ? rhythm.paragraph : AtelierMetrics.spaceXS
         )
         paragraph.alignment = .center
+        let figureLocation = output.length
         let figure = NSMutableAttributedString(attachment: attachment)
         figure.addAttribute(
             .paragraphStyle,
@@ -1485,7 +1572,53 @@ enum MarkdownAttributedDocumentBuilder {
                 id: id,
                 url: url,
                 attachment: attachment,
-                bounds: bounds
+                range: NSRange(location: figureLocation, length: figure.length)
+            )
+        )
+    }
+
+    /// Reserves a diagram card in the shared text storage. The rendered Mermaid
+    /// image replaces the placeholder in place, without rebuilding the document.
+    private static func appendMermaidFigure(
+        id: String,
+        source: String,
+        to output: NSMutableAttributedString,
+        bodyFont: NSFont,
+        rhythm: MarkdownRhythm,
+        mermaidFigures: inout [MarkdownMermaidFigureRegion]
+    ) {
+        let bounds = MarkdownMermaidFigureLayout.reservedBounds()
+        let attachment = NSTextAttachment()
+        attachment.bounds = bounds
+        attachment.image = MarkdownImageFigureRenderer.image(
+            size: bounds.size,
+            content: nil,
+            message: MarkdownMermaidFigureLayout.loadingMessage
+        )
+        let paragraph = paragraphStyle(
+            lineSpacing: 0,
+            before: rhythm.paragraph,
+            after: rhythm.paragraph
+        )
+        paragraph.alignment = .center
+        let figureLocation = output.length
+        let figure = NSMutableAttributedString(attachment: attachment)
+        figure.addAttribute(
+            .paragraphStyle,
+            value: paragraph,
+            range: NSRange(location: 0, length: figure.length)
+        )
+        output.append(figure)
+        output.append(NSAttributedString(string: "\n", attributes: [
+            .font: bodyFont,
+            .paragraphStyle: paragraph
+        ]))
+        mermaidFigures.append(
+            MarkdownMermaidFigureRegion(
+                id: id,
+                source: source,
+                attachment: attachment,
+                range: NSRange(location: figureLocation, length: figure.length)
             )
         )
     }
@@ -2119,7 +2252,11 @@ nonisolated struct MarkdownDecodedImage: Sendable {
 
 @MainActor
 private enum MarkdownImageFigureRenderer {
-    static func image(size: NSSize, content: CGImage?) -> NSImage {
+    static func image(
+        size: NSSize,
+        content: CGImage?,
+        message: String? = nil
+    ) -> NSImage {
         let width = max(1, Int(size.width.rounded(.up)))
         let height = max(1, Int(size.height.rounded(.up)))
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
@@ -2174,6 +2311,23 @@ private enum MarkdownImageFigureRenderer {
             context.clip()
             context.interpolationQuality = .high
             context.draw(content, in: fitted)
+            context.restoreGState()
+        } else if let message {
+            let label = NSAttributedString(
+                string: message,
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: AtelierTypography.caption),
+                    .foregroundColor: AppKitThemeAdapter.secondary
+                ]
+            )
+            let line = CTLineCreateWithAttributedString(label)
+            let labelBounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
+            context.saveGState()
+            context.textPosition = CGPoint(
+                x: frame.midX - labelBounds.width / 2,
+                y: frame.midY - labelBounds.height / 2
+            )
+            CTLineDraw(line, context)
             context.restoreGState()
         }
 
@@ -2505,6 +2659,8 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
         private var highlightTask: Task<Void, Never>?
         private var imageGeneration = 0
         private var imageTask: Task<Void, Never>?
+        private var mermaidGeneration = 0
+        private var mermaidTask: Task<Void, Never>?
         private var lastReportedProgressPixel = -1
         private var lastViewportWidth: CGFloat = 0
         private var isActive = false
@@ -2565,6 +2721,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                     usesDarkAppearance: usesDarkAppearance
                 )
                 scheduleImageLoads(rendered.imageFigures)
+                scheduleMermaidRenders(rendered.mermaidFigures)
             }
 
             if appliedJumpRequest != jumpRequest {
@@ -2582,6 +2739,9 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             imageGeneration += 1
             imageTask?.cancel()
             imageTask = nil
+            mermaidGeneration += 1
+            mermaidTask?.cancel()
+            mermaidTask = nil
             for control in codeCopyControls.values {
                 control.removeFromSuperview()
             }
@@ -2705,17 +2865,125 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             to figure: MarkdownImageFigureRegion,
             generation: Int
         ) {
-            guard generation == imageGeneration,
-                  let scrollView,
-                  let textView else {
+            guard generation == imageGeneration else { return }
+            let bounds = MarkdownImageFigureLayout.fittedBounds(
+                pixelWidth: decoded.width,
+                pixelHeight: decoded.height
+            )
+            applyFigure(
+                image: MarkdownImageFigureRenderer.image(
+                    size: bounds.size,
+                    content: decoded.cgImage()
+                ),
+                bounds: bounds,
+                attachment: figure.attachment,
+                range: figure.range
+            )
+        }
+
+        private func scheduleMermaidRenders(
+            _ figures: [MarkdownMermaidFigureRegion]
+        ) {
+            mermaidGeneration += 1
+            let generation = mermaidGeneration
+            mermaidTask?.cancel()
+            mermaidTask = nil
+            guard !figures.isEmpty else { return }
+            let width = MarkdownMermaidFigureLayout.renderWidth
+            mermaidTask = Task { @MainActor [weak self] in
+                for figure in figures {
+                    guard !Task.isCancelled else { return }
+                    do {
+                        let rendered = try await MermaidImageCache.shared.image(
+                            source: figure.source,
+                            width: width
+                        )
+                        guard !Task.isCancelled else { return }
+                        self?.applyMermaid(
+                            rendered,
+                            to: figure,
+                            generation: generation
+                        )
+                    } catch is CancellationError {
+                        // An evicted queue slot is not a render failure: keep the
+                        // placeholder so a later pass can still draw the diagram.
+                        return
+                    } catch {
+                        guard !Task.isCancelled else { return }
+                        self?.applyMermaidFailure(
+                            to: figure,
+                            generation: generation
+                        )
+                    }
+                }
+            }
+        }
+
+        private func applyMermaid(
+            _ rendered: NSImage,
+            to figure: MarkdownMermaidFigureRegion,
+            generation: Int
+        ) {
+            guard generation == mermaidGeneration else { return }
+            let bounds = MarkdownMermaidFigureLayout.fittedBounds(
+                imageSize: rendered.size
+            )
+            applyFigure(
+                image: MarkdownImageFigureRenderer.image(
+                    size: bounds.size,
+                    content: rendered.cgImage(
+                        forProposedRect: nil,
+                        context: nil,
+                        hints: nil
+                    )
+                ),
+                bounds: bounds,
+                attachment: figure.attachment,
+                range: figure.range
+            )
+        }
+
+        private func applyMermaidFailure(
+            to figure: MarkdownMermaidFigureRegion,
+            generation: Int
+        ) {
+            guard generation == mermaidGeneration else { return }
+            let bounds = figure.attachment.bounds
+            applyFigure(
+                image: MarkdownImageFigureRenderer.image(
+                    size: bounds.size,
+                    content: nil,
+                    message: MarkdownMermaidFigureLayout.failureMessage
+                ),
+                bounds: bounds,
+                attachment: figure.attachment,
+                range: figure.range
+            )
+        }
+
+        /// Swaps one attachment in place: re-layout only that character range and
+        /// hold the reader's scroll origin while the figure changes height.
+        private func applyFigure(
+            image: NSImage,
+            bounds: NSRect,
+            attachment: NSTextAttachment,
+            range: NSRange
+        ) {
+            guard let scrollView,
+                  let textView,
+                  let layoutManager = textView.layoutManager,
+                  let textStorage = textView.textStorage,
+                  NSMaxRange(range) <= textStorage.length else {
                 return
             }
             let origin = scrollView.contentView.bounds.origin
-            figure.attachment.image = MarkdownImageFigureRenderer.image(
-                size: figure.bounds.size,
-                content: decoded.cgImage()
+            attachment.image = image
+            attachment.bounds = bounds
+            layoutManager.invalidateLayout(
+                forCharacterRange: range,
+                actualCharacterRange: nil
             )
-            figure.attachment.bounds = figure.bounds
+            layoutManager.invalidateDisplay(forCharacterRange: range)
             textView.needsDisplay = true
             scrollView.contentView.scroll(to: origin)
             scrollView.reflectScrolledClipView(scrollView.contentView)

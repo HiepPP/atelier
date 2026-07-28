@@ -986,8 +986,14 @@ struct AgentResponsesTests {
         #expect(text.contains("let value = 1"))
         #expect(text.contains("Name"))
         #expect(text.contains("Alpha"))
-        #expect(text.contains("MERMAID - SOURCE FALLBACK"))
-        #expect(text.contains("graph TD"))
+        // A parseable diagram becomes a figure region, not inline source text.
+        #expect(!text.contains("MERMAID - SOURCE FALLBACK"))
+        #expect(rendered.mermaidFigures.map(\.source) == ["graph TD\nA --> B"])
+        #expect(rendered.mermaidFigures.first?.range.length == 1)
+        #expect(
+            rendered.mermaidFigures.first?.attachment.bounds
+                == MarkdownMermaidFigureLayout.reservedBounds()
+        )
         #expect(rendered.codeHighlights.map(\.source) == ["let value = 1"])
     }
 
@@ -1898,14 +1904,21 @@ struct AgentResponsesTests {
         #expect(rendered.imageFigures.count == 1)
         guard let region = rendered.imageFigures.first else { return }
         #expect(region.url == localURL.standardizedFileURL)
-        #expect(region.attachment.bounds == region.bounds)
+        #expect(region.attachment.bounds == MarkdownImageFigureLayout.reservedBounds())
+        #expect(region.range.length == 1)
         #expect(rendered.attributedString.string.contains("Exact caption"))
         let decoded = await MarkdownLocalImageLoader.load(region.url)
         #expect(decoded?.width == 1)
         #expect(decoded?.height == 1)
         #expect(decoded?.pixels.count == 4)
         #expect(decoded?.cgImage() != nil)
-        #expect(region.attachment.bounds == region.bounds)
+        // Decoded size wins over the reservation, and small art is never upscaled.
+        #expect(
+            MarkdownImageFigureLayout.fittedBounds(
+                pixelWidth: 1,
+                pixelHeight: 1
+            ) == NSRect(x: 0, y: 0, width: 1, height: 1)
+        )
 
         let cancelledLoad = Task {
             await MarkdownLocalImageLoader.load(region.url)

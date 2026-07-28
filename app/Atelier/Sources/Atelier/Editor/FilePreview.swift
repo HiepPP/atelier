@@ -101,6 +101,24 @@ struct MarkdownFileTabView: View {
         return document.blocks.isEmpty
     }
 
+    /// Content-driven mount. The width breakpoint only changes opacity, so a
+    /// resize never adds or removes a view during AppKit's layout pass.
+    private var hasSectionBar: Bool {
+        document.outline.count >= 2
+    }
+
+    private var showsStickySection: Bool {
+        showsPreview && MarkdownStickySectionPolicy.showsBar(
+            headingCount: document.outline.count,
+            showsOutline: showsOutline
+        )
+    }
+
+    private var activeSectionTitle: String? {
+        document.outline.first { $0.id == selectedOutlineID }?.title
+            ?? document.outline.first?.title
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             ZStack {
@@ -133,6 +151,15 @@ struct MarkdownFileTabView: View {
                 if showsPreview, showsEmptyPreview {
                     MarkdownEmptyPreview()
                         .zIndex(2)
+                }
+            }
+            .overlay(alignment: .top) {
+                if hasSectionBar, let activeSectionTitle {
+                    MarkdownStickySectionBar(
+                        title: activeSectionTitle,
+                        readingProgress: readingProgress
+                    )
+                    .opacity(showsStickySection ? 1 : 0)
                 }
             }
 
@@ -218,6 +245,11 @@ private struct MarkdownFileDocumentView: View {
         )
     }
 
+    private var activeSectionTitle: String? {
+        document.outline.first { $0.id == selectedOutlineID }?.title
+            ?? document.outline.first?.title
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             ZStack {
@@ -230,6 +262,20 @@ private struct MarkdownFileDocumentView: View {
                 )
                 if document.blocks.isEmpty {
                     MarkdownEmptyPreview()
+                }
+            }
+            .overlay(alignment: .top) {
+                if document.outline.count >= 2, let activeSectionTitle {
+                    MarkdownStickySectionBar(
+                        title: activeSectionTitle,
+                        readingProgress: readingProgress
+                    )
+                    .opacity(
+                        MarkdownStickySectionPolicy.showsBar(
+                            headingCount: document.outline.count,
+                            showsOutline: showsOutline
+                        ) ? 1 : 0
+                    )
                 }
             }
             if showsOutline {
@@ -335,6 +381,59 @@ nonisolated enum MarkdownSourceOutlinePolicy {
             entryIndex += 1
         }
         return result
+    }
+}
+
+enum MarkdownStickySectionPolicy {
+    static let height: CGFloat = 28
+    static let progressHeight: CGFloat = 2
+
+    /// The outline rail already carries section state; the bar only covers the
+    /// narrow layouts where that rail is hidden.
+    static func showsBar(headingCount: Int, showsOutline: Bool) -> Bool {
+        headingCount >= 2 && !showsOutline
+    }
+}
+
+/// Passive chrome: mirrors the values the native surface already reports, so it
+/// never parses, measures, or animates during document scroll.
+private struct MarkdownStickySectionBar: View {
+    let title: String
+    let readingProgress: CGFloat
+
+    var body: some View {
+        Text(verbatim: title)
+            .atelierFont(size: AtelierTypography.micro, weight: .semibold)
+            .foregroundStyle(.secondary)
+            .tracking(0.4)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, AtelierMetrics.spaceL)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: MarkdownStickySectionPolicy.height)
+            .background(.ultraThinMaterial)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(AtelierTheme.border)
+                    .frame(height: AtelierTheme.strokeHairline)
+            }
+            .overlay(alignment: .bottomLeading) {
+                GeometryReader { geometry in
+                    Rectangle()
+                        .fill(AtelierTheme.accent)
+                        .frame(
+                            width: geometry.size.width
+                                * min(1, max(0, readingProgress)),
+                            height: MarkdownStickySectionPolicy.progressHeight
+                        )
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                }
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 

@@ -809,7 +809,8 @@ Persistence boundaries:
   and run the page's scripts so interactive local previews render correctly.
 - Render Markdown Preview as one read-only, selectable `NSTextView` backed by one `NSTextStorage`.
   Keep every rendered block in that single native document so selection can cross headings,
-  paragraphs, lists, quotes, code, tables, and Mermaid fallback content. Preserve native `Cmd-C`.
+  paragraphs, lists, quotes, code, tables, Mermaid figures, and Mermaid source fallback content.
+  Preserve native `Cmd-C`.
 - Render Markdown file-preview body text at `editorSize` so Source and Preview share the same
   base text size. Center a `documentMaxWidth` text container, use roomier line and section spacing,
   and render H1/H2 with the editorial serif face. Give H1 and H2 tighter display tracking; render
@@ -927,10 +928,24 @@ Persistence boundaries:
   Use `0.5u` paragraph spacing, H3 `1u` before and `0.5u` after, H1 and H2 `2u` before and `0.75u`
   after, divider `1.5u`, code card `1u`, and lede `0.75u`. Resolve rhythm during document build.
 - Render an image-only Markdown line as one stable native figure when it resolves to a local file.
-  Resolve relative paths from the Markdown file directory. Never load remote images. Reserve final
-  attachment bounds before off-main decoding, preserve those bounds after decode, cap the figure at
-  `documentMaxWidth`, and show source alt text exactly as its caption. Missing images keep the same
-  quiet bordered placeholder. Never invent captions.
+  Resolve relative paths from the Markdown file directory. Never load remote images. Reserve a
+  `16:9` placeholder at `documentMaxWidth` before off-main decoding, then adopt the decoded image's
+  own aspect ratio: never letterbox a portrait or small image inside a fixed landscape box. Show
+  source alt text exactly as its caption. Missing images keep the same quiet bordered placeholder.
+  Never invent captions.
+- Size a decoded figure from its pixel dimensions read as points. Cap width at `documentMaxWidth`,
+  cap height at `1.2` times `documentMaxWidth`, and shrink width to preserve aspect when the height
+  cap binds. Keep an image smaller than the measure at its own size instead of upscaling it.
+- Resolve final figure bounds once per decode, then invalidate layout for that attachment's
+  character range only. Never rebuild the attributed document, and restore the scroll origin after
+  the figure resizes.
+- Render a fenced `mermaid` block in Markdown file Preview as one native diagram figure inside the
+  same text storage, using the same reserve-then-swap attachment path as image figures and the same
+  shared render cache as the agent transcript. Render off the main draw path, key the cache by
+  source and render width, and never rebuild the attributed document to show a diagram.
+- Show a quiet bordered card with a centered secondary status label while a diagram renders and when
+  a render fails. A Mermaid block whose source fails to parse keeps the labelled source fallback
+  with its parser message so the author can still read and fix the diagram.
 - Collect one-line Markdown footnote definitions without rendering their source syntax. Number
   resolved references by first-reference order, render accent superscript numbers, preserve unresolved
   references literally, and append one quiet Notes section after content. Keep Notes out of outline.
@@ -939,6 +954,16 @@ Persistence boundaries:
 - Show passive reading progress as a one-pixel accent hairline on the outline rail's leading edge.
   Derive it from the existing native bounds observer, clamp it to zero through one, and report only
   when the visible rail-pixel value changes. Do not animate passive updates or rebuild the document.
+- When the On This Page rail is hidden and the document has two or more headings, pin a quiet
+  section bar to the top of the Markdown Preview surface. Show the active heading title in secondary
+  micro type over a translucent material with a hairline bottom edge, and draw the same reading
+  progress as a full-width accent line along that edge.
+- Keep the section bar passive: reuse the existing active-heading and reading-progress values, never
+  hit-test it, never animate it during passive scroll, and never show it in Source mode or beside a
+  visible outline rail.
+- Mount the section bar from heading count alone and carry it as an overlay on the preview surface.
+  Crossing the outline width breakpoint changes only its opacity, so a resize never inserts or
+  removes a view during a layout pass and the bar never contributes to the measured column width.
 - Put the Source/Preview toggle in the trailing editor action group. Keep find and word-wrap
   commands scoped to Source mode.
 - Use `Cmd-R` to toggle Source and Preview for the active `.md` or `.html` file. Disable it for
