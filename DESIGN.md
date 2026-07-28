@@ -728,12 +728,35 @@ Persistence boundaries:
 - Use a Graphite Observatory treatment: matte alloy surfaces, compact editorial telemetry, and
   restrained workflow color. Do not add gradients, glow, or decorative glass.
 - Label the header `Watchtower`. Keep refresh and close as keyboard-accessible icon controls.
-- Merge plan identity, progress, and task counts into one continuous summary surface. Do not stack
-  separate equal-weight plan, progress, and count cards.
+- Acknowledge a refresh with one short turn of the refresh icon so a no-change reload is still
+  visible. Skip the turn under Reduce Motion.
+- Order the panel as plan identity, file actions, task groups, commands, then Archive. Tasks are the
+  content of the panel and must precede the command and Archive surfaces.
+- Merge plan identity and progress into one compact summary surface. Show the title, plan status,
+  slug, and updated date, then one telemetry line. Do not stack separate equal-weight plan,
+  progress, and count cards.
+- State each count exactly once. The summary carries the segmented strip and one `done/total` ratio
+  with its percentage. Per-state counts belong to their task-group headers, not to a separate cell
+  row and not to an oversized display metric.
+- Keep the plan title the largest text in the panel. Render the ratio and percentage as compact
+  monospaced digits, never as a display-scale number.
 - Show one segmented workflow strip inside the summary. Segment widths represent Done, Active,
   Blocked, and Todo counts. Keep an accessible text value for the complete distribution.
+- Give the strip the full card width and place the completion readout on the line above it. Do not
+  squeeze the strip and the readout onto one line.
+- Fill only the Done band solid. Render every pending band as a tinted wash with a hairline edge, so
+  a plan with nothing done reads as composition instead of a filled progress bar. Name each band and
+  its count in a tooltip.
+- Show the slug without its date prefix and the updated date as a bare compact date. Keep the
+  complete slug and an explicit updated label in tooltips and accessibility text. Truncate the slug
+  at the tail, never in the middle.
 - Use the existing accent for Active. Use `workflowDone`, `workflowTodo`, and `workflowBlocked` for
   their matching plan states. Keep Unknown and Archive neutral.
+- Offer file actions for `NEXT` and `CONTEXT` only. Resolve their paths when the plan refreshes and
+  disable an action whose file is absent. Never open a path that does not exist. Do not duplicate
+  the Archive disclosure as a file action.
+- Give every task group its own disclosure state. Open every group by default so the whole plan is
+  visible without a click. Keep each group independently collapsible.
 - Apply workflow color to task groups through one thin leading rule and a 6% header wash. Render
   every task as a separate neutral card with compact spacing.
 - Make the complete task card one button that opens its specification. Put the task ID and status
@@ -742,14 +765,17 @@ Persistence boundaries:
 - Render status labels with a restrained filled wash and semantic text. Never rely on color alone.
 - Keep task IDs and archive links neutral at rest. Use normal hover and focus affordances instead of
   borrowing Git teal.
-- When no plan is active, merge the empty-state message and commands into one launch surface. Make
-  `/watchtower new` the single accent-filled primary action instead of stacking two equal cards.
-- Render commands inside one matte graphite deck in both empty and active-plan states. Use dedicated
-  rail foreground tokens on that deck, then reserve terracotta for the primary command and hover.
-- Present remaining commands as a compact two-column matrix of flat rows. Keep them graphite at rest,
-  with accent hover feedback and `workflowDone` copy confirmation.
-- Render Archive as one quiet browser below the workflow surface. Use one integrated disclosure
-  heading and full-width plan rows. Do not repeat `Archive` or `SAVED` inside every row.
+- Render commands as one matte graphite deck behind a single disclosure, with identical content in
+  the empty and active-plan states. Open the deck by default. Use dedicated rail foreground tokens
+  on that deck, then reserve terracotta for the primary command and hover.
+- Keep `/watchtower new` the single accent-filled primary action at the top of the deck. Present the
+  remaining commands as a compact two-column matrix of flat rows, graphite at rest, with accent
+  hover feedback and `workflowDone` copy confirmation.
+- When no plan is active, state that in one quiet notice above the command deck. Do not restate the
+  empty message inside the deck.
+- Render Archive as one quiet browser below the command deck, open by default. Use one integrated
+  disclosure heading and full-width plan rows. Do not repeat `Archive` or `SAVED` inside every row.
+- Count plans with correct singular and plural wording in every disclosure heading.
 - Split date-prefixed archive slugs into a readable plan title and compact monospaced date. Stack
   the date below the title instead of reserving a fixed date column. Keep the complete slug in
   accessibility labels and file-opening behavior.

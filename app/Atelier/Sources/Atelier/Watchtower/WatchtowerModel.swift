@@ -28,6 +28,8 @@ final class WatchtowerModel {
     private(set) var rootDir: String?
     private(set) var plan: WatchtowerPlan?
     private(set) var archive: [WatchtowerArchivePlan] = []
+    // Resolved on refresh, never in a view body, so the panel never stats the disk while drawing.
+    private(set) var contextPath: String?
 
     // Loaders are injected for deterministic tests; defaults use the parser.
     @ObservationIgnored private let planLoader: (String) -> WatchtowerPlan?
@@ -55,13 +57,21 @@ final class WatchtowerModel {
     @discardableResult
     func refresh() -> Bool {
         guard let root = rootDir else {
-            return apply(plan: nil, archive: [])
+            return apply(plan: nil, archive: [], contextPath: nil)
         }
-        return apply(plan: planLoader(root), archive: archiveLoader(root))
+        return apply(
+            plan: planLoader(root),
+            archive: archiveLoader(root),
+            contextPath: Self.existingContextPath(root: root)
+        )
     }
 
     // Assign only changed values so @Observable does not fire on a no-op refresh.
-    private func apply(plan newPlan: WatchtowerPlan?, archive newArchive: [WatchtowerArchivePlan]) -> Bool {
+    private func apply(
+        plan newPlan: WatchtowerPlan?,
+        archive newArchive: [WatchtowerArchivePlan],
+        contextPath newContextPath: String?
+    ) -> Bool {
         var changed = false
         if newPlan != plan {
             plan = newPlan
@@ -71,7 +81,19 @@ final class WatchtowerModel {
             archive = newArchive
             changed = true
         }
+        if newContextPath != contextPath {
+            contextPath = newContextPath
+            changed = true
+        }
         return changed
+    }
+
+    // nil when the workspace has no watchtower/CONTEXT.md, so the panel can disable the action
+    // instead of opening a path that does not exist.
+    private static func existingContextPath(root: String) -> String? {
+        let path = ((root as NSString).appendingPathComponent("watchtower") as NSString)
+            .appendingPathComponent("CONTEXT.md")
+        return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 
     // MARK: - Derived state

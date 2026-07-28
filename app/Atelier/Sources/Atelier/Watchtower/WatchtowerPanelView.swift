@@ -6,11 +6,43 @@ private struct WatchtowerWorkflowSegment: Identifiable {
     let label: String
     let count: Int
     let tint: Color
+    // Only the Done band is filled solid; every pending band renders as a wash.
+    var isComplete = false
 }
 
-// Read-only Watchtower panel: header, plan summary, workflow distribution,
-// file actions, command chips, and task / Archive sections. Task ids and archive
-// rows are clickable and jump to the file via onOpenFile.
+// One pass over the tracker. The summary strip and the group headers read the same
+// counts instead of re-filtering the task array once per state per body evaluation.
+private struct WatchtowerGroupedTasks {
+    var active: [WatchtowerTask] = []
+    var blocked: [WatchtowerTask] = []
+    var todo: [WatchtowerTask] = []
+    var done: [WatchtowerTask] = []
+
+    init(_ tasks: [WatchtowerTask]) {
+        for task in tasks {
+            switch WatchtowerTaskGroup(status: task.status) {
+            case .active: active.append(task)
+            case .blocked: blocked.append(task)
+            case .todo: todo.append(task)
+            case .done: done.append(task)
+            case nil: continue
+            }
+        }
+    }
+
+    func tasks(in group: WatchtowerTaskGroup) -> [WatchtowerTask] {
+        switch group {
+        case .active: active
+        case .blocked: blocked
+        case .todo: todo
+        case .done: done
+        }
+    }
+}
+
+// Read-only Watchtower panel, ordered plan identity -> file actions -> task groups ->
+// commands -> Archive. Task ids and archive rows are clickable and jump to the file via
+// onOpenFile.
 //
 // Crash-rule note: mount this as an overlay side panel, never as an HSplitView
 // child that can collapse to zero. The view is pure - it derives layout from the
@@ -20,23 +52,32 @@ struct WatchtowerPanelView: View {
     var onOpenFile: (URL) -> Void = { _ in }
     var onClose: () -> Void = {}
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    // Every section opens by default; the panel shows the whole plan without a click.
+    @State private var activeExpanded = true
+    @State private var blockedExpanded = true
     @State private var todoExpanded = true
+    @State private var doneExpanded = true
     @State private var archiveExpanded = true
+    @State private var commandsExpanded = true
+    @State private var refreshTurns = 0
 
     var body: some View {
+        let grouped = WatchtowerGroupedTasks(model.tasks)
         VStack(spacing: 0) {
             header
             separator
             ScrollView {
                 VStack(alignment: .leading, spacing: AtelierMetrics.spaceM) {
                     if model.hasPlan {
-                        planSummaryCard
+                        summaryCard(grouped)
                         fileActions
-                        commandsCard
-                        taskGroups
+                        taskGroups(grouped)
                     } else {
-                        launchSurface
+                        emptyNotice
                     }
+                    commandsSection
                     if !model.archive.isEmpty {
                         archiveSection
                     }
@@ -56,7 +97,7 @@ struct WatchtowerPanelView: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
             Spacer(minLength: 0)
-            iconButton("arrow.clockwise", label: "Refresh plan") { model.refresh() }
+            refreshButton
             Rectangle()
                 .fill(AtelierTheme.border)
                 .frame(width: AtelierTheme.strokeHairline, height: AtelierMetrics.regularIconSize)
@@ -64,6 +105,18 @@ struct WatchtowerPanelView: View {
         }
         .padding(.horizontal, AtelierMetrics.spaceL)
         .frame(height: AtelierMetrics.panelHeaderHeight)
+    }
+
+    // One short turn acknowledges a refresh that finds no change. Reduce Motion skips it.
+    private var refreshButton: some View {
+        iconButton("arrow.clockwise", label: "Refresh plan") {
+            model.refresh()
+            if !reduceMotion {
+                refreshTurns += 1
+            }
+        }
+        .rotationEffect(.degrees(Double(refreshTurns) * 360))
+        .animation(.easeInOut(duration: 0.45), value: refreshTurns)
     }
 
     private func iconButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
@@ -82,138 +135,147 @@ struct WatchtowerPanelView: View {
 
     // MARK: - Plan summary
 
-    private var planSummaryCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
-                HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceS) {
-                    Text(model.title.isEmpty ? "Untitled plan" : model.title)
-                        .atelierFont(size: AtelierTypography.headline, weight: .semibold)
-                        .lineLimit(2)
-                    Spacer(minLength: 0)
-                    planStatusBadge
-                }
-                HStack(spacing: AtelierMetrics.spaceS) {
-                    Text(model.plan?.slug ?? "")
-                        .atelierFont(size: AtelierTypography.caption, design: .monospaced)
+    private func summaryCard(_ grouped: WatchtowerGroupedTasks) -> some View {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+            HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceS) {
+                Text(model.title.isEmpty ? "Untitled plan" : model.title)
+                    .atelierFont(size: AtelierTypography.headline, weight: .semibold)
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+                planStatusBadge
+            }
+            HStack(spacing: AtelierMetrics.spaceM) {
+                Text(shortSlug)
+                    .atelierFont(size: AtelierTypography.caption, design: .monospaced)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(model.plan?.slug ?? "")
+                    .accessibilityLabel("Plan slug \(model.plan?.slug ?? "")")
+                Spacer(minLength: 0)
+                if let updated = model.plan?.updated, !updated.isEmpty {
+                    Text(updated)
+                        .atelierFont(size: AtelierTypography.micro, design: .monospaced)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: AtelierMetrics.spaceM)
-                    if let updated = model.plan?.updated, !updated.isEmpty {
-                        Text("Updated \(updated)")
-                            .atelierFont(size: AtelierTypography.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+                        .fixedSize()
+                        .help("Updated \(updated)")
+                        .accessibilityLabel("Updated \(updated)")
                 }
             }
-            .padding(AtelierMetrics.spaceM)
-
-            summaryDivider
-
-            VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("\(Int((model.progress * 100).rounded()))%")
-                        .atelierFont(size: AtelierTypography.display, weight: .bold)
-                        .foregroundStyle(AtelierTheme.accent)
-                        .monospacedDigit()
-                    Spacer(minLength: 0)
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("Completion")
-                            .atelierFont(size: AtelierTypography.micro, weight: .medium)
-                            .foregroundStyle(.secondary)
-                        Text("\(model.doneCount) of \(model.totalCount) done")
-                            .atelierFont(size: AtelierTypography.caption)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                }
-                workflowStrip
+            VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
+                completionReadout
+                workflowStrip(grouped)
             }
-            .padding(AtelierMetrics.spaceM)
-
-            summaryDivider
-
-            HStack(spacing: 0) {
-                countCell("Done", model.doneCount, tint: AtelierTheme.workflowDone)
-                countDivider
-                countCell("Active", model.tasks(in: .active).count, tint: AtelierTheme.accent)
-                countDivider
-                countCell("Blocked", model.blockedIds.count, tint: AtelierTheme.workflowBlocked)
-                countDivider
-                countCell("Todo", model.tasks(in: .todo).count, tint: AtelierTheme.workflowTodo)
-            }
+            .padding(.top, 2)
         }
+        .padding(AtelierMetrics.spaceM)
         .frame(maxWidth: .infinity, alignment: .leading)
         .atelierCard(radius: AtelierTheme.panelRadius, fill: AtelierTheme.raised)
     }
 
-    private var workflowStrip: some View {
-        GeometryReader { proxy in
-            let segments = workflowSegments.filter { $0.count > 0 }
+    // The slug repeats its own date prefix next to the updated date, so drop it here
+    // and keep the complete slug in the tooltip and the accessibility label.
+    private var shortSlug: String {
+        let slug = model.plan?.slug ?? ""
+        let prefix = slug.prefix(8)
+        guard prefix.count == 8, prefix.allSatisfy(\.isNumber) else { return slug }
+        return String(slug.dropFirst(8)).trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
+    }
+
+    private var completionReadout: some View {
+        HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceXS) {
+            Text(percentText)
+                .atelierFont(size: AtelierTypography.label, weight: .semibold)
+                .foregroundStyle(.primary)
+                .monospacedDigit()
+            Text("\(model.doneCount) of \(model.totalCount) done")
+                .atelierFont(size: AtelierTypography.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(model.doneCount) of \(model.totalCount) tasks done, \(percentText)")
+    }
+
+    private var percentText: String {
+        "\(Int((model.progress * 100).rounded()))%"
+    }
+
+    // Done is the only solid band. Pending states stay washed with a hairline edge so a plan
+    // with nothing done reads as composition, never as a filled progress bar.
+    private func workflowStrip(_ grouped: WatchtowerGroupedTasks) -> some View {
+        let segments = workflowSegments(grouped).filter { $0.count > 0 }
+        return GeometryReader { proxy in
             let gapCount = max(0, segments.count - 1)
             let availableWidth = max(0, proxy.size.width - CGFloat(gapCount * 2))
             HStack(spacing: 2) {
                 ForEach(segments) { segment in
-                    RoundedRectangle(cornerRadius: 2, style: .continuous)
-                        .fill(segment.tint)
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(segment.isComplete ? segment.tint : segment.tint.opacity(0.22))
+                        .overlay {
+                            if !segment.isComplete {
+                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                    .stroke(
+                                        segment.tint.opacity(0.48),
+                                        lineWidth: AtelierTheme.strokeControl
+                                    )
+                            }
+                        }
                         .frame(
                             width: availableWidth
                                 * CGFloat(segment.count)
                                 / CGFloat(max(model.totalCount, 1))
                         )
+                        .help("\(segment.label) \(segment.count)")
                 }
             }
         }
-        .frame(height: 6)
+        .frame(height: 10)
         .background(
-            AtelierTheme.border.opacity(0.45),
-            in: RoundedRectangle(cornerRadius: 2, style: .continuous)
+            AtelierTheme.border.opacity(0.32),
+            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Workflow distribution")
-        .accessibilityValue(workflowDistributionText)
+        .accessibilityValue(workflowDistributionText(grouped))
     }
 
-    private var workflowSegments: [WatchtowerWorkflowSegment] {
+    private func workflowSegments(_ grouped: WatchtowerGroupedTasks) -> [WatchtowerWorkflowSegment] {
         [
             WatchtowerWorkflowSegment(
                 id: "done",
                 label: "Done",
-                count: model.doneCount,
-                tint: AtelierTheme.workflowDone
+                count: grouped.done.count,
+                tint: AtelierTheme.workflowDone,
+                isComplete: true
             ),
             WatchtowerWorkflowSegment(
                 id: "active",
                 label: "Active",
-                count: model.tasks(in: .active).count,
+                count: grouped.active.count,
                 tint: AtelierTheme.accent
             ),
             WatchtowerWorkflowSegment(
                 id: "blocked",
                 label: "Blocked",
-                count: model.blockedIds.count,
+                count: grouped.blocked.count,
                 tint: AtelierTheme.workflowBlocked
             ),
             WatchtowerWorkflowSegment(
                 id: "todo",
                 label: "Todo",
-                count: model.tasks(in: .todo).count,
+                count: grouped.todo.count,
                 tint: AtelierTheme.workflowTodo
             ),
         ]
     }
 
-    private var workflowDistributionText: String {
-        workflowSegments
+    private func workflowDistributionText(_ grouped: WatchtowerGroupedTasks) -> String {
+        workflowSegments(grouped)
             .map { "\($0.label) \($0.count)" }
             .joined(separator: ", ")
-    }
-
-    private var summaryDivider: some View {
-        Rectangle()
-            .fill(AtelierTheme.border)
-            .frame(height: AtelierTheme.strokeHairline)
     }
 
     private var planStatusBadge: some View {
@@ -251,144 +313,99 @@ struct WatchtowerPanelView: View {
         }
     }
 
-    private func countCell(_ label: String, _ value: Int, tint: Color) -> some View {
-        VStack(spacing: 2) {
-            Text("\(value)")
-                .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                .foregroundStyle(.primary)
-                .monospacedDigit()
-            Text(label.uppercased())
-                .atelierFont(size: AtelierTypography.micro, weight: .medium)
-                .tracking(0.4)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, AtelierMetrics.spaceS)
-        .overlay(alignment: .top) {
-            Capsule()
-                .fill(tint)
-                .frame(width: AtelierMetrics.regularIconSize, height: 2)
-                .accessibilityHidden(true)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label) \(value)")
-    }
-
-    private var countDivider: some View {
-        Rectangle()
-            .fill(AtelierTheme.border)
-            .frame(width: AtelierTheme.strokeHairline, height: AtelierMetrics.regularIconSize)
-    }
-
     // MARK: - File actions
 
     private var fileActions: some View {
         HStack(spacing: AtelierMetrics.spaceS) {
-            fileActionButton("NEXT", emphasized: true, path: model.plan?.manifestPath)
-            fileActionButton("CONTEXT", emphasized: true, path: contextPath)
-            fileActionButton("Archive", emphasized: false, path: model.archive.first?.manifestPath)
+            WatchtowerFileActionButton(title: "NEXT", path: model.plan?.manifestPath, onOpen: open)
+            WatchtowerFileActionButton(title: "CONTEXT", path: model.contextPath, onOpen: open)
         }
     }
 
-    private func fileActionButton(_ title: String, emphasized: Bool, path: String?) -> some View {
-        Button {
-            open(path)
-        } label: {
-            Text(title)
-                .atelierFont(size: AtelierTypography.caption, weight: emphasized ? .semibold : .regular)
-                .foregroundStyle(path == nil ? Color.secondary : .primary)
-                .frame(maxWidth: .infinity)
-                .frame(height: AtelierMetrics.controlHeight)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .atelierCard(radius: AtelierTheme.controlRadius, fill: AtelierTheme.panel)
-        .disabled(path == nil)
-        .opacity(path == nil ? AtelierTheme.disabledOpacity : 1)
-        .accessibilityLabel("Open \(title)")
-        .atelierPointerCursor()
-    }
+    // MARK: - Empty state
 
-    private var contextPath: String? {
-        guard let root = model.rootDir else { return nil }
-        return ((root as NSString).appendingPathComponent("watchtower") as NSString)
-            .appendingPathComponent("CONTEXT.md")
-    }
-
-    // MARK: - Commands
-
-    private var commandsCard: some View {
-        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
-            HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceS) {
-                Text("Command deck")
-                    .atelierFont(size: AtelierTypography.label, weight: .semibold)
-                    .foregroundStyle(AtelierTheme.workspaceRailForeground)
-                Spacer(minLength: 0)
-                Text("Copy or drag")
-                    .atelierFont(size: AtelierTypography.micro)
-                    .foregroundStyle(AtelierTheme.workspaceRailSecondary)
-            }
-            LazyVGrid(columns: commandColumns, spacing: AtelierMetrics.spaceXS) {
-                ForEach(WatchtowerCommand.all) { command in
-                    WatchtowerCommandChip(command: command, isOnGraphite: true)
-                }
+    private var emptyNotice: some View {
+        HStack(spacing: AtelierMetrics.spaceM) {
+            Image(systemName: "binoculars")
+                .font(.system(size: AtelierTypography.headline, weight: .medium))
+                .foregroundStyle(AtelierTheme.accent)
+                .frame(width: 32, height: 32)
+                .background(
+                    AtelierTheme.accent.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+                )
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("No active plan")
+                    .atelierFont(size: AtelierTypography.headline, weight: .semibold)
+                    .foregroundStyle(.primary)
+                Text("Start one with a command below.")
+                    .atelierFont(size: AtelierTypography.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(AtelierMetrics.spaceM)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .atelierCard(radius: AtelierTheme.panelRadius, fill: AtelierTheme.workspaceRailSolid)
+        .atelierCard(radius: AtelierTheme.panelRadius, fill: AtelierTheme.raised)
     }
 
-    private var launchSurface: some View {
+    // MARK: - Commands
+
+    private var commandsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Rectangle()
-                .fill(AtelierTheme.accent)
-                .frame(height: 2)
-                .accessibilityHidden(true)
-
-            HStack(spacing: AtelierMetrics.spaceM) {
-                Image(systemName: "binoculars")
-                    .font(.system(size: AtelierTypography.headline, weight: .medium))
-                    .foregroundStyle(AtelierTheme.accent)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        AtelierTheme.accent.opacity(0.12),
-                        in: RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
-                    )
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("No active plan")
-                        .atelierFont(size: AtelierTypography.headline, weight: .semibold)
-                        .foregroundStyle(AtelierTheme.workspaceRailForeground)
-                    Text("Copy a command, or drag it onto a terminal.")
-                        .atelierFont(size: AtelierTypography.caption)
+            Button {
+                commandsExpanded.toggle()
+            } label: {
+                HStack(spacing: AtelierMetrics.spaceS) {
+                    Image(systemName: commandsExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: AtelierTypography.micro, weight: .semibold))
                         .foregroundStyle(AtelierTheme.workspaceRailSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Commands")
+                        .atelierFont(size: AtelierTypography.label, weight: .semibold)
+                        .foregroundStyle(AtelierTheme.workspaceRailForeground)
+                    Spacer(minLength: 0)
+                    Text("\(WatchtowerCommand.all.count)")
+                        .atelierFont(size: AtelierTypography.caption, weight: .medium)
+                        .foregroundStyle(AtelierTheme.workspaceRailSecondary)
+                        .monospacedDigit()
                 }
+                .padding(.horizontal, AtelierMetrics.spaceM)
+                .frame(height: AtelierMetrics.sectionHeaderHeight)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(AtelierMetrics.spaceM)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Commands, \(WatchtowerCommand.all.count)")
+            .accessibilityValue(commandsExpanded ? "Expanded" : "Collapsed")
+            .atelierPointerCursor()
 
-            commandDeckDivider
-
-            VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
-                ForEach(WatchtowerCommand.all.prefix(1)) { command in
-                    WatchtowerCommandChip(command: command, isPrimary: true, isOnGraphite: true)
-                }
-                Text("More commands")
-                    .atelierFont(size: AtelierTypography.caption, weight: .medium)
-                    .foregroundStyle(AtelierTheme.workspaceRailSecondary)
-                LazyVGrid(columns: commandColumns, spacing: AtelierMetrics.spaceXS) {
-                    ForEach(WatchtowerCommand.all.dropFirst()) { command in
-                        WatchtowerCommandChip(command: command, isOnGraphite: true)
-                    }
-                }
+            if commandsExpanded {
+                commandDeckDivider
+                commandDeck
             }
-            .padding(AtelierMetrics.spaceM)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .atelierCard(radius: AtelierTheme.panelRadius, fill: AtelierTheme.workspaceRailSolid)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Watchtower commands")
+    }
+
+    private var commandDeck: some View {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+            ForEach(WatchtowerCommand.all.prefix(1)) { command in
+                WatchtowerCommandChip(command: command, isPrimary: true)
+            }
+            LazyVGrid(columns: commandColumns, spacing: AtelierMetrics.spaceXS) {
+                ForEach(WatchtowerCommand.all.dropFirst()) { command in
+                    WatchtowerCommandChip(command: command)
+                }
+            }
+            Text("Click to copy. Drag onto a terminal to run.")
+                .atelierFont(size: AtelierTypography.micro)
+                .foregroundStyle(AtelierTheme.workspaceRailSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(AtelierMetrics.spaceM)
     }
 
     private var commandDeckDivider: some View {
@@ -406,15 +423,15 @@ struct WatchtowerPanelView: View {
 
     // MARK: - Task groups
 
-    private var taskGroups: some View {
+    private func taskGroups(_ grouped: WatchtowerGroupedTasks) -> some View {
         ForEach(WatchtowerTaskGroup.allCases, id: \.self) { group in
-            let tasks = model.tasks(in: group)
+            let tasks = grouped.tasks(in: group)
             if !tasks.isEmpty {
                 disclosureSection(
                     title: title(for: group),
                     count: tasks.count,
                     tint: color(for: group),
-                    isExpanded: group == .active || group == .blocked ? .constant(true) : $todoExpanded
+                    isExpanded: binding(for: group)
                 ) {
                     VStack(spacing: AtelierMetrics.spaceXS) {
                         ForEach(tasks, id: \.order) { task in
@@ -424,6 +441,16 @@ struct WatchtowerPanelView: View {
                     .padding(.top, AtelierMetrics.spaceXS)
                 }
             }
+        }
+    }
+
+    // Every group owns its disclosure state so collapsing Todo never collapses Done.
+    private func binding(for group: WatchtowerTaskGroup) -> Binding<Bool> {
+        switch group {
+        case .active: $activeExpanded
+        case .blocked: $blockedExpanded
+        case .todo: $todoExpanded
+        case .done: $doneExpanded
         }
     }
 
@@ -451,35 +478,39 @@ struct WatchtowerPanelView: View {
                     Text("Archive")
                         .atelierFont(size: AtelierTypography.label, weight: .semibold)
                     Spacer(minLength: 0)
-                    Text("\(model.archive.count) plans")
+                    Text(archiveCountText)
                         .atelierFont(size: AtelierTypography.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
-                .padding(.horizontal, AtelierMetrics.spaceS)
+                .padding(.horizontal, AtelierMetrics.spaceM)
                 .frame(height: AtelierMetrics.sectionHeaderHeight)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Archive, \(model.archive.count) plans")
+            .accessibilityLabel("Archive, \(archiveCountText)")
             .accessibilityValue(archiveExpanded ? "Expanded" : "Collapsed")
             .atelierPointerCursor()
 
             if archiveExpanded {
-                summaryDivider
+                separator
                 ForEach(model.archive, id: \.slug) { entry in
                     WatchtowerArchiveRow(entry: entry) {
                         open(entry.manifestPath)
                     }
                     if entry.slug != model.archive.last?.slug {
-                        summaryDivider
-                            .padding(.horizontal, AtelierMetrics.spaceS)
+                        separator
+                            .padding(.horizontal, AtelierMetrics.spaceM)
                     }
                 }
             }
         }
-        .atelierCard(radius: AtelierTheme.controlRadius, fill: AtelierTheme.panel.opacity(0.72))
+        .atelierCard(radius: AtelierTheme.panelRadius, fill: AtelierTheme.panel)
+    }
+
+    private var archiveCountText: String {
+        model.archive.count == 1 ? "1 plan" : "\(model.archive.count) plans"
     }
 
     // MARK: - Building blocks
@@ -585,6 +616,55 @@ struct WatchtowerPanelView: View {
     }
 }
 
+// Opens one plan file. Disabled when the model could not resolve the path, so the
+// panel never asks the editor to open something that is not on disk.
+private struct WatchtowerFileActionButton: View {
+    let title: String
+    let path: String?
+    let onOpen: (String?) -> Void
+
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
+    private var isHighlighted: Bool {
+        (isHovered || isFocused) && path != nil
+    }
+
+    var body: some View {
+        Button {
+            onOpen(path)
+        } label: {
+            Text(title)
+                .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+                .foregroundStyle(isHighlighted ? AtelierTheme.accent : .primary)
+                .frame(maxWidth: .infinity)
+                .frame(height: AtelierMetrics.controlHeight)
+                .background(
+                    isHighlighted ? AtelierTheme.accent.opacity(0.10) : AtelierTheme.panel,
+                    in: RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+                        .stroke(
+                            isHighlighted
+                                ? AtelierTheme.accent.opacity(0.34)
+                                : AtelierTheme.border.opacity(0.72),
+                            lineWidth: AtelierTheme.strokeControl
+                        )
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($isFocused)
+        .disabled(path == nil)
+        .opacity(path == nil ? AtelierTheme.disabledOpacity : 1)
+        .accessibilityLabel("Open \(title)")
+        .help(path == nil ? "\(title) is not available in this workspace" : "Open \(title)")
+        .onHover { isHovered = $0 }
+        .atelierPointerCursor()
+    }
+}
+
 private struct WatchtowerTaskCard: View {
     let task: WatchtowerTask
     let statusLabel: String
@@ -665,11 +745,11 @@ private struct WatchtowerTaskCard: View {
     }
 }
 
-// One command row: click copies to the clipboard; drag drops onto the terminal to run.
+// One command row on the graphite deck: click copies to the clipboard; drag drops
+// onto the terminal to run.
 private struct WatchtowerCommandChip: View {
     let command: WatchtowerCommand
     var isPrimary = false
-    var isOnGraphite = false
 
     @State private var copied = false
     @State private var isHovered = false
@@ -719,7 +799,7 @@ private struct WatchtowerCommandChip: View {
         if isPrimary && !copied {
             return AtelierTheme.accentInk
         }
-        return isOnGraphite ? AtelierTheme.workspaceRailForeground : .primary
+        return AtelierTheme.workspaceRailForeground
     }
 
     private var commandIconForeground: Color {
@@ -729,7 +809,7 @@ private struct WatchtowerCommandChip: View {
         if isPrimary {
             return AtelierTheme.accentInk.opacity(0.84)
         }
-        return isOnGraphite ? AtelierTheme.workspaceRailSecondary : .secondary
+        return AtelierTheme.workspaceRailSecondary
     }
 
     private var chipFill: Color {
@@ -739,12 +819,9 @@ private struct WatchtowerCommandChip: View {
         if isPrimary {
             return isHovered ? AtelierTheme.accent.opacity(0.88) : AtelierTheme.accent
         }
-        if isOnGraphite {
-            return isHovered
-                ? AtelierTheme.accent.opacity(0.18)
-                : AtelierTheme.workspaceRailHover.opacity(0.72)
-        }
-        return isHovered ? AtelierTheme.accent.opacity(0.10) : AtelierTheme.panel.opacity(0.66)
+        return isHovered
+            ? AtelierTheme.accent.opacity(0.18)
+            : AtelierTheme.workspaceRailHover.opacity(0.72)
     }
 
     private var chipStroke: Color {
@@ -754,12 +831,9 @@ private struct WatchtowerCommandChip: View {
         if isPrimary {
             return AtelierTheme.accent
         }
-        if isOnGraphite {
-            return isHovered
-                ? AtelierTheme.accent.opacity(0.56)
-                : AtelierTheme.workspaceRailBorder.opacity(0.72)
-        }
-        return isHovered ? AtelierTheme.accent.opacity(0.32) : AtelierTheme.border.opacity(0.72)
+        return isHovered
+            ? AtelierTheme.accent.opacity(0.56)
+            : AtelierTheme.workspaceRailBorder.opacity(0.72)
     }
 
     private func copy() {
