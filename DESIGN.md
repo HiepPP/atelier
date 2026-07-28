@@ -1065,7 +1065,9 @@ The five background features, all read-only and cancellable:
 - Open the response overlay at a trailing half-width below the tab strip.
 - Provide one header control that toggles between full width and a trailing half-width mode.
 - Opening the overlay from the Response action or `Cmd-Shift-E` always restores half-width mode.
-- Restore at most 100 newest final responses for the current workspace at startup.
+- Restore at most 100 newest final responses for the current workspace at startup, and only from the
+  last three days. A transcript older than that window is never opened, and a response older than
+  that window never reaches the panel. Older history stays on disk for other tools to read.
 - Treat restored responses as read, then count only newly monitored responses as unread.
 - Start transcript restore only when a workspace first becomes active. Keep live monitoring
   running after activation, including while another workspace is selected.
@@ -1076,6 +1078,21 @@ The five background features, all read-only and cancellable:
   agent writing its own transcript emits a continuous event stream, and a per-event refresh
   re-walks and re-parses every transcript file. Keep the existing longer trailing refresh that
   covers files created inside the source's discovery throttle window.
+- Skip unchanged transcript files before parsing. Fingerprint every discovered file with one cheap
+  size and modification date read. A refresh where no file changed returns the previous merged
+  result: it reads no full file attributes, parses nothing, rebuilds no response list, and publishes
+  no state change. Only a file whose size or modification date moved reaches the parse path.
+- Read transcripts newest first and stop once the newest 100 responses for the workspace are in
+  hand. A workspace can hold hundreds of megabytes of old transcripts, and parsing them all only to
+  drop them costs repeated CPU bursts after every launch. Older transcripts stay unread.
+- Read only the head of a transcript before its first parse. A file whose head names another
+  workspace is never parsed in full, and that answer is remembered for later refreshes. A head that
+  names no workspace is parsed as usual, so an unknown answer never drops a real transcript.
+- Cap the first read of a transcript above 1 MiB. Restore its session header and its newest 1 MiB
+  only. Responses that sit earlier inside such a file are not restored, because a single transcript
+  can reach 8 MB and only the newest 100 responses can reach the panel. Keep the header in the parsed
+  buffer: a codex response is only accepted while the session workspace is known, and that comes from
+  the `session_meta` line at the top of the file. Later appends still read from the real file end.
 - Keep status, navigation, refresh, copy, and close actions keyboard accessible.
 - Keep the transcript Markdown treatment consistent with the file-preview surface: pull-quote block
   quotes with an accent left rule and serif italic secondary text, completed task items in secondary

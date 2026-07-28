@@ -149,7 +149,19 @@ nonisolated enum AgentTranscriptParser {
     }
 
     static func belongsToWorkspace(_ jsonLines: String, workspacePath: String) -> Bool {
-        let expectedWorkspace = standardizedPath(workspacePath)
+        guard let declared = declaredWorkspacePath(jsonLines) else { return false }
+        return declared == standardizedPath(workspacePath)
+    }
+
+    /// True only when the lines name a workspace and it is a different one.
+    /// Lines that name no workspace return false, so an unknown answer never
+    /// drops a real transcript.
+    static func declaresOtherWorkspace(_ jsonLines: String, workspacePath: String) -> Bool {
+        guard let declared = declaredWorkspacePath(jsonLines) else { return false }
+        return declared != standardizedPath(workspacePath)
+    }
+
+    private static func declaredWorkspacePath(_ jsonLines: String) -> String? {
         for line in jsonLines.split(separator: "\n", omittingEmptySubsequences: true) {
             guard let data = line.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -158,13 +170,13 @@ nonisolated enum AgentTranscriptParser {
             if object["type"] as? String == "session_meta",
                let payload = object["payload"] as? [String: Any],
                let cwd = payload["cwd"] as? String {
-                return standardizedPath(cwd) == expectedWorkspace
+                return standardizedPath(cwd)
             }
             if let cwd = object["cwd"] as? String {
-                return standardizedPath(cwd) == expectedWorkspace
+                return standardizedPath(cwd)
             }
         }
-        return false
+        return nil
     }
 
     static func sessionStartedAt(_ jsonLines: String) -> Date? {
@@ -389,6 +401,11 @@ private nonisolated final class AgentTranscriptRestoreGate: @unchecked Sendable 
 
 nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     private static let maximumTranscriptBytes = 16 * 1024 * 1024
+    private static let workspaceProbeBytes = 16 * 1024
+    private static let maximumFirstParseBytes = 1024 * 1024
+    /// How far back the response overlay restores. Transcripts older than this
+    /// window are never opened, and older responses never reach the panel.
+    static let defaultHistoryWindow: TimeInterval = 3 * 24 * 60 * 60
 
     private struct TranscriptEntry {
         let url: URL
@@ -406,6 +423,12 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
         let responses: [AgentResponse]
     }
 
+    private struct FileFingerprint: Equatable {
+        let url: URL
+        let size: Int
+        let modificationDate: Date
+    }
+
     private let workspacePath: String
     private let modifiedAfter: Date
     private let roots: [URL]
@@ -416,9 +439,14 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     private var directoryLimitPerRoot: Int { transcriptLimitPerRoot * 4 }
     private var discoveredURLs: [URL] = []
     private var cache: [URL: CachedTranscript] = [:]
+    private var foreignURLs: Set<URL> = []
     private var nextDiscoveryDate = Date.distantPast
     private var hasCompletedInitialLoad = false
+    private var lastFingerprints: [FileFingerprint] = []
+    private var lastMergedResponses: [AgentResponse] = []
+    private var hasMergedResult = false
     private(set) var parsedByteCount = 0
+    private(set) var mergeCount = 0
 
     init(
         workspacePath: String,
@@ -489,20 +517,63 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
             nextDiscoveryDate = Date().addingTimeInterval(2)
             let activeURLs = Set(discoveredURLs)
             cache = cache.filter { activeURLs.contains($0.key) }
+            foreignURLs.formIntersection(activeURLs)
+        }
+
+        // Fingerprint every discovered file with one cheap size and
+        // modification date read. A running agent appends to one transcript,
+        // so most refreshes see no change at all. Returning the stored result
+        // then skips the full attribute read, the parse, and the merge.
+        var fingerprints: [FileFingerprint] = []
+        fingerprints.reserveCapacity(discoveredURLs.count)
+        for url in discoveredURLs {
+            guard !isCurrentTaskCancelled else { return [] }
+            // One stat call per file. URL resource values cache their result on
+            // the URL, so an appended file would keep reporting its old size.
+            var info = stat()
+            guard stat(url.path, &info) == 0 else { continue }
+            fingerprints.append(
+                FileFingerprint(
+                    url: url,
+                    size: Int(info.st_size),
+                    modificationDate: Self.modificationDate(from: info)
+                )
+            )
+        }
+        if hasMergedResult, fingerprints == lastFingerprints {
+            return lastMergedResponses
         }
 
         var responses: [AgentResponse] = []
         var remainingUncachedBytes = uncachedBytesLimit
 
-        for url in discoveredURLs {
+        for fingerprint in fingerprints {
             guard !isCurrentTaskCancelled else { return [] }
+            // Files arrive newest first. Once the newest responses fill the
+            // limit, older transcripts cannot reach the published list, so
+            // opening them only burns CPU on a large backlog.
+            guard responses.count < responseLimit else { break }
+            let url = fingerprint.url
+            // A session that belongs to another workspace can never produce a
+            // response here. Skip it before any read, however much it grows.
+            if foreignURLs.contains(url) { continue }
+            // An unchanged file keeps its cached responses. Only a file whose
+            // size or modification date moved needs the full attribute read.
+            if let cached = cache[url],
+               cached.size == fingerprint.size,
+               cached.modificationDate == fingerprint.modificationDate {
+                responses.append(contentsOf: cached.responses)
+                continue
+            }
             guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-                  let modificationDate = attributes[.modificationDate] as? Date,
                   let size = (attributes[.size] as? NSNumber)?.intValue,
                   size <= Self.maximumTranscriptBytes,
                   let fileNumber = attributes[.systemFileNumber] as? NSNumber else {
                 continue
             }
+            // Store the fingerprint date, not the attribute date, so the next
+            // refresh compares two dates read the same way.
+            let modificationDate = fingerprint.modificationDate
             let fileID = fileNumber.uint64Value
             if let cached = cache[url],
                cached.size == size,
@@ -521,16 +592,32 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
             }
 
             let previous = cache[url]
+            // Read only the head before the first parse of a file. A head that
+            // names another workspace means the whole file is waste here.
+            if previous == nil, declaresOtherWorkspace(at: url) {
+                foreignURLs.insert(url)
+                continue
+            }
             let canReadAppend = previous?.fileID == fileID && size > (previous?.size ?? size)
-            let offset = canReadAppend ? previous?.size ?? 0 : 0
+            // A first read of a large transcript only needs the newest part.
+            // Older lines in the same file cannot reach the response limit.
+            let firstReadOffset = canReadAppend || size <= Self.maximumFirstParseBytes
+                ? 0
+                : size - Self.maximumFirstParseBytes
+            let offset = canReadAppend ? previous?.size ?? 0 : firstReadOffset
             let uncachedBytes = size - offset
             guard uncachedBytes <= remainingUncachedBytes else {
                 continue
             }
-            guard let data = readData(from: url, offset: offset) else {
+            guard let tail = readData(from: url, offset: offset) else {
                 continue
             }
-            remainingUncachedBytes -= data.count
+            remainingUncachedBytes -= tail.count
+            // Keep the true end offset for the cache. A capped read drops bytes
+            // from the front of the buffer, and a later append must still start
+            // at the real end of the file.
+            let endOffset = offset + tail.count
+            let data = firstReadOffset > 0 ? cappedParseBuffer(for: url, tail: tail) : tail
             parsedByteCount &+= data.count
             let initialState = canReadAppend
                 ? previous?.parserState ?? AgentTranscriptParser.State()
@@ -552,7 +639,7 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
             }
             cache[url] = CachedTranscript(
                 modificationDate: modificationDate,
-                size: offset + data.count,
+                size: endOffset,
                 fileID: fileID,
                 parserState: result.state,
                 responses: parsed
@@ -567,7 +654,47 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
         let sorted = unique.values.sorted {
             $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp < $1.timestamp
         }
-        return Array(sorted.suffix(responseLimit))
+        let merged = Array(sorted.suffix(responseLimit))
+        mergeCount += 1
+        lastFingerprints = fingerprints
+        lastMergedResponses = merged
+        hasMergedResult = true
+        return merged
+    }
+
+    /// Buffer for a capped first read: the file head, then the tail started at
+    /// its first complete line. The head carries the codex `session_meta` line,
+    /// and a response is only accepted while that session workspace is known.
+    private func cappedParseBuffer(for url: URL, tail: Data) -> Data {
+        var buffer = Data()
+        if let head = readHead(of: url), let lastNewline = head.lastIndex(of: 0x0A) {
+            buffer.append(head[...lastNewline])
+        }
+        if let firstNewline = tail.firstIndex(of: 0x0A) {
+            buffer.append(tail[tail.index(after: firstNewline)...])
+        }
+        return buffer
+    }
+
+    private func readHead(of url: URL) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        return try? handle.read(upToCount: Self.workspaceProbeBytes)
+    }
+
+    private func declaresOtherWorkspace(at url: URL) -> Bool {
+        guard let head = readHead(of: url) else { return false }
+        return AgentTranscriptParser.declaresOtherWorkspace(
+            String(decoding: head, as: UTF8.self),
+            workspacePath: workspacePath
+        )
+    }
+
+    private static func modificationDate(from info: stat) -> Date {
+        Date(
+            timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)
+                + TimeInterval(info.st_mtimespec.tv_nsec) / 1_000_000_000
+        )
     }
 
     private func readData(from url: URL, offset: Int) -> Data? {

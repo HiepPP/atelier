@@ -272,6 +272,272 @@ struct AgentResponsesTests {
         #expect(await monitor.parsedByteCount == parsedBytesAfterAppend)
     }
 
+    @Test("Monitor skips the merge when no transcript file changed")
+    func unchangedTranscriptRefreshSkipsWork() async throws {
+        let root = temporaryDirectory("unchanged-refresh")
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let transcriptURL = root.appendingPathComponent("session.jsonl")
+        let initial = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"one","cwd":"\(workspace.path)"}}
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"id":"first","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"One"}]}}
+        """
+        try initial.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            modifiedAfter: .distantPast,
+            roots: [root]
+        )
+
+        let first = await monitor.loadResponses()
+        let mergeCountAfterFirst = await monitor.mergeCount
+        let parsedBytesAfterFirst = await monitor.parsedByteCount
+        #expect(first.map(\.markdown) == ["One"])
+        #expect(mergeCountAfterFirst == 1)
+
+        let second = await monitor.loadResponses()
+        #expect(second.map(\.id) == first.map(\.id))
+        #expect(await monitor.mergeCount == mergeCountAfterFirst)
+        #expect(await monitor.parsedByteCount == parsedBytesAfterFirst)
+
+        let appended = Data("""
+
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"response_item","payload":{"id":"second","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Two"}]}}
+        """.utf8)
+        let handle = try FileHandle(forWritingTo: transcriptURL)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: appended)
+
+        let third = await monitor.loadResponses()
+        #expect(third.map(\.markdown) == ["One", "Two"])
+        #expect(await monitor.mergeCount == mergeCountAfterFirst + 1)
+        #expect(await monitor.parsedByteCount - parsedBytesAfterFirst == appended.count)
+    }
+
+    @Test("Monitor stops reading older transcripts once the newest fill the limit")
+    func newestTranscriptsStopFurtherParsing() async throws {
+        let root = temporaryDirectory("newest-first-stop")
+        let transcriptRoot = root.appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptRoot, withIntermediateDirectories: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+
+        var newestBytes = 0
+        for index in 0..<3 {
+            let transcript = """
+            {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"session-\(index)","cwd":"\(workspace.path)"}}
+            {"timestamp":"2026-07-17T08:00:0\(index).000Z","type":"response_item","payload":{"id":"response-\(index)","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Response \(index)"}]}}
+            """
+            let url = transcriptRoot.appendingPathComponent("session-\(index).jsonl")
+            try transcript.write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date(timeIntervalSince1970: TimeInterval(index + 1))],
+                ofItemAtPath: url.path
+            )
+            if index == 2 {
+                newestBytes = transcript.utf8.count
+            }
+        }
+
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            roots: [transcriptRoot],
+            responseLimit: 1
+        )
+        let restored = await monitor.loadResponses()
+
+        #expect(restored.map(\.markdown) == ["Response 2"])
+        #expect(await monitor.parsedByteCount == newestBytes)
+    }
+
+    @Test("Monitor never parses a transcript that names another workspace")
+    func foreignTranscriptStaysUnparsed() async throws {
+        let root = temporaryDirectory("foreign-transcript")
+        let transcriptRoot = root.appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptRoot, withIntermediateDirectories: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+
+        let own = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"own","cwd":"\(workspace.path)"}}
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"id":"own-1","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Mine"}]}}
+        """
+        var foreign = """
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"session_meta","payload":{"id":"other","cwd":"/tmp/other-workspace"}}
+        """
+        for index in 0..<200 {
+            foreign += """
+            \n{"timestamp":"2026-07-17T08:00:03.000Z","type":"response_item","payload":{"id":"other-\(index)","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Not mine \(index)"}]}}
+            """
+        }
+        let ownURL = transcriptRoot.appendingPathComponent("own.jsonl")
+        let foreignURL = transcriptRoot.appendingPathComponent("foreign.jsonl")
+        try own.write(to: ownURL, atomically: true, encoding: .utf8)
+        try foreign.write(to: foreignURL, atomically: true, encoding: .utf8)
+        // The foreign file is newest, so it is visited first.
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1)],
+            ofItemAtPath: ownURL.path
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 2)],
+            ofItemAtPath: foreignURL.path
+        )
+
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            modifiedAfter: .distantPast,
+            roots: [transcriptRoot]
+        )
+        let restored = await monitor.loadResponses()
+        #expect(restored.map(\.markdown) == ["Mine"])
+        #expect(await monitor.parsedByteCount == own.utf8.count)
+
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 3)],
+            ofItemAtPath: foreignURL.path
+        )
+        let second = await monitor.loadResponses()
+        #expect(second.map(\.markdown) == ["Mine"])
+        #expect(await monitor.parsedByteCount == own.utf8.count)
+    }
+
+    @Test("Monitor still parses a transcript whose head names no workspace")
+    func headlessTranscriptStillParsed() async throws {
+        let root = temporaryDirectory("headless-transcript")
+        let transcriptRoot = root.appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptRoot, withIntermediateDirectories: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+
+        let transcript = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"note","payload":{"id":"no-cwd"}}
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"session_meta","payload":{"id":"late","cwd":"\(workspace.path)"}}
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"response_item","payload":{"id":"late-1","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Late"}]}}
+        """
+        try transcript.write(
+            to: transcriptRoot.appendingPathComponent("late.jsonl"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            modifiedAfter: .distantPast,
+            roots: [transcriptRoot]
+        )
+        let restored = await monitor.loadResponses()
+
+        #expect(restored.map(\.markdown) == ["Late"])
+        #expect(await monitor.parsedByteCount == transcript.utf8.count)
+    }
+
+    @Test("Monitor caps the first parse of a large transcript to its tail")
+    func largeTranscriptFirstParseIsCapped() async throws {
+        let root = temporaryDirectory("capped-first-parse")
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let transcriptURL = root.appendingPathComponent("large.jsonl")
+
+        // One codex session whose header sits at the top, then enough padded
+        // responses to push the file past the 1 MiB first-parse cap.
+        var lines = [
+            """
+            {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"large","cwd":"\(workspace.path)"}}
+            """
+        ]
+        let padding = String(repeating: "x", count: 4096)
+        for index in 0..<400 {
+            let minute = index / 60
+            let second = index % 60
+            lines.append(
+                """
+                {"timestamp":"2026-07-17T08:\(String(format: "%02d", minute)):\(String(format: "%02d", second)).000Z","type":"response_item","payload":{"id":"response-\(index)","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Response \(index) \(padding)"}]}}
+                """
+            )
+        }
+        let contents = lines.joined(separator: "\n")
+        try contents.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        #expect(contents.utf8.count > 1024 * 1024)
+
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            modifiedAfter: .distantPast,
+            roots: [root]
+        )
+        let restored = await monitor.loadResponses()
+        let parsedAfterFirstRead = await monitor.parsedByteCount
+
+        // The header survived the cap, so codex responses are still accepted.
+        #expect(restored.count > 0)
+        #expect(restored.last?.markdown.hasPrefix("Response 399") == true)
+        #expect(restored.contains { $0.markdown.hasPrefix("Response 0") } == false)
+        #expect(parsedAfterFirstRead < contents.utf8.count)
+        #expect(parsedAfterFirstRead <= 1024 * 1024 + 16 * 1024)
+
+        let appended = Data("""
+
+        {"timestamp":"2026-07-17T09:00:00.000Z","type":"response_item","payload":{"id":"response-last","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Newest"}]}}
+        """.utf8)
+        let handle = try FileHandle(forWritingTo: transcriptURL)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: appended)
+
+        let afterAppend = await monitor.loadResponses()
+        #expect(afterAppend.last?.markdown == "Newest")
+        #expect(await monitor.parsedByteCount - parsedAfterFirstRead == appended.count)
+    }
+
+    @Test("Monitor reads only transcripts inside the history window")
+    func historyWindowSkipsOldTranscripts() async throws {
+        let root = temporaryDirectory("history-window")
+        let transcriptRoot = root.appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptRoot, withIntermediateDirectories: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+
+        let cutoff = Date().addingTimeInterval(-AgentTranscriptMonitor.defaultHistoryWindow)
+        let oldDate = cutoff.addingTimeInterval(-86400)
+        let recentDate = Date().addingTimeInterval(-3600)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let old = """
+        {"timestamp":"\(formatter.string(from: oldDate))","type":"session_meta","payload":{"id":"old","cwd":"\(workspace.path)"}}
+        {"timestamp":"\(formatter.string(from: oldDate))","type":"response_item","payload":{"id":"old-1","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Old"}]}}
+        """
+        // The recent file holds one response from before the cutoff and one after it.
+        let recent = """
+        {"timestamp":"\(formatter.string(from: recentDate))","type":"session_meta","payload":{"id":"recent","cwd":"\(workspace.path)"}}
+        {"timestamp":"\(formatter.string(from: oldDate))","type":"response_item","payload":{"id":"stale-1","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Stale"}]}}
+        {"timestamp":"\(formatter.string(from: recentDate))","type":"response_item","payload":{"id":"recent-1","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Recent"}]}}
+        """
+        let oldURL = transcriptRoot.appendingPathComponent("old.jsonl")
+        let recentURL = transcriptRoot.appendingPathComponent("recent.jsonl")
+        try old.write(to: oldURL, atomically: true, encoding: .utf8)
+        try recent.write(to: recentURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: oldDate],
+            ofItemAtPath: oldURL.path
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: recentDate],
+            ofItemAtPath: recentURL.path
+        )
+
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            modifiedAfter: cutoff,
+            roots: [transcriptRoot]
+        )
+        let restored = await monitor.loadResponses()
+
+        #expect(restored.map(\.markdown) == ["Recent"])
+        #expect(await monitor.parsedByteCount == recent.utf8.count)
+    }
+
     @Test("Model deduplicates refreshes and exposes stable sessions")
     func modelAndSessionIdentity() async {
         let response = AgentResponse(

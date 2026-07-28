@@ -92,7 +92,12 @@ final class WorkspaceSession {
             )
         }
         self.agentResponses = agentResponses ?? AgentResponsesModel(
-            source: AgentTranscriptMonitor(workspacePath: rootURL.path)
+            source: AgentTranscriptMonitor(
+                workspacePath: rootURL.path,
+                modifiedAfter: Date().addingTimeInterval(
+                    -AgentTranscriptMonitor.defaultHistoryWindow
+                )
+            )
         )
         gemmaSidecar = GemmaSidecarModel(
             terminalTabs: tabs,
