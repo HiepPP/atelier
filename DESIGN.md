@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Status | Current implementation baseline |
-| Updated | 2026-07-27 |
+| Updated | 2026-07-28 |
 | Baseline commit | `02ebe5b` |
 | Platform | macOS 26+ |
 | UI stack | SwiftUI, AppKit, Luminare |
@@ -145,6 +145,9 @@ All palette colors are dynamic `sRGB` colors. Foreground text uses native label 
 | `pressed` | `#CCC7BF` | `#44494F` | Pressed state |
 | `accent` | `#A44F32` | `#D79570` | Primary emphasis and focus |
 | `accentInk` | `#FFF9F2` | `#21150F` | Text on accent fill |
+| `workflowDone` | `#4E6C55` | `#7FA98A` | Completed workflow state |
+| `workflowTodo` | `#8A652B` | `#CAA15B` | Pending workflow state |
+| `workflowBlocked` | `#934941` | `#D17B72` | Blocked workflow state |
 | `workspaceRailTop` | `#1D232B` | `#171C22` | Upper graphite rail gradient stop |
 | `workspaceRailBottom` | `#2D3B45` | `#202D35` | Lower petrol rail gradient stop |
 | `workspaceRailSolid` | `#252D35` | `#1D252C` | Reduce Transparency rail fallback |
@@ -163,6 +166,7 @@ All palette colors are dynamic `sRGB` colors. Foreground text uses native label 
 Color rules:
 
 - Reserve accent for focus, primary action, and active indicators.
+- Use `workflowDone`, `workflowTodo`, and `workflowBlocked` only for non-Git workflow state.
 - Use bright warm `chromeSelection` glass and dark-ink `chromeSelectionInk` for selected sidebar and center tabs.
 - Reserve Git colors for file and diff meaning.
 - Use native primary and secondary labels for normal text.
@@ -717,6 +721,39 @@ Persistence boundaries:
 - Keep diff line numbers in a fixed 48-point gutter.
 - Use monospaced selectable diff text.
 - Confirm destructive discard actions with a native alert.
+
+### Watchtower
+
+- Present Watchtower as a fixed 340-point overlay. Keep the center work surface fully mounted.
+- Use a Graphite Observatory treatment: matte alloy surfaces, compact editorial telemetry, and
+  restrained workflow color. Do not add gradients, glow, or decorative glass.
+- Label the header `Watchtower`. Keep refresh and close as keyboard-accessible icon controls.
+- Merge plan identity, progress, and task counts into one continuous summary surface. Do not stack
+  separate equal-weight plan, progress, and count cards.
+- Show one segmented workflow strip inside the summary. Segment widths represent Done, Active,
+  Blocked, and Todo counts. Keep an accessible text value for the complete distribution.
+- Use the existing accent for Active. Use `workflowDone`, `workflowTodo`, and `workflowBlocked` for
+  their matching plan states. Keep Unknown and Archive neutral.
+- Apply workflow color to task groups through one thin leading rule and a 6% header wash. Render
+  every task as a separate neutral card with compact spacing.
+- Make the complete task card one button that opens its specification. Put the task ID and status
+  on one compact metadata line, then give the title the full card width below it. Use a restrained
+  accent wash for hover and focus feedback.
+- Render status labels with a restrained filled wash and semantic text. Never rely on color alone.
+- Keep task IDs and archive links neutral at rest. Use normal hover and focus affordances instead of
+  borrowing Git teal.
+- When no plan is active, merge the empty-state message and commands into one launch surface. Make
+  `/watchtower new` the single accent-filled primary action instead of stacking two equal cards.
+- Render commands inside one matte graphite deck in both empty and active-plan states. Use dedicated
+  rail foreground tokens on that deck, then reserve terracotta for the primary command and hover.
+- Present remaining commands as a compact two-column matrix of flat rows. Keep them graphite at rest,
+  with accent hover feedback and `workflowDone` copy confirmation.
+- Render Archive as one quiet browser below the workflow surface. Use one integrated disclosure
+  heading and full-width plan rows. Do not repeat `Archive` or `SAVED` inside every row.
+- Split date-prefixed archive slugs into a readable plan title and compact monospaced date. Stack
+  the date below the title instead of reserving a fixed date column. Keep the complete slug in
+  accessibility labels and file-opening behavior.
+- Preserve native labels, pointer cursors, Reduce Transparency behavior, and Increase Contrast rules.
 
 ### Editor and Terminal
 

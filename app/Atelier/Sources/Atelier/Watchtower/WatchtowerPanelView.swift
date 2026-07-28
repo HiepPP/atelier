@@ -1,8 +1,15 @@
 import AppKit
 import SwiftUI
 
-// Read-only Watchtower dashboard: header, plan card, progress, status counts,
-// file actions, command chips, and Todo / Archive sections. Task ids and archive
+private struct WatchtowerWorkflowSegment: Identifiable {
+    let id: String
+    let label: String
+    let count: Int
+    let tint: Color
+}
+
+// Read-only Watchtower panel: header, plan summary, workflow distribution,
+// file actions, command chips, and task / Archive sections. Task ids and archive
 // rows are clickable and jump to the file via onOpenFile.
 //
 // Crash-rule note: mount this as an overlay side panel, never as an HSplitView
@@ -23,16 +30,12 @@ struct WatchtowerPanelView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: AtelierMetrics.spaceM) {
                     if model.hasPlan {
-                        planCard
-                        progressCard
-                        statusCounts
+                        planSummaryCard
                         fileActions
-                    }
-                    commandsCard
-                    if model.hasPlan {
+                        commandsCard
                         taskGroups
                     } else {
-                        noPlanNote
+                        launchSurface
                     }
                     if !model.archive.isEmpty {
                         archiveSection
@@ -48,9 +51,8 @@ struct WatchtowerPanelView: View {
 
     private var header: some View {
         HStack(spacing: AtelierMetrics.spaceM) {
-            Text("Watchtower: Dashboard".uppercased())
+            Text("Watchtower")
                 .atelierFont(size: AtelierTypography.label, weight: .semibold)
-                .tracking(0.6)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
             Spacer(minLength: 0)
@@ -78,46 +80,166 @@ struct WatchtowerPanelView: View {
         .atelierPointerCursor()
     }
 
-    // MARK: - Plan card
+    // MARK: - Plan summary
 
-    private var planCard: some View {
-        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
-            HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceS) {
-                Text(model.title.isEmpty ? "Untitled plan" : model.title)
-                    .atelierFont(size: AtelierTypography.headline, weight: .semibold)
-                    .lineLimit(2)
-                Spacer(minLength: 0)
-                planStatusBadge
-            }
-            HStack(spacing: AtelierMetrics.spaceS) {
-                Text(model.plan?.slug ?? "")
-                    .atelierFont(size: AtelierTypography.caption, design: .monospaced)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: AtelierMetrics.spaceM)
-                if let updated = model.plan?.updated, !updated.isEmpty {
-                    Text("Updated \(updated)")
-                        .atelierFont(size: AtelierTypography.caption)
+    private var planSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+                HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceS) {
+                    Text(model.title.isEmpty ? "Untitled plan" : model.title)
+                        .atelierFont(size: AtelierTypography.headline, weight: .semibold)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                    planStatusBadge
+                }
+                HStack(spacing: AtelierMetrics.spaceS) {
+                    Text(model.plan?.slug ?? "")
+                        .atelierFont(size: AtelierTypography.caption, design: .monospaced)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: AtelierMetrics.spaceM)
+                    if let updated = model.plan?.updated, !updated.isEmpty {
+                        Text("Updated \(updated)")
+                            .atelierFont(size: AtelierTypography.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
+            .padding(AtelierMetrics.spaceM)
+
+            summaryDivider
+
+            VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(Int((model.progress * 100).rounded()))%")
+                        .atelierFont(size: AtelierTypography.display, weight: .bold)
+                        .foregroundStyle(AtelierTheme.accent)
+                        .monospacedDigit()
+                    Spacer(minLength: 0)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("Completion")
+                            .atelierFont(size: AtelierTypography.micro, weight: .medium)
+                            .foregroundStyle(.secondary)
+                        Text("\(model.doneCount) of \(model.totalCount) done")
+                            .atelierFont(size: AtelierTypography.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+                workflowStrip
+            }
+            .padding(AtelierMetrics.spaceM)
+
+            summaryDivider
+
+            HStack(spacing: 0) {
+                countCell("Done", model.doneCount, tint: AtelierTheme.workflowDone)
+                countDivider
+                countCell("Active", model.tasks(in: .active).count, tint: AtelierTheme.accent)
+                countDivider
+                countCell("Blocked", model.blockedIds.count, tint: AtelierTheme.workflowBlocked)
+                countDivider
+                countCell("Todo", model.tasks(in: .todo).count, tint: AtelierTheme.workflowTodo)
+            }
         }
-        .padding(AtelierMetrics.spaceM)
         .frame(maxWidth: .infinity, alignment: .leading)
         .atelierCard(radius: AtelierTheme.panelRadius, fill: AtelierTheme.raised)
     }
 
+    private var workflowStrip: some View {
+        GeometryReader { proxy in
+            let segments = workflowSegments.filter { $0.count > 0 }
+            let gapCount = max(0, segments.count - 1)
+            let availableWidth = max(0, proxy.size.width - CGFloat(gapCount * 2))
+            HStack(spacing: 2) {
+                ForEach(segments) { segment in
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(segment.tint)
+                        .frame(
+                            width: availableWidth
+                                * CGFloat(segment.count)
+                                / CGFloat(max(model.totalCount, 1))
+                        )
+                }
+            }
+        }
+        .frame(height: 6)
+        .background(
+            AtelierTheme.border.opacity(0.45),
+            in: RoundedRectangle(cornerRadius: 2, style: .continuous)
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Workflow distribution")
+        .accessibilityValue(workflowDistributionText)
+    }
+
+    private var workflowSegments: [WatchtowerWorkflowSegment] {
+        [
+            WatchtowerWorkflowSegment(
+                id: "done",
+                label: "Done",
+                count: model.doneCount,
+                tint: AtelierTheme.workflowDone
+            ),
+            WatchtowerWorkflowSegment(
+                id: "active",
+                label: "Active",
+                count: model.tasks(in: .active).count,
+                tint: AtelierTheme.accent
+            ),
+            WatchtowerWorkflowSegment(
+                id: "blocked",
+                label: "Blocked",
+                count: model.blockedIds.count,
+                tint: AtelierTheme.workflowBlocked
+            ),
+            WatchtowerWorkflowSegment(
+                id: "todo",
+                label: "Todo",
+                count: model.tasks(in: .todo).count,
+                tint: AtelierTheme.workflowTodo
+            ),
+        ]
+    }
+
+    private var workflowDistributionText: String {
+        workflowSegments
+            .map { "\($0.label) \($0.count)" }
+            .joined(separator: ", ")
+    }
+
+    private var summaryDivider: some View {
+        Rectangle()
+            .fill(AtelierTheme.border)
+            .frame(height: AtelierTheme.strokeHairline)
+    }
+
     private var planStatusBadge: some View {
-        Text(planStatusText.uppercased())
+        let tint = planStatusColor
+        return Text(planStatusText.uppercased())
             .atelierFont(size: AtelierTypography.micro, weight: .semibold)
             .tracking(0.5)
-            .foregroundStyle(AtelierTheme.accentInk)
+            .foregroundStyle(.primary)
             .padding(.horizontal, AtelierMetrics.spaceS)
             .padding(.vertical, 3)
-            .background(AtelierTheme.accent, in: Capsule())
+            .background(tint.opacity(0.12), in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(tint.opacity(0.28), lineWidth: AtelierTheme.strokeControl)
+            }
             .fixedSize()
+            .accessibilityLabel("Plan status \(planStatusText)")
+    }
+
+    private var planStatusColor: Color {
+        switch model.plan?.status {
+        case .active: AtelierTheme.accent
+        case .done: AtelierTheme.workflowDone
+        case .archived: .secondary
+        default: .secondary
+        }
     }
 
     private var planStatusText: String {
@@ -129,67 +251,26 @@ struct WatchtowerPanelView: View {
         }
     }
 
-    // MARK: - Progress
-
-    private var progressCard: some View {
-        VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("\(Int((model.progress * 100).rounded()))%")
-                    .atelierFont(size: AtelierTypography.display, weight: .bold)
-                    .foregroundStyle(AtelierTheme.accent)
-                    .monospacedDigit()
-                Spacer(minLength: 0)
-                Text("\(model.doneCount) of \(model.totalCount) done")
-                    .atelierFont(size: AtelierTypography.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(AtelierTheme.border.opacity(0.6))
-                    Capsule()
-                        .fill(AtelierTheme.accent)
-                        .frame(width: max(0, proxy.size.width * model.progress))
-                }
-            }
-            .frame(height: 8)
-            .accessibilityElement()
-            .accessibilityLabel("Plan progress")
-            .accessibilityValue("\(model.doneCount) of \(model.totalCount) done")
-        }
-        .padding(AtelierMetrics.spaceM)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .atelierCard(radius: AtelierTheme.panelRadius, fill: AtelierTheme.raised)
-    }
-
-    // MARK: - Status counts
-
-    private var statusCounts: some View {
-        HStack(spacing: 0) {
-            countCell("Done", model.doneCount, tint: AtelierTheme.gitAdded)
-            countDivider
-            countCell("Active", model.tasks(in: .active).count, tint: AtelierTheme.accent)
-            countDivider
-            countCell("Blocked", model.blockedIds.count, tint: AtelierTheme.danger)
-        }
-        .frame(maxWidth: .infinity)
-        .atelierCard()
-    }
-
     private func countCell(_ label: String, _ value: Int, tint: Color) -> some View {
-        HStack(spacing: AtelierMetrics.spaceXS) {
+        VStack(spacing: 2) {
+            Text("\(value)")
+                .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+                .foregroundStyle(.primary)
+                .monospacedDigit()
             Text(label.uppercased())
                 .atelierFont(size: AtelierTypography.micro, weight: .medium)
                 .tracking(0.4)
                 .foregroundStyle(.secondary)
-            Text("\(value)")
-                .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                .foregroundStyle(tint)
-                .monospacedDigit()
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, AtelierMetrics.spaceS)
-        .accessibilityElement(children: .combine)
+        .overlay(alignment: .top) {
+            Capsule()
+                .fill(tint)
+                .frame(width: AtelierMetrics.regularIconSize, height: 2)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(label) \(value)")
     }
 
@@ -238,18 +319,89 @@ struct WatchtowerPanelView: View {
 
     private var commandsCard: some View {
         VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
-            Text("watchtower")
-                .atelierFont(size: AtelierTypography.caption, design: .monospaced)
-                .foregroundStyle(.secondary)
-            WatchtowerFlowLayout(spacing: AtelierMetrics.spaceXS) {
+            HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceS) {
+                Text("Command deck")
+                    .atelierFont(size: AtelierTypography.label, weight: .semibold)
+                    .foregroundStyle(AtelierTheme.workspaceRailForeground)
+                Spacer(minLength: 0)
+                Text("Copy or drag")
+                    .atelierFont(size: AtelierTypography.micro)
+                    .foregroundStyle(AtelierTheme.workspaceRailSecondary)
+            }
+            LazyVGrid(columns: commandColumns, spacing: AtelierMetrics.spaceXS) {
                 ForEach(WatchtowerCommand.all) { command in
-                    WatchtowerCommandChip(command: command)
+                    WatchtowerCommandChip(command: command, isOnGraphite: true)
                 }
             }
         }
         .padding(AtelierMetrics.spaceM)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .atelierCard(radius: AtelierTheme.panelRadius, fill: AtelierTheme.raised)
+        .atelierCard(radius: AtelierTheme.panelRadius, fill: AtelierTheme.workspaceRailSolid)
+    }
+
+    private var launchSurface: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Rectangle()
+                .fill(AtelierTheme.accent)
+                .frame(height: 2)
+                .accessibilityHidden(true)
+
+            HStack(spacing: AtelierMetrics.spaceM) {
+                Image(systemName: "binoculars")
+                    .font(.system(size: AtelierTypography.headline, weight: .medium))
+                    .foregroundStyle(AtelierTheme.accent)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        AtelierTheme.accent.opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: AtelierTheme.controlRadius, style: .continuous)
+                    )
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("No active plan")
+                        .atelierFont(size: AtelierTypography.headline, weight: .semibold)
+                        .foregroundStyle(AtelierTheme.workspaceRailForeground)
+                    Text("Copy a command, or drag it onto a terminal.")
+                        .atelierFont(size: AtelierTypography.caption)
+                        .foregroundStyle(AtelierTheme.workspaceRailSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(AtelierMetrics.spaceM)
+
+            commandDeckDivider
+
+            VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
+                ForEach(WatchtowerCommand.all.prefix(1)) { command in
+                    WatchtowerCommandChip(command: command, isPrimary: true, isOnGraphite: true)
+                }
+                Text("More commands")
+                    .atelierFont(size: AtelierTypography.caption, weight: .medium)
+                    .foregroundStyle(AtelierTheme.workspaceRailSecondary)
+                LazyVGrid(columns: commandColumns, spacing: AtelierMetrics.spaceXS) {
+                    ForEach(WatchtowerCommand.all.dropFirst()) { command in
+                        WatchtowerCommandChip(command: command, isOnGraphite: true)
+                    }
+                }
+            }
+            .padding(AtelierMetrics.spaceM)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .atelierCard(radius: AtelierTheme.panelRadius, fill: AtelierTheme.workspaceRailSolid)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Watchtower commands")
+    }
+
+    private var commandDeckDivider: some View {
+        Rectangle()
+            .fill(AtelierTheme.workspaceRailBorder.opacity(0.72))
+            .frame(height: AtelierTheme.strokeHairline)
+    }
+
+    private var commandColumns: [GridItem] {
+        [
+            GridItem(.flexible(), spacing: AtelierMetrics.spaceXS),
+            GridItem(.flexible(), spacing: AtelierMetrics.spaceXS),
+        ]
     }
 
     // MARK: - Task groups
@@ -261,71 +413,73 @@ struct WatchtowerPanelView: View {
                 disclosureSection(
                     title: title(for: group),
                     count: tasks.count,
+                    tint: color(for: group),
                     isExpanded: group == .active || group == .blocked ? .constant(true) : $todoExpanded
                 ) {
-                    ForEach(tasks, id: \.order) { task in
-                        taskRow(task, group: group)
+                    VStack(spacing: AtelierMetrics.spaceXS) {
+                        ForEach(tasks, id: \.order) { task in
+                            taskRow(task)
+                        }
                     }
+                    .padding(.top, AtelierMetrics.spaceXS)
                 }
             }
         }
     }
 
-    private func taskRow(_ task: WatchtowerTask, group: WatchtowerTaskGroup) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceM) {
-            Button {
-                open(task.specPath ?? model.plan?.manifestPath)
-            } label: {
-                Text(task.id)
-                    .atelierFont(size: AtelierTypography.caption, weight: .medium, design: .monospaced)
-                    .foregroundStyle(AtelierTheme.codeCyan)
-                    .frame(width: 72, alignment: .leading)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open \(task.id)")
-            .atelierPointerCursor()
-
-            Text(task.title)
-                .atelierFont(size: AtelierTypography.body)
-                .lineLimit(2)
-            Spacer(minLength: AtelierMetrics.spaceS)
-            statusPill(task.status)
+    private func taskRow(_ task: WatchtowerTask) -> some View {
+        WatchtowerTaskCard(
+            task: task,
+            statusLabel: statusText(task.status),
+            statusTint: statusColor(task.status)
+        ) {
+            open(task.specPath ?? model.plan?.manifestPath)
         }
-        .padding(.vertical, AtelierMetrics.spaceS)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Archive
 
     private var archiveSection: some View {
-        disclosureSection(title: "Archive", count: model.archive.count, isExpanded: $archiveExpanded) {
-            ForEach(model.archive, id: \.slug) { entry in
-                HStack(alignment: .firstTextBaseline, spacing: AtelierMetrics.spaceM) {
-                    Button {
-                        open(entry.manifestPath)
-                    } label: {
-                        Text("Archive")
-                            .atelierFont(size: AtelierTypography.caption, weight: .medium)
-                            .foregroundStyle(AtelierTheme.codeCyan)
-                            .frame(width: 72, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Open archived plan \(entry.slug)")
-                    .atelierPointerCursor()
-
-                    Text(entry.slug)
-                        .atelierFont(size: AtelierTypography.caption, design: .monospaced)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: AtelierMetrics.spaceS)
-                    tagPill("SAVED", tint: .secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                archiveExpanded.toggle()
+            } label: {
+                HStack(spacing: AtelierMetrics.spaceS) {
+                    Image(systemName: archiveExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: AtelierTypography.micro, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Archive")
+                        .atelierFont(size: AtelierTypography.label, weight: .semibold)
+                    Spacer(minLength: 0)
+                    Text("\(model.archive.count) plans")
+                        .atelierFont(size: AtelierTypography.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
-                .padding(.vertical, AtelierMetrics.spaceS)
+                .padding(.horizontal, AtelierMetrics.spaceS)
+                .frame(height: AtelierMetrics.sectionHeaderHeight)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Archive, \(model.archive.count) plans")
+            .accessibilityValue(archiveExpanded ? "Expanded" : "Collapsed")
+            .atelierPointerCursor()
+
+            if archiveExpanded {
+                summaryDivider
+                ForEach(model.archive, id: \.slug) { entry in
+                    WatchtowerArchiveRow(entry: entry) {
+                        open(entry.manifestPath)
+                    }
+                    if entry.slug != model.archive.last?.slug {
+                        summaryDivider
+                            .padding(.horizontal, AtelierMetrics.spaceS)
+                    }
+                }
             }
         }
+        .atelierCard(radius: AtelierTheme.controlRadius, fill: AtelierTheme.panel.opacity(0.72))
     }
 
     // MARK: - Building blocks
@@ -333,66 +487,49 @@ struct WatchtowerPanelView: View {
     private func disclosureSection<Content: View>(
         title: String,
         count: Int,
+        tint: Color? = nil,
         isExpanded: Binding<Bool>,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let sectionTint = tint ?? AtelierTheme.border
+        let sectionFill = tint?.opacity(0.06) ?? AtelierTheme.panel
+        return VStack(alignment: .leading, spacing: 0) {
             Button {
                 isExpanded.wrappedValue.toggle()
             } label: {
-                HStack(spacing: AtelierMetrics.spaceS) {
-                    Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
-                        .font(.system(size: AtelierTypography.micro, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Text(title)
-                        .atelierFont(size: AtelierTypography.label, weight: .semibold)
-                    Spacer(minLength: 0)
-                    Text("\(count)")
-                        .atelierFont(size: AtelierTypography.caption, weight: .medium)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+                HStack(spacing: 0) {
+                    Rectangle()
+                        .fill(sectionTint)
+                        .frame(width: 2)
+                        .accessibilityHidden(true)
+                    HStack(spacing: AtelierMetrics.spaceS) {
+                        Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
+                            .font(.system(size: AtelierTypography.micro, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Text(title)
+                            .atelierFont(size: AtelierTypography.label, weight: .semibold)
+                        Spacer(minLength: 0)
+                        Text("\(count)")
+                            .atelierFont(size: AtelierTypography.caption, weight: .medium)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .padding(.horizontal, AtelierMetrics.spaceS)
                 }
                 .frame(height: AtelierMetrics.sectionHeaderHeight)
+                .background(sectionFill)
+                .clipShape(.rect(cornerRadius: AtelierTheme.rowRadius))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("\(title), \(count)")
+            .accessibilityValue(isExpanded.wrappedValue ? "Expanded" : "Collapsed")
             .atelierPointerCursor()
 
             if isExpanded.wrappedValue {
                 content()
             }
         }
-    }
-
-    private func statusPill(_ status: WatchtowerTaskStatus) -> some View {
-        tagPill(statusText(status), tint: statusColor(status))
-    }
-
-    private func tagPill(_ text: String, tint: Color) -> some View {
-        Text(text)
-            .atelierFont(size: AtelierTypography.micro, weight: .medium)
-            .tracking(0.4)
-            .foregroundStyle(tint)
-            .padding(.horizontal, AtelierMetrics.spaceS)
-            .padding(.vertical, 2)
-            .overlay {
-                Capsule().stroke(tint.opacity(0.5), lineWidth: AtelierTheme.strokeControl)
-            }
-            .fixedSize()
-    }
-
-    private var noPlanNote: some View {
-        VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
-            Label("No active plan", systemImage: "binoculars")
-                .atelierFont(size: AtelierTypography.body, weight: .medium)
-            Text("Run /watchtower new to create one.")
-                .atelierFont(size: AtelierTypography.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(AtelierMetrics.spaceM)
-        .atelierCard(radius: AtelierTheme.panelRadius, fill: AtelierTheme.raised)
     }
 
     private var separator: some View {
@@ -411,11 +548,20 @@ struct WatchtowerPanelView: View {
     // Theme colors are precomputed constants; no allocation on the draw path.
     private func statusColor(_ status: WatchtowerTaskStatus) -> Color {
         switch status {
-        case .done: AtelierTheme.gitAdded
+        case .done: AtelierTheme.workflowDone
         case .inProgress: AtelierTheme.accent
-        case .blocked: AtelierTheme.danger
-        case .todo: AtelierTheme.gitOrange
+        case .blocked: AtelierTheme.workflowBlocked
+        case .todo: AtelierTheme.workflowTodo
         case .unknown: .secondary
+        }
+    }
+
+    private func color(for group: WatchtowerTaskGroup) -> Color {
+        switch group {
+        case .active: AtelierTheme.accent
+        case .blocked: AtelierTheme.workflowBlocked
+        case .todo: AtelierTheme.workflowTodo
+        case .done: AtelierTheme.workflowDone
         }
     }
 
@@ -439,28 +585,124 @@ struct WatchtowerPanelView: View {
     }
 }
 
-// One command chip: click copies to the clipboard; drag drops onto the terminal to run.
+private struct WatchtowerTaskCard: View {
+    let task: WatchtowerTask
+    let statusLabel: String
+    let statusTint: Color
+    let onOpen: () -> Void
+
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
+    private var isHighlighted: Bool {
+        isHovered || isFocused
+    }
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
+                HStack(alignment: .center, spacing: AtelierMetrics.spaceS) {
+                    Text(task.id)
+                        .atelierFont(
+                            size: AtelierTypography.caption,
+                            weight: .medium,
+                            design: .monospaced
+                        )
+                        .foregroundStyle(isHighlighted ? AtelierTheme.accent : .secondary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: AtelierMetrics.spaceS)
+
+                    Text(statusLabel)
+                        .atelierFont(size: AtelierTypography.micro, weight: .medium)
+                        .tracking(0.4)
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, AtelierMetrics.spaceS)
+                        .padding(.vertical, 2)
+                        .background(statusTint.opacity(0.10), in: Capsule())
+                        .overlay {
+                            Capsule().stroke(
+                                statusTint.opacity(0.28),
+                                lineWidth: AtelierTheme.strokeControl
+                            )
+                        }
+                        .fixedSize()
+                }
+
+                Text(task.title)
+                    .atelierFont(size: AtelierTypography.body, weight: .medium)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, AtelierMetrics.spaceM)
+            .padding(.vertical, AtelierMetrics.spaceS)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .background(
+                isHighlighted
+                    ? AtelierTheme.accent.opacity(0.07)
+                    : AtelierTheme.panel.opacity(0.76),
+                in: RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+                    .stroke(
+                        isHighlighted
+                            ? AtelierTheme.accent.opacity(0.34)
+                            : AtelierTheme.border.opacity(0.72),
+                        lineWidth: AtelierTheme.strokeControl
+                    )
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($isFocused)
+        .accessibilityLabel("\(task.id), \(task.title), \(statusLabel)")
+        .accessibilityHint("Opens the task specification")
+        .help("Open \(task.id)")
+        .onHover { isHovered = $0 }
+        .atelierPointerCursor()
+    }
+}
+
+// One command row: click copies to the clipboard; drag drops onto the terminal to run.
 private struct WatchtowerCommandChip: View {
     let command: WatchtowerCommand
+    var isPrimary = false
+    var isOnGraphite = false
+
     @State private var copied = false
+    @State private var isHovered = false
 
     var body: some View {
         Button(action: copy) {
-            HStack(spacing: AtelierMetrics.spaceXS) {
-                if copied {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: AtelierTypography.micro, weight: .semibold))
-                        .foregroundStyle(AtelierTheme.gitAdded)
-                }
-                Text(command.label)
-                    .atelierFont(size: AtelierTypography.caption, design: .monospaced)
+            HStack(spacing: AtelierMetrics.spaceS) {
+                Text(isPrimary ? command.command : command.label)
+                    .atelierFont(
+                        size: AtelierTypography.caption,
+                        weight: isPrimary ? .semibold : .regular,
+                        design: .monospaced
+                    )
+                    .foregroundStyle(commandForeground)
+                    .lineLimit(1)
+                    .minimumScaleFactor(isPrimary ? 1 : 0.82)
+                    .allowsTightening(true)
+                Spacer(minLength: AtelierMetrics.spaceXS)
+                Image(systemName: copied ? "checkmark" : (isPrimary ? "doc.on.doc" : "arrow.up.left"))
+                    .font(.system(size: AtelierTypography.micro, weight: .semibold))
+                    .foregroundStyle(commandIconForeground)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, AtelierMetrics.spaceS)
-            .padding(.vertical, AtelierMetrics.spaceXS)
-            .background(AtelierTheme.panel, in: RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: isPrimary ? 34 : AtelierMetrics.controlHeight)
+            .background(
+                chipFill,
+                in: RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
-                    .stroke(AtelierTheme.border, lineWidth: AtelierTheme.strokeControl)
+                    .stroke(chipStroke, lineWidth: AtelierTheme.strokeControl)
             }
             .contentShape(Rectangle())
         }
@@ -469,7 +711,55 @@ private struct WatchtowerCommandChip: View {
         .help("Click to copy \(command.command). Drag onto the terminal to run.")
         .accessibilityLabel("\(command.command) command")
         .accessibilityHint("Copies to the clipboard. Drag onto the terminal to run.")
+        .onHover { isHovered = $0 }
         .atelierPointerCursor()
+    }
+
+    private var commandForeground: Color {
+        if isPrimary && !copied {
+            return AtelierTheme.accentInk
+        }
+        return isOnGraphite ? AtelierTheme.workspaceRailForeground : .primary
+    }
+
+    private var commandIconForeground: Color {
+        if copied {
+            return AtelierTheme.workflowDone
+        }
+        if isPrimary {
+            return AtelierTheme.accentInk.opacity(0.84)
+        }
+        return isOnGraphite ? AtelierTheme.workspaceRailSecondary : .secondary
+    }
+
+    private var chipFill: Color {
+        if copied {
+            return AtelierTheme.workflowDone.opacity(isPrimary ? 0.18 : 0.10)
+        }
+        if isPrimary {
+            return isHovered ? AtelierTheme.accent.opacity(0.88) : AtelierTheme.accent
+        }
+        if isOnGraphite {
+            return isHovered
+                ? AtelierTheme.accent.opacity(0.18)
+                : AtelierTheme.workspaceRailHover.opacity(0.72)
+        }
+        return isHovered ? AtelierTheme.accent.opacity(0.10) : AtelierTheme.panel.opacity(0.66)
+    }
+
+    private var chipStroke: Color {
+        if copied {
+            return AtelierTheme.workflowDone.opacity(0.32)
+        }
+        if isPrimary {
+            return AtelierTheme.accent
+        }
+        if isOnGraphite {
+            return isHovered
+                ? AtelierTheme.accent.opacity(0.56)
+                : AtelierTheme.workspaceRailBorder.opacity(0.72)
+        }
+        return isHovered ? AtelierTheme.accent.opacity(0.32) : AtelierTheme.border.opacity(0.72)
     }
 
     private func copy() {
@@ -483,46 +773,75 @@ private struct WatchtowerCommandChip: View {
     }
 }
 
-// Left-to-right wrapping layout for the command chips.
-struct WatchtowerFlowLayout: Layout {
-    var spacing: CGFloat
+private struct WatchtowerArchiveRow: View {
+    let entry: WatchtowerArchivePlan
+    let onOpen: () -> Void
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
-        let maxWidth = proposal.width ?? .greatestFiniteMagnitude
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        var widest: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > maxWidth {
-                y += rowHeight + spacing
-                x = 0
-                rowHeight = 0
-            }
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-            widest = max(widest, x - spacing)
-        }
-        let width = proposal.width ?? widest
-        return CGSize(width: width, height: y + rowHeight)
+    @State private var isHovered = false
+    @FocusState private var isFocused: Bool
+
+    private var isHighlighted: Bool {
+        isHovered || isFocused
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
-        var x = bounds.minX
-        var y = bounds.minY
-        var rowHeight: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + size.width > bounds.maxX {
-                y += rowHeight + spacing
-                x = bounds.minX
-                rowHeight = 0
+    var body: some View {
+        let display = archiveDisplay
+        Button(action: onOpen) {
+            HStack(alignment: .center, spacing: AtelierMetrics.spaceM) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(display.title)
+                        .atelierFont(size: AtelierTypography.caption, weight: .medium)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Text(display.date)
+                        .atelierFont(
+                            size: AtelierTypography.micro,
+                            weight: .medium,
+                            design: .monospaced
+                        )
+                        .foregroundStyle(isHighlighted ? AtelierTheme.accent : .secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: AtelierMetrics.spaceS)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: AtelierTypography.micro, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
-            subview.place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(size))
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
+            .padding(.horizontal, AtelierMetrics.spaceM)
+            .padding(.vertical, AtelierMetrics.spaceS)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minHeight: 44)
+            .background(isHighlighted ? AtelierTheme.accent.opacity(0.07) : .clear)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .focused($isFocused)
+        .accessibilityLabel("Open archived plan \(display.title), \(display.date), \(entry.slug)")
+        .accessibilityHint("Opens the archived plan manifest")
+        .onHover { isHovered = $0 }
+        .atelierPointerCursor()
+    }
+
+    private var archiveDisplay: (date: String, title: String) {
+        let datePrefix = String(entry.slug.prefix(8))
+        let hasDate = datePrefix.count == 8 && datePrefix.allSatisfy(\.isNumber)
+        let rawTitle = hasDate ? String(entry.slug.dropFirst(8)) : entry.slug
+        let title = rawTitle
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-_"))
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+        guard hasDate else {
+            return ("PLAN", title)
+        }
+        let year = datePrefix.prefix(4)
+        let month = datePrefix.dropFirst(4).prefix(2)
+        let day = datePrefix.suffix(2)
+        return ("\(year).\(month).\(day)", title)
     }
 }
 
@@ -542,8 +861,10 @@ extension WatchtowerModel {
             "",
             "| Order | TASK | Group | Status | Spec | Deps | Context | Notes |",
             "|---|---|---|---|---|---|---|---|",
-            "| 1 | TASK-001 Mock dashboard row | ui | TODO | - | - | - | n |",
-            "| 2 | TASK-002 Mock command copy check | ui | TODO | - | TASK-001 | - | n |",
+            "| 1 | TASK-001 Completed summary surface | ui | DONE | - | - | - | n |",
+            "| 2 | TASK-002 Active workflow strip | ui | IN PROGRESS | - | TASK-001 | - | n |",
+            "| 3 | TASK-003 Blocked accessibility audit | ui | BLOCKED | - | TASK-002 | - | n |",
+            "| 4 | TASK-004 Pending command polish | ui | TODO | - | TASK-003 | - | n |",
         ].joined(separator: "\n")
         let plan = WatchtowerParser.parsePlanContent(content, manifestPath: "/ws/watchtower/NEXT.md")
         let archive = [

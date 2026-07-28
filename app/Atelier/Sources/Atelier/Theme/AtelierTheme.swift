@@ -15,6 +15,9 @@ enum AtelierInteractionState: Equatable, Sendable {
 enum AtelierTheme {
     static let accent = Color(nsColor: AppKitThemeAdapter.accent)
     static let accentInk = Color(nsColor: AppKitThemeAdapter.accentInk)
+    static let workflowDone = Color(nsColor: AppKitThemeAdapter.workflowDone)
+    static let workflowTodo = Color(nsColor: AppKitThemeAdapter.workflowTodo)
+    static let workflowBlocked = Color(nsColor: AppKitThemeAdapter.workflowBlocked)
     static let chrome = Color(nsColor: AppKitThemeAdapter.chrome)
     static let canvas = Color(nsColor: AppKitThemeAdapter.canvas)
     static let sidebar = Color(nsColor: AppKitThemeAdapter.sidebar)
