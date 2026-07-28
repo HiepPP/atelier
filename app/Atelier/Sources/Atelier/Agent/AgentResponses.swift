@@ -429,6 +429,11 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
         let modificationDate: Date
     }
 
+    private struct DirectoryFingerprint: Equatable {
+        let path: String
+        let modificationDate: Date
+    }
+
     private let workspacePath: String
     private let modifiedAfter: Date
     private let roots: [URL]
@@ -437,6 +442,7 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     private let transcriptLimitPerRoot: Int
     private let uncachedBytesLimit: Int
     private var directoryLimitPerRoot: Int { transcriptLimitPerRoot * 4 }
+    private let discoveryInterval: TimeInterval
     private var discoveredURLs: [URL] = []
     private var cache: [URL: CachedTranscript] = [:]
     private var foreignURLs: Set<URL> = []
@@ -445,6 +451,14 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     private var lastFingerprints: [FileFingerprint] = []
     private var lastMergedResponses: [AgentResponse] = []
     private var hasMergedResult = false
+    /// How long a reused discovery walk stays valid before a full re-walk runs
+    /// even when no visited directory moved, so files created in directories the
+    /// bounded walk never visited still surface eventually.
+    private static let discoveryWalkRevalidationInterval: TimeInterval = 60
+    private var lastWalkFingerprints: [DirectoryFingerprint] = []
+    private var lastWalkURLs: [URL] = []
+    private var nextForcedWalkDate = Date.distantPast
+    private(set) var discoveryWalkCount = 0
     private(set) var parsedByteCount = 0
     private(set) var mergeCount = 0
 
@@ -454,10 +468,12 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
         roots: [URL]? = nil,
         responseLimit: Int = 100,
         transcriptLimitPerRoot: Int = 100,
-        uncachedBytesLimit: Int = 16 * 1024 * 1024
+        uncachedBytesLimit: Int = 16 * 1024 * 1024,
+        discoveryInterval: TimeInterval = 2
     ) {
         self.workspacePath = workspacePath
         self.modifiedAfter = modifiedAfter
+        self.discoveryInterval = max(0, discoveryInterval)
         self.responseLimit = max(1, responseLimit)
         self.transcriptLimitPerRoot = max(1, transcriptLimitPerRoot)
         self.uncachedBytesLimit = max(1, uncachedBytesLimit)
@@ -514,7 +530,7 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     private func loadResponsesWithoutInitialGate() -> [AgentResponse] {
         if Date() >= nextDiscoveryDate {
             discoveredURLs = transcriptURLs()
-            nextDiscoveryDate = Date().addingTimeInterval(2)
+            nextDiscoveryDate = Date().addingTimeInterval(discoveryInterval)
             let activeURLs = Set(discoveredURLs)
             cache = cache.filter { activeURLs.contains($0.key) }
             foreignURLs.formIntersection(activeURLs)
@@ -716,7 +732,22 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
     }
 
     private func transcriptURLs() -> [URL] {
+        // The recursive walk lists directory contents and reads per-file
+        // resource values, and it runs on every discovery pass. Creating or
+        // deleting a transcript moves its parent directory's modification
+        // date, while an append moves only the file's own date. Re-stat the
+        // directories the last walk visited; when none moved, reuse the last
+        // file list without listing anything.
+        if Date() < nextForcedWalkDate,
+           !lastWalkFingerprints.isEmpty,
+           lastWalkFingerprints.allSatisfy({
+               $0.modificationDate == Self.directoryModificationDate(atPath: $0.path)
+           }) {
+            return lastWalkURLs
+        }
+
         var candidates: [TranscriptEntry] = []
+        var fingerprints: [DirectoryFingerprint] = []
         let keys: Set<URLResourceKey> = [
             .contentModificationDateKey,
             .fileSizeKey,
@@ -724,25 +755,49 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
             .isRegularFileKey
         ]
 
-        for root in roots where FileManager.default.fileExists(atPath: root.path) {
+        for root in roots {
+            guard FileManager.default.fileExists(atPath: root.path) else {
+                // Record a missing root too. Its sentinel date changes to a
+                // real one when the root appears, forcing the next full walk.
+                fingerprints.append(
+                    DirectoryFingerprint(path: root.path, modificationDate: .distantPast)
+                )
+                continue
+            }
             var rootCandidates: [TranscriptEntry] = []
             var visitedDirectoryCount = 0
             collectRecentTranscriptEntries(
                 in: root,
                 keys: keys,
                 entries: &rootCandidates,
-                visitedDirectoryCount: &visitedDirectoryCount
+                visitedDirectoryCount: &visitedDirectoryCount,
+                directoryFingerprints: &fingerprints
             )
             candidates.append(contentsOf: rootCandidates)
         }
-        return candidates.sorted(by: Self.isNewerEntry).map(\.url)
+        let urls = candidates.sorted(by: Self.isNewerEntry).map(\.url)
+        // A cancelled walk holds a partial list; do not cache it as complete.
+        if !isCurrentTaskCancelled {
+            discoveryWalkCount += 1
+            lastWalkFingerprints = fingerprints
+            lastWalkURLs = urls
+            nextForcedWalkDate = Date().addingTimeInterval(Self.discoveryWalkRevalidationInterval)
+        }
+        return urls
+    }
+
+    private static func directoryModificationDate(atPath path: String) -> Date {
+        var info = stat()
+        guard stat(path, &info) == 0 else { return .distantPast }
+        return modificationDate(from: info)
     }
 
     private func collectRecentTranscriptEntries(
         in directory: URL,
         keys: Set<URLResourceKey>,
         entries: inout [TranscriptEntry],
-        visitedDirectoryCount: inout Int
+        visitedDirectoryCount: inout Int,
+        directoryFingerprints: inout [DirectoryFingerprint]
     ) {
         guard entries.count < transcriptLimitPerRoot,
               visitedDirectoryCount < directoryLimitPerRoot,
@@ -750,6 +805,14 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
             return
         }
         visitedDirectoryCount += 1
+        // Stat the directory before listing it, so a file that lands between
+        // the two reads shows up as a moved date on the next revalidation.
+        directoryFingerprints.append(
+            DirectoryFingerprint(
+                path: directory.path,
+                modificationDate: Self.directoryModificationDate(atPath: directory.path)
+            )
+        )
 
         guard let children = try? FileManager.default.contentsOfDirectory(
             at: directory,
@@ -776,7 +839,8 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
                     in: entry.url,
                     keys: keys,
                     entries: &entries,
-                    visitedDirectoryCount: &visitedDirectoryCount
+                    visitedDirectoryCount: &visitedDirectoryCount,
+                    directoryFingerprints: &directoryFingerprints
                 )
             } else if entry.isRegularFile,
                       entry.url.pathExtension == "jsonl",

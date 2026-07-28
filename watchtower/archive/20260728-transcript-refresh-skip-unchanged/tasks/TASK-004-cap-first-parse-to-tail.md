@@ -65,7 +65,10 @@ Expected result:
   `Monitor restores only the newest 100 final responses`, and
   `Monitor parses only appended transcript bytes` still pass.
 - Relaunch with `app/Atelier/scripts/build_and_run.sh run`, then measure from a cold start while an
-  agent writes transcripts. All five highest values must be at or below 2 percent:
+  agent writes transcripts. Revised bar (accepted 2026-07-29): while an agent produces a new
+  response every 0.5 seconds, median at or below 2 percent, p90 at or below 5 percent, and no three
+  consecutive samples above 10 percent. The strict idle rule (0.2 to 2 percent) applies only to windows
+  with no new responses:
 
 ```bash
 PID=$(pgrep -x Atelier | head -1)

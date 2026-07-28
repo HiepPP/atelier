@@ -23,6 +23,8 @@ final class WorkspaceSession {
     private let workspaceSearchRuntimeContext: WorkspaceGemmaSearchRuntimeContext
     private let gitNexusSearchClient: any GitNexusCodeIntelligence
     private var fileWatcher: FileWatcher?
+    @ObservationIgnored private var fileTreeInvalidationTask: Task<Void, Never>?
+    @ObservationIgnored private var lastFileTreeInvalidationSpawn: ContinuousClock.Instant?
     private(set) var isStarted = false
     private let workspaceAccess: WorkspaceAccessController?
 
@@ -119,7 +121,7 @@ final class WorkspaceSession {
         let watcher = FileWatcher(path: rootURL.path) { [weak self] invalidation in
             guard let self else { return }
             if invalidation.contains(.workspaceContent) {
-                invalidateFileTree()
+                scheduleFileTreeInvalidation()
             }
             if invalidation.contains(.watchtowerPlan) {
                 watchtower.refresh()
@@ -143,6 +145,8 @@ final class WorkspaceSession {
             isStarted = false
             fileWatcher?.stop()
             fileWatcher = nil
+            fileTreeInvalidationTask?.cancel()
+            fileTreeInvalidationTask = nil
             watchtower.setRoot(nil)
             gitModel.stop()
             gemmaAgent.close()
@@ -235,6 +239,24 @@ final class WorkspaceSession {
         workspaceSearchRuntimeContext.revision = fileTreeRevision
         paletteModel.updateFileRevision(fileTreeRevision)
         workspaceSearchModel.updateFileRevision(fileTreeRevision)
+    }
+
+    /// Watcher-driven invalidation. A workspace write burst delivers watcher
+    /// events about twice per second, and each revision bump re-renders every
+    /// consumer and re-lists expanded file-tree directories. Space bumps at
+    /// least two seconds apart with a trailing delay, so the burst collapses
+    /// while the final state still lands. Direct user actions (create, rename,
+    /// trash) keep calling `invalidateFileTree` for an immediate update.
+    private func scheduleFileTreeInvalidation() {
+        fileTreeInvalidationTask?.cancel()
+        let elapsed = lastFileTreeInvalidationSpawn.map { ContinuousClock.now - $0 }
+        let delay = GitRefreshThrottlePolicy.delay(sinceLastSpawn: elapsed)
+        fileTreeInvalidationTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self else { return }
+            lastFileTreeInvalidationSpawn = .now
+            invalidateFileTree()
+        }
     }
 
     isolated deinit {

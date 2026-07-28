@@ -537,6 +537,11 @@ Persistence boundaries:
 - Every Explorer item keeps the pointing-hand cursor over its disclosure, icon, label, badges, and
   trailing row area. No item subview may expose the text or arrow cursor.
 - Vertically center the disclosure, icon, and label within every file-tree row.
+- Throttle watcher-driven file-tree invalidation. Filesystem events bump the shared file-tree
+  revision at most once per two seconds with a trailing delay, so a workspace write burst collapses
+  into spaced refreshes while the final state still lands. Direct user actions in the tree (create,
+  rename, move to Trash, ignore) refresh immediately. The revision read stays scoped to the
+  explorer tree view, so a bump re-renders the tree, not the whole sidebar.
 - Use overlay Explorer scroll indicators that fade away when scrolling stops.
 - Keep the base file or folder icon and add an `arrow.turn.up.right` badge after symlink names.
 - Do not expand directory symlinks from Explorer.
@@ -1082,6 +1087,12 @@ The five background features, all read-only and cancellable:
   size and modification date read. A refresh where no file changed returns the previous merged
   result: it reads no full file attributes, parses nothing, rebuilds no response list, and publishes
   no state change. Only a file whose size or modification date moved reaches the parse path.
+- Cache the transcript discovery walk. A discovery pass records the modification date of every
+  directory it visits. The next pass re-stats only those directories, and when none moved it
+  reuses the previous file list without listing any directory contents or reading any per-file
+  resource values. Creating or deleting a transcript changes its parent directory and forces a
+  fresh walk; a bounded time limit re-walks periodically so files in unvisited directories still
+  surface.
 - Read transcripts newest first and stop once the newest 100 responses for the workspace are in
   hand. A workspace can hold hundreds of megabytes of old transcripts, and parsing them all only to
   drop them costs repeated CPU bursts after every launch. Older transcripts stay unread.

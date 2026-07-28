@@ -256,6 +256,22 @@ actor GitCommitMessageGenerator {
     }
 }
 
+/// Spacing policy for filesystem-driven git refreshes. Agent activity emits
+/// events spaced past the debounce window, so a debounce alone spawns one
+/// `git status` per event; a minimum spacing between spawns collapses the
+/// burst while the trailing delay still captures the final state.
+nonisolated enum GitRefreshThrottlePolicy {
+    static let debounce: Duration = .milliseconds(300)
+    static let minimumSpacing: Duration = .seconds(2)
+
+    static func delay(sinceLastSpawn elapsed: Duration?) -> Duration {
+        guard let elapsed, elapsed >= .zero, elapsed < minimumSpacing else {
+            return debounce
+        }
+        return max(debounce, minimumSpacing - elapsed)
+    }
+}
+
 @MainActor
 @Observable
 final class GitWorkspaceModel {
@@ -283,6 +299,7 @@ final class GitWorkspaceModel {
     private var refreshID = UUID()
     private var statusRefreshID = UUID()
     private var pendingRepositoryMetadataRefresh = false
+    private var lastFilesystemRefreshSpawn: ContinuousClock.Instant?
 
     init(
         workspacePath: String,
@@ -391,9 +408,13 @@ final class GitWorkspaceModel {
         pendingRepositoryMetadataRefresh = pendingRepositoryMetadataRefresh
             || repositoryMetadataChanged
         invalidateTask?.cancel()
+        let delay = GitRefreshThrottlePolicy.delay(
+            sinceLastSpawn: lastFilesystemRefreshSpawn.map { .now - $0 }
+        )
         invalidateTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled else { return }
+            lastFilesystemRefreshSpawn = .now
             let refreshRepositoryMetadata = pendingRepositoryMetadataRefresh
             pendingRepositoryMetadataRefresh = false
             if refreshRepositoryMetadata {

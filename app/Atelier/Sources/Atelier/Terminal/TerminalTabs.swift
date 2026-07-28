@@ -1144,6 +1144,52 @@ nonisolated enum TerminalWorkspaceActivationPolicy {
     }
 }
 
+/// Toolbar button that opens the agent response overlay. It is its own view so
+/// the `unreadCount` read stays out of the large tab-strip body: publishing a
+/// new response re-renders only this button, not the whole strip.
+private struct AgentResponseOverlayButton: View {
+    let agentResponses: AgentResponsesModel
+    let isAgentSidecarPresented: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: AtelierMetrics.spaceXS) {
+                Image(systemName: "text.bubble")
+                Text("Response")
+                if agentResponses.unreadCount > 0 {
+                    Circle()
+                        .fill(AtelierTheme.accent)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+            .padding(.horizontal, AtelierMetrics.spaceS)
+            .frame(height: AtelierMetrics.controlHeight)
+            .contentShape(
+                RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
+            )
+        }
+        .buttonStyle(.plain)
+        .atelierPointerCursor()
+        .foregroundStyle(
+            isAgentSidecarPresented ? AtelierTheme.accent : Color.primary
+        )
+        .atelierGlassControl(isSelected: isAgentSidecarPresented)
+        .accessibilityLabel(
+            isAgentSidecarPresented
+                ? "Close agent response overlay"
+                : "Open agent response overlay"
+        )
+        .accessibilityValue("\(agentResponses.unreadCount) unread")
+        .help(
+            isAgentSidecarPresented
+                ? "Close Agent Responses"
+                : "Open Agent Responses"
+        )
+    }
+}
+
 struct TerminalTabs: View {
     @Bindable var model: TerminalTabsModel
     @Bindable var agentResponses: AgentResponsesModel
@@ -1308,39 +1354,12 @@ struct TerminalTabs: View {
                 .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.chrome)
 
                 HStack(spacing: AtelierMetrics.spaceXS) {
-                    Button(action: toggleAgentResponseOverlay) {
-                        HStack(spacing: AtelierMetrics.spaceXS) {
-                            Image(systemName: "text.bubble")
-                            Text("Response")
-                            if agentResponses.unreadCount > 0 {
-                                Circle()
-                                    .fill(AtelierTheme.accent)
-                                    .frame(width: 6, height: 6)
-                            }
-                        }
-                        .atelierFont(size: AtelierTypography.caption, weight: .semibold)
-                        .padding(.horizontal, AtelierMetrics.spaceS)
-                        .frame(height: AtelierMetrics.controlHeight)
-                        .contentShape(
-                            RoundedRectangle(cornerRadius: AtelierTheme.controlRadius)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .atelierPointerCursor()
-                    .foregroundStyle(
-                        isAgentSidecarPresented ? AtelierTheme.accent : Color.primary
-                    )
-                    .atelierGlassControl(isSelected: isAgentSidecarPresented)
-                    .accessibilityLabel(
-                        isAgentSidecarPresented
-                            ? "Close agent response overlay"
-                            : "Open agent response overlay"
-                    )
-                    .accessibilityValue("\(agentResponses.unreadCount) unread")
-                    .help(
-                        isAgentSidecarPresented
-                            ? "Close Agent Responses"
-                            : "Open Agent Responses"
+                    // A separate view keeps the unread-count read out of this
+                    // large body, so a new response only re-renders the button.
+                    AgentResponseOverlayButton(
+                        agentResponses: agentResponses,
+                        isAgentSidecarPresented: isAgentSidecarPresented,
+                        action: toggleAgentResponseOverlay
                     )
 
                     if let editor = model.selectedEditor {

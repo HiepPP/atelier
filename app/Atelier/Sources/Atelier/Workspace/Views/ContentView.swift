@@ -1227,8 +1227,8 @@ struct WorkspaceView: View {
 
             ExplorerFileTree(
                 gitModel: gitModel,
+                session: session,
                 rootURL: workspaceURL,
-                revision: session.fileTreeRevision,
                 revealRequest: chrome.explorerRevealRequest,
                 onTargetDirectoryChange: { fileTreeTargetDirectory = $0 },
                 onCreateItem: { kind, parentURL in
@@ -1465,10 +1465,12 @@ private struct GitBranchLabel: View {
     }
 }
 
+/// Reads `fileTreeRevision` and the git snapshot inside its own body, so a
+/// watcher-driven revision bump re-renders only this view, not the sidebar.
 private struct ExplorerFileTree: View {
     let gitModel: GitWorkspaceModel
+    let session: WorkspaceSession
     let rootURL: URL
-    let revision: Int
     let revealRequest: FileTreeRevealRequest?
     let onTargetDirectoryChange: (URL) -> Void
     let onCreateItem: (FileTreeCreationKind, URL) -> Void
@@ -1482,7 +1484,7 @@ private struct ExplorerFileTree: View {
     var body: some View {
         FileTreeView(
             rootURL: rootURL,
-            revision: revision,
+            revision: session.fileTreeRevision,
             revealRequest: revealRequest,
             ignoredPaths: gitModel.snapshot.status.ignoredPaths,
             onTargetDirectoryChange: onTargetDirectoryChange,

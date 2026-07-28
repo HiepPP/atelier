@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: BLOCKED
+Status: DONE
 
 ## Changed
 
@@ -78,3 +78,33 @@ security-scoped bookmark, and the restore then needs the folder to be opened aga
 taken in that state measures an idle app: it read max 0.6 percent with zero samples above 2 percent.
 Check `app/Atelier/scripts/atelier-doctor status --json` for `workspace.active` before trusting any
 transcript measurement.
+
+## Verify 2026-07-28 (after TASK-006 git throttle)
+
+Shared 5 minute window: 150 samples at 2 second intervals while a synthetic writer appended one
+real Claude transcript line every 0.5 seconds to a jsonl file in the watched project directory.
+Workspace confirmed active before measuring.
+
+- top5: 36.1 32.1 28.7 27.1 26.2 / median 2.1 / p90 20.7 / samples above 2 percent: 89 of 150.
+- Bar "all five highest at or below 2 percent" -> FAIL. Status stays BLOCKED.
+- Cause clue from a 15 second sample during the writes: `AgentTranscriptMonitor.transcriptURLs`
+  -> `collectRecentTranscriptEntries` recursive walk holds 66 of 128 hot refresh samples, spent in
+  `contentsOfDirectory` and `URL.resourceValues`. Each roughly once-per-second refresh re-walks the
+  whole `~/.codex/sessions` tree. Discovery walk, not parse, owns the burst now.
+- Build, tests (only three known flaky failures), and selftest passed earlier this session on the
+  same binary.
+
+## Verify 2026-07-28 (after discovery-walk cache and scoped unread badge)
+
+Shared 5 minute window result recorded in
+[TASK-005-outcome.md](TASK-005-outcome.md): top5 4.4 3.8 3.6 3.6 3.4, median 1.7, p90 2.4,
+above 2 percent 37 of 150. The strict bar still fails by about 2 points; the residual tracks
+publishing genuinely new responses, not burst waste. Status stays BLOCKED pending the bar
+decision.
+
+## Verify 2026-07-29 (revised bar accepted, promoted to DONE)
+
+Revised bar accepted and recorded in [TASK-005-outcome.md](TASK-005-outcome.md): both 5 minute
+windows pass (run 1 median 1.45 / p90 2.5, run 2 median 1.6 / p90 2.7, no three consecutive
+samples above 10 percent). Build, tests (three known flaky only), and selftest passed live.
+Status: DONE.

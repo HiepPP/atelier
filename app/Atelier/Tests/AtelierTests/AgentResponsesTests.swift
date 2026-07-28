@@ -315,6 +315,61 @@ struct AgentResponsesTests {
         #expect(await monitor.parsedByteCount - parsedBytesAfterFirst == appended.count)
     }
 
+    @Test("Monitor reuses the discovery walk while directory dates hold still")
+    func discoveryWalkReuse() async throws {
+        let root = temporaryDirectory("discovery-walk-reuse")
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        let day = root.appendingPathComponent("day", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: day, withIntermediateDirectories: true)
+        let transcriptURL = day.appendingPathComponent("a.jsonl")
+        let initial = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"one","cwd":"\(workspace.path)"}}
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"id":"first","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"One"}]}}
+        """
+        try initial.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            modifiedAfter: .distantPast,
+            roots: [root],
+            discoveryInterval: 0
+        )
+
+        let first = await monitor.loadResponses()
+        #expect(first.map(\.markdown) == ["One"])
+        #expect(await monitor.discoveryWalkCount == 1)
+
+        _ = await monitor.loadResponses()
+        #expect(await monitor.discoveryWalkCount == 1)
+
+        let appended = Data("""
+
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"response_item","payload":{"id":"second","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Two"}]}}
+        """.utf8)
+        let handle = try FileHandle(forWritingTo: transcriptURL)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: appended)
+        try handle.close()
+
+        // An append moves only the file date, so the walk stays reused while
+        // the fingerprint pass still picks up the new response.
+        let afterAppend = await monitor.loadResponses()
+        #expect(afterAppend.map(\.markdown) == ["One", "Two"])
+        #expect(await monitor.discoveryWalkCount == 1)
+
+        let secondURL = day.appendingPathComponent("b.jsonl")
+        let second = """
+        {"timestamp":"2026-07-17T08:00:03.000Z","type":"session_meta","payload":{"id":"two","cwd":"\(workspace.path)"}}
+        {"timestamp":"2026-07-17T08:00:04.000Z","type":"response_item","payload":{"id":"third","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Three"}]}}
+        """
+        try second.write(to: secondURL, atomically: true, encoding: .utf8)
+
+        // A new file moves its parent directory date and forces a fresh walk.
+        let afterNewFile = await monitor.loadResponses()
+        #expect(afterNewFile.map(\.markdown) == ["One", "Two", "Three"])
+        #expect(await monitor.discoveryWalkCount == 2)
+    }
+
     @Test("Monitor stops reading older transcripts once the newest fill the limit")
     func newestTranscriptsStopFurtherParsing() async throws {
         let root = temporaryDirectory("newest-first-stop")
