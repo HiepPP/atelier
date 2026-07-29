@@ -1266,6 +1266,34 @@ struct AtelierTests {
         #expect(environment["CLAUDE_CONFIG_DIR"] == "/keep")
     }
 
+    @Test("Occlusion redraw policy forces display only for the desynced key window")
+    func terminalOcclusionRedrawPolicy() {
+        // Force display: key window claims occluded while rendering is active.
+        #expect(TerminalOcclusionRedrawPolicy.shouldForceDisplay(
+            renderingActive: true, occlusionVisible: false, isKeyWindow: true
+        ))
+        #expect(!TerminalOcclusionRedrawPolicy.shouldForceDisplay(
+            renderingActive: true, occlusionVisible: true, isKeyWindow: true
+        ))
+        #expect(!TerminalOcclusionRedrawPolicy.shouldForceDisplay(
+            renderingActive: true, occlusionVisible: false, isKeyWindow: false
+        ))
+        #expect(!TerminalOcclusionRedrawPolicy.shouldForceDisplay(
+            renderingActive: false, occlusionVisible: false, isKeyWindow: true
+        ))
+
+        // Repaint on regaining visibility, but only for the active terminal.
+        #expect(TerminalOcclusionRedrawPolicy.shouldRepaintOnOcclusionChange(
+            renderingActive: true, occlusionVisible: true
+        ))
+        #expect(!TerminalOcclusionRedrawPolicy.shouldRepaintOnOcclusionChange(
+            renderingActive: true, occlusionVisible: false
+        ))
+        #expect(!TerminalOcclusionRedrawPolicy.shouldRepaintOnOcclusionChange(
+            renderingActive: false, occlusionVisible: true
+        ))
+    }
+
     @Test("Legacy terminal routes multiline input and TUI arrows")
     func terminalLegacyKeyFallback() throws {
         let sequence: (UInt16, TerminalLegacyKeyPolicy.SpecialKey?, String?, Bool) -> [UInt8]? = {

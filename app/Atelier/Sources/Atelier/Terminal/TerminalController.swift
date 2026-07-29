@@ -12,6 +12,33 @@ enum TerminalRenderingPolicy {
     }
 }
 
+/// AppKit withholds `draw(_:)`-driven display for windows it considers
+/// occluded, while Core Animation-backed SwiftUI content keeps updating. When
+/// the occlusion state desyncs from what the user actually sees (observed with
+/// a maximized window on a secondary display), the terminal freezes on its
+/// last frame even though the PTY keeps streaming into the buffer.
+enum TerminalOcclusionRedrawPolicy {
+    /// A key window means the user is interacting with it, so a missing
+    /// visible bit is a desync: pending invalidations must be drawn
+    /// explicitly or they are silently discarded.
+    static func shouldForceDisplay(
+        renderingActive: Bool,
+        occlusionVisible: Bool,
+        isKeyWindow: Bool
+    ) -> Bool {
+        renderingActive && isKeyWindow && !occlusionVisible
+    }
+
+    /// Repaint after the window becomes visible again: draws skipped while
+    /// occluded leave the backing layer showing stale content.
+    static func shouldRepaintOnOcclusionChange(
+        renderingActive: Bool,
+        occlusionVisible: Bool
+    ) -> Bool {
+        renderingActive && occlusionVisible
+    }
+}
+
 /// Bounds for the read-only terminal scrollback snapshot exposed to the Gemma
 /// sidecar. The snapshot never logs its content.
 enum TerminalScrollbackPolicy {
@@ -242,6 +269,8 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
     private var keyDownMonitor: Any?
     private var scrollWheelMonitor: Any?
     private var renderingIsActive = false
+    private var occlusionObserver: NSObjectProtocol?
+    private var forcedDisplayPending = false
 
     func setRenderingActive(_ isActive: Bool) {
         let shouldHide = !isActive
@@ -294,6 +323,7 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
         super.viewDidMoveToWindow()
         installKeyDownMonitor()
         installScrollWheelMonitor()
+        installOcclusionObserver()
         updateRendererForDisplay()
         focusIfPossible()
     }
@@ -322,7 +352,57 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
             NSEvent.removeMonitor(scrollWheelMonitor)
             self.scrollWheelMonitor = nil
         }
+        if newWindow !== window, let occlusionObserver {
+            NotificationCenter.default.removeObserver(occlusionObserver)
+            self.occlusionObserver = nil
+        }
         super.viewWillMove(toWindow: newWindow)
+    }
+
+    private func installOcclusionObserver() {
+        if let occlusionObserver {
+            NotificationCenter.default.removeObserver(occlusionObserver)
+            self.occlusionObserver = nil
+        }
+        guard let window else { return }
+        occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleOcclusionChange() }
+        }
+    }
+
+    private func handleOcclusionChange() {
+        guard let window,
+              TerminalOcclusionRedrawPolicy.shouldRepaintOnOcclusionChange(
+                  renderingActive: renderingIsActive,
+                  occlusionVisible: window.occlusionState.contains(.visible)
+              ) else { return }
+        setNeedsDisplay(bounds)
+        for subview in subviews {
+            subview.setNeedsDisplay(subview.bounds)
+        }
+    }
+
+    override func setNeedsDisplay(_ invalidRect: NSRect) {
+        super.setNeedsDisplay(invalidRect)
+        guard let window,
+              TerminalOcclusionRedrawPolicy.shouldForceDisplay(
+                  renderingActive: renderingIsActive,
+                  occlusionVisible: window.occlusionState.contains(.visible),
+                  isKeyWindow: window.isKeyWindow
+              ),
+              !forcedDisplayPending else { return }
+        forcedDisplayPending = true
+        // Deferred one runloop turn: never draw synchronously inside an
+        // invalidation, and coalesce a burst of dirty rects into one pass.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.forcedDisplayPending = false
+            self.displayIfNeeded()
+        }
     }
 
     private func installKeyDownMonitor() {
