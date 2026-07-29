@@ -32,5 +32,18 @@
     <string>NSApplication</string>
     <key>ATSApplicationFontsPath</key>
     <string>Fonts/</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>app.atelier.Atelier</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>atelier</string>
+            </array>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+        </dict>
+    </array>
 </dict>
 </plist>

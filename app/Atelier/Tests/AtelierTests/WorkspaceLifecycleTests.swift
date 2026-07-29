@@ -573,6 +573,49 @@ struct WorkspaceLifecycleTests {
         #expect(error != unavailable)
     }
 
+    @Test("Deep link selects a catalog workspace and ignores unknown paths")
+    func deepLinkSelection() async throws {
+        let model = makeModel("deeplink-select")
+        let first = temporaryDirectory("deeplink-a")
+        let second = temporaryDirectory("deeplink-b")
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        try model.openWorkspace(workspaceState(first))
+        try model.openWorkspace(workspaceState(second))
+        #expect(model.selectedWorkspaceItem?.id == second.standardizedFileURL.path)
+
+        let link = try #require(URL(string: "atelier://open?path=\(first.path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"))
+        model.handleDeepLink(link)
+        #expect(model.selectedWorkspaceItem?.id == first.standardizedFileURL.path)
+
+        model.handleDeepLink(URL(string: "atelier://open?path=/tmp/atelier-not-in-catalog")!)
+        #expect(model.selectedWorkspaceItem?.id == first.standardizedFileURL.path)
+
+        model.handleDeepLink(URL(string: "other://open?path=\(second.path)")!)
+        #expect(model.selectedWorkspaceItem?.id == first.standardizedFileURL.path)
+    }
+
+    @Test("Deep link received during startup is applied after restore")
+    func deepLinkQueuedDuringStartup() async throws {
+        let first = temporaryDirectory("deeplink-queue-a")
+        let second = temporaryDirectory("deeplink-queue-b")
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        let stateURL = temporaryDirectory("deeplink-queue").appendingPathComponent("state.json")
+        let persistence = WorkspacePersistenceService(fileURL: stateURL)
+        try await persistence.save(WorkspaceCatalogState(
+            workspaces: [workspaceState(first), workspaceState(second)],
+            selectedWorkspaceID: first.standardizedFileURL.path
+        ))
+
+        let model = makeModel("deeplink-queue", persistence: persistence)
+        model.start()
+        let link = try #require(URL(string: "atelier://open?path=\(second.path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"))
+        model.handleDeepLink(link)
+        await waitUntil { model.selectedWorkspaceItem?.id == second.standardizedFileURL.path }
+        #expect(model.selectedWorkspaceItem?.id == second.standardizedFileURL.path)
+    }
+
     private func makeModel(
         _ name: String,
         persistence: WorkspacePersistenceService? = nil,

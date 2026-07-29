@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Observation
 
 @MainActor
@@ -69,6 +70,7 @@ final class AppModel {
     private var hasStarted = false
     private var hasStopped = false
     private var isStartupRestorePending = false
+    private var pendingDeepLinkURL: URL?
 
     init(environment: AppEnvironment = .live()) {
         self.environment = environment
@@ -327,6 +329,29 @@ final class AppModel {
         }
     }
 
+    /// Handle an `atelier://open?path=...` deep link. Only workspaces already
+    /// present in the catalog are selectable; unknown paths just surface the app.
+    func handleDeepLink(_ url: URL) {
+        guard url.scheme == "atelier", !hasStopped else { return }
+        if isStartupRestorePending {
+            pendingDeepLinkURL = url
+            return
+        }
+        windowController.showWorkspaceWindow()
+        guard url.host() == "open",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let path = components.queryItems?.first(where: { $0.name == "path" })?.value,
+              !path.isEmpty else {
+            return
+        }
+        let workspaceID = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.path
+        guard workspaceStates.contains(where: { $0.id == workspaceID }) else {
+            AppLogger.workspace.info("Deep link ignored: path is not an open workspace")
+            return
+        }
+        selectWorkspace(id: workspaceID)
+    }
+
     @discardableResult
     func stop() -> Task<Void, Never> {
         if hasStopped {
@@ -470,6 +495,10 @@ final class AppModel {
         guard isStartupRestorePending else { return }
         isStartupRestorePending = false
         startPersistenceIfNeeded()
+        if let url = pendingDeepLinkURL {
+            pendingDeepLinkURL = nil
+            handleDeepLink(url)
+        }
     }
 
     private func drainPersistence() async {

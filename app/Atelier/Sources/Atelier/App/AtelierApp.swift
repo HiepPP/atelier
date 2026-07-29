@@ -37,6 +37,12 @@ struct AtelierApp: App {
                 appDelegate.model = model
                 startModelIfNeeded()
             }
+            .onOpenURL { url in
+                model.handleDeepLink(url)
+            }
+            // Route external URL events into the existing window instead of
+            // letting WindowGroup spawn a new window scene per deep link.
+            .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
             .alert(item: presentedError) { error in
                 Alert(
                     title: Text(error.title),
@@ -46,6 +52,7 @@ struct AtelierApp: App {
             }
         }
         .windowToolbarStyle(.unifiedCompact)
+        .handlesExternalEvents(matching: ["*"])
         .commands {
             AppCommands(model: model)
             AtelierPaletteCommands()
