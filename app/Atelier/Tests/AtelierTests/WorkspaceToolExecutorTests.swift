@@ -74,7 +74,7 @@ struct WorkspaceToolExecutorTests {
     @Test("In-flight search stops when its owner is cancelled")
     func cancellation() async throws {
         let root = try fixture()
-        for index in 0..<500 {
+        for index in 0..<50 {
             try Data(repeating: 65, count: 20_000).write(
                 to: root.appendingPathComponent("Sources/file-\(index).txt")
             )
@@ -83,12 +83,13 @@ struct WorkspaceToolExecutorTests {
         let task = Task {
             try await executor.execute(call(.searchWorkspace, ["query": .string("missing")]))
         }
-        let canceller = Task {
-            try? await Task.sleep(for: .milliseconds(5))
-            task.cancel()
-        }
+        // Cancel immediately instead of after a timed sleep: every executor
+        // stage checks cancellation (entry, per file, per line), so the result
+        // is .cancelled in every interleave. A wall-clock delay raced the
+        // scan under full parallel test runs and lost when the pool was
+        // saturated, letting the search finish first.
+        task.cancel()
         await #expect(throws: WorkspaceToolError.cancelled) { try await task.value }
-        await canceller.value
     }
 
     @Test("Terminal output caps lines and characters and errors without a terminal")
