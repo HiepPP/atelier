@@ -178,8 +178,12 @@ struct PrecommitWhisperTests {
         )
     }
 
+    /// Generous deadline: every async test in the package is implicitly
+    /// MainActor, so under a full parallel run this loop and the model's
+    /// pipeline share one serialized executor with every other test. The
+    /// condition decides the pass; the timeout only bounds a hung pipeline.
     private func waitUntil(
-        timeout: Double = 2.0,
+        timeout: Double = 10.0,
         _ condition: @escaping @MainActor () -> Bool
     ) async {
         let deadline = Date().addingTimeInterval(timeout)

@@ -851,24 +851,26 @@ struct AtelierTests {
         let remote = root.appendingPathComponent("remote.git", isDirectory: true)
         try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
         let command = GitCommand()
-        func git(_ arguments: [String], at directory: URL? = nil) throws -> Data {
-            try command.run(
-                arguments: arguments,
-                workspacePath: (directory ?? repository).path
-            )
+        // Detached: GitCommand.run blocks on waitUntilExit. Run on the main
+        // actor it starves every concurrently scheduled main-actor test.
+        func git(_ arguments: [String], at directory: URL? = nil) async throws -> Data {
+            let path = (directory ?? repository).path
+            return try await Task.detached {
+                try command.run(arguments: arguments, workspacePath: path)
+            }.value
         }
 
-        _ = try git(["init", "--bare", "-q", remote.path], at: root)
-        _ = try git(["init", "-q"])
-        _ = try git(["config", "user.name", "Atelier Tests"])
-        _ = try git(["config", "user.email", "atelier-tests@example.invalid"])
-        _ = try git(["branch", "-M", "main"])
-        _ = try git(["remote", "add", "origin", remote.path])
+        _ = try await git(["init", "--bare", "-q", remote.path], at: root)
+        _ = try await git(["init", "-q"])
+        _ = try await git(["config", "user.name", "Atelier Tests"])
+        _ = try await git(["config", "user.email", "atelier-tests@example.invalid"])
+        _ = try await git(["branch", "-M", "main"])
+        _ = try await git(["remote", "add", "origin", remote.path])
         let tracked = repository.appendingPathComponent("tracked.txt")
         try Data("before\n".utf8).write(to: tracked)
-        _ = try git(["add", "--", "tracked.txt"])
-        _ = try git(["commit", "-qm", "initial"])
-        _ = try git(["push", "-qu", "origin", "main"])
+        _ = try await git(["add", "--", "tracked.txt"])
+        _ = try await git(["commit", "-qm", "initial"])
+        _ = try await git(["push", "-qu", "origin", "main"])
 
         try Data("after\n".utf8).write(to: tracked)
         try Data("new\n".utf8).write(
@@ -910,23 +912,23 @@ struct AtelierTests {
         #expect(model.pushPhase == .idle)
         #expect(model.errorMessage == nil)
         #expect(generatedMessage == "feat(git): push generated changes")
-        let localHead = String(decoding: try git(["rev-parse", "HEAD"]), as: UTF8.self)
+        let localHead = String(decoding: try await git(["rev-parse", "HEAD"]), as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let remoteHead = String(
-            decoding: try git(
+            decoding: try await git(
                 ["--git-dir", remote.path, "rev-parse", "refs/heads/main"],
                 at: root
             ),
             as: UTF8.self
         ).trimmingCharacters(in: .whitespacesAndNewlines)
-        let subject = String(decoding: try git(["log", "-1", "--pretty=%s"]), as: UTF8.self)
+        let subject = String(decoding: try await git(["log", "-1", "--pretty=%s"]), as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         #expect(localHead == remoteHead)
         #expect(subject == "feat(git): push generated changes")
     }
 
     @Test("Git service stages tracked and untracked changes together")
-    func gitStageAll() async throws {
+    nonisolated func gitStageAll() async throws {
         let repository = temporaryDirectory("git-stage-all")
         try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
         let command = GitCommand()
@@ -957,7 +959,7 @@ struct AtelierTests {
     }
 
     @Test("Git service discards tracked and untracked folder changes")
-    func gitDiscardFolderChanges() async throws {
+    nonisolated func gitDiscardFolderChanges() async throws {
         let repository = temporaryDirectory("git-discard-folder-changes")
         let folder = repository.appendingPathComponent("config/webpack", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -991,7 +993,7 @@ struct AtelierTests {
     }
 
     @Test("Git service lists files inside untracked directories")
-    func gitNestedUntrackedFiles() async throws {
+    nonisolated func gitNestedUntrackedFiles() async throws {
         let repository = temporaryDirectory("git-nested-untracked-files")
         let article = repository.appendingPathComponent(
             "generated-assets/20260727-article",
@@ -1510,7 +1512,7 @@ struct AtelierTests {
         #expect(!model.isSearching)
     }
 
-    private func temporaryDirectory(_ name: String) -> URL {
+    private nonisolated func temporaryDirectory(_ name: String) -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("atelier-tests-\(name)-\(UUID().uuidString)", isDirectory: true)
     }
