@@ -79,7 +79,10 @@ final class PrecommitWhisperModel {
     // Change-detection bookkeeping.
     private var currentTargetFingerprint: String?
     private var lastHandledFingerprint: String?
-    private var isChecking = false
+
+    /// True while a tick's diff check is in flight. Read-only outside so tests
+    /// can sequence on check completion instead of wall-clock sleeps.
+    private(set) var isChecking = false
 
     private var checkTask: Task<Void, Never>?
     private var scanTask: Task<Void, Never>?

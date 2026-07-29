@@ -127,17 +127,20 @@ struct PrecommitWhisperTests {
     func newerDiffSupersedes() async {
         let stub = WhisperStub(diff: "+print(\"AAAA\")",
                                response: "DEBUG_PRINT | A.swift:3 | leftover print")
-        let model = PrecommitWhisperModel(services: makeServices(stub), debounceSeconds: 0.3)
+        let model = PrecommitWhisperModel(services: makeServices(stub), debounceSeconds: 1.0)
         defer { model.cleanup() }
 
         model.tick()
-        try? await Task.sleep(for: .milliseconds(40))
+        // Sequence on the check completing, not a wall-clock sleep: once
+        // isChecking drops, the first scan is armed and its 1s debounce
+        // leaves the whole window for the superseding tick.
+        await waitUntil { !model.isChecking }
         await stub.setDiff("+print(\"BBBB\")")
         model.tick()
 
         await waitUntil { !model.findings.isEmpty }
         // Give a stale first scan a chance to (wrongly) fire before asserting once.
-        try? await Task.sleep(for: .milliseconds(50))
+        try? await Task.sleep(for: .milliseconds(100))
 
         let count = await stub.callCount
         let prompt = await stub.lastPrompt
@@ -150,12 +153,15 @@ struct PrecommitWhisperTests {
     func cleanupCancelsPendingScan() async {
         let stub = WhisperStub(diff: "+print(\"x\")",
                                response: "DEBUG_PRINT | A.swift:3 | leftover print")
-        let model = PrecommitWhisperModel(services: makeServices(stub), debounceSeconds: 0.3)
+        let model = PrecommitWhisperModel(services: makeServices(stub), debounceSeconds: 1.0)
 
         model.tick()
-        try? await Task.sleep(for: .milliseconds(40))
+        // Sequence on the check completing so cleanup provably lands while
+        // the scan is still debouncing, then wait past the debounce window
+        // to prove the pending scan was cancelled rather than merely slow.
+        await waitUntil { !model.isChecking }
         model.cleanup()
-        try? await Task.sleep(for: .milliseconds(400))
+        try? await Task.sleep(for: .milliseconds(1_300))
 
         let count = await stub.callCount
         #expect(count == 0)
