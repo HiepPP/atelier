@@ -39,6 +39,42 @@ enum TerminalOcclusionRedrawPolicy {
     }
 }
 
+/// SwiftTerm re-arms its one-second CSI ?2026 safety timeout on every BSU
+/// (`ESC[?2026h`), so a child emitting BSU more often than once per second
+/// without a matching ESU pauses rendering indefinitely: `updateDisplay` and
+/// `queuePendingDisplay` early-return while `synchronizedOutputActive` stays
+/// set. SwiftTerm exposes no public way to clear the flag, so past an absolute
+/// deadline measured from the first BSU the watchdog feeds the ESU sequence
+/// back through the public parser path, which ends the update and repaints.
+enum TerminalSynchronizedOutputWatchdogPolicy {
+    /// Absolute ceiling from the first BSU of a stuck update; re-arms do not
+    /// extend it.
+    static let deadlineSeconds: TimeInterval = 3
+
+    /// `ESC [ ? 2026 l` — DECRST 2026, the end-synchronized-update sequence.
+    static let endSequence: [UInt8] = [0x1B, 0x5B, 0x3F, 0x32, 0x30, 0x32, 0x36, 0x6C]
+
+    /// Anchors the deadline at the first observation of the active flag,
+    /// holds that anchor across re-arms, and clears it once the update ends.
+    static func activationStart(
+        activeSince: TimeInterval?,
+        isActive: Bool,
+        now: TimeInterval
+    ) -> TimeInterval? {
+        guard isActive else { return nil }
+        return activeSince ?? now
+    }
+
+    static func shouldForceEnd(
+        activeSince: TimeInterval?,
+        isActive: Bool,
+        now: TimeInterval
+    ) -> Bool {
+        guard isActive, let activeSince else { return false }
+        return now - activeSince >= deadlineSeconds
+    }
+}
+
 /// Bounds for the read-only terminal scrollback snapshot exposed to the Gemma
 /// sidecar. The snapshot never logs its content.
 enum TerminalScrollbackPolicy {
@@ -223,7 +259,8 @@ final class TerminalController {
             active: isActive,
             attached: terminal.window != nil,
             processRunning: isProcessRunning,
-            firstResponder: terminal.window?.firstResponder === terminal
+            firstResponder: terminal.window?.firstResponder === terminal,
+            synchronizedOutputActive: terminal.getTerminal().synchronizedOutputActive
         )
     }
 
@@ -271,6 +308,7 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
     private var renderingIsActive = false
     private var occlusionObserver: NSObjectProtocol?
     private var forcedDisplayPending = false
+    private var synchronizedOutputActiveSince: TimeInterval?
 
     func setRenderingActive(_ isActive: Bool) {
         let shouldHide = !isActive
@@ -311,6 +349,38 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
             let bracketedPasteEnd: [UInt8] = [0x1b, 0x5b, 0x32, 0x30, 0x31, 0x7e]
             send(data: bracketedPasteEnd[...])
         }
+    }
+
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        super.dataReceived(slice: slice)
+        enforceSynchronizedOutputDeadline()
+    }
+
+    /// Event-driven on purpose: a stuck CSI 2026 update requires the child to
+    /// keep re-arming SwiftTerm's timeout with fresh BSU bytes, so PTY data
+    /// keeps arriving and this check keeps running. When the stream goes
+    /// quiet, SwiftTerm's own one-second timeout ends the update instead.
+    private func enforceSynchronizedOutputDeadline() {
+        let isActive = getTerminal().synchronizedOutputActive
+        let now = ProcessInfo.processInfo.systemUptime
+        synchronizedOutputActiveSince = TerminalSynchronizedOutputWatchdogPolicy.activationStart(
+            activeSince: synchronizedOutputActiveSince,
+            isActive: isActive,
+            now: now
+        )
+        guard TerminalSynchronizedOutputWatchdogPolicy.shouldForceEnd(
+            activeSince: synchronizedOutputActiveSince,
+            isActive: isActive,
+            now: now
+        ) else { return }
+        synchronizedOutputActiveSince = nil
+        AppLogger.terminal.warning(
+            "Synchronized output exceeded watchdog deadline; forcing end of update"
+        )
+        // A PTY chunk can end mid-escape-sequence, but ESC restarts the VT
+        // parser state machine, so this complete sequence still parses and
+        // publicly reaches SwiftTerm's endSynchronizedOutput().
+        feed(byteArray: TerminalSynchronizedOutputWatchdogPolicy.endSequence[...])
     }
 
     func releaseFocusIfNeeded() {
@@ -496,8 +566,13 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
         guard let window else { return }
         scrollWheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) {
             [weak self, weak window] event in
+            // Every tab's terminal stays mounted sharing one frame, so a
+            // hidden tab's monitor would otherwise consume the scroll meant
+            // for the visible terminal.
             guard let self,
                   let window,
+                  self.renderingIsActive,
+                  !self.isHidden,
                   event.window === window,
                   self.bounds.contains(self.convert(event.locationInWindow, from: nil)) else {
                 return event
@@ -542,6 +617,12 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
         Task { @MainActor [weak self, weak window] in
             await Task.yield()
             guard let self, let window else { return }
+            // Tab selection can change before this deferred turn runs;
+            // focusing a now-hidden terminal sends keystrokes to an
+            // invisible view.
+            guard self.window === window,
+                  self.renderingIsActive,
+                  !self.isHidden else { return }
             window.makeFirstResponder(self)
         }
     }

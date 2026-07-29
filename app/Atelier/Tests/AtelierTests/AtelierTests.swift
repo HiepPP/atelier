@@ -792,6 +792,7 @@ struct AtelierTests {
                 == "/usr/bin:/custom/bin:/usr/local/bin:/opt/homebrew/bin:/Users/tester/.local/bin"
         )
         #expect(environment["GIT_OPTIONAL_LOCKS"] == "0")
+        #expect(environment["GIT_TERMINAL_PROMPT"] == "0")
         #expect(environment["SSH_AUTH_SOCK"] == "/tmp/agent.sock")
     }
 
@@ -1294,6 +1295,52 @@ struct AtelierTests {
         #expect(!TerminalOcclusionRedrawPolicy.shouldRepaintOnOcclusionChange(
             renderingActive: false, occlusionVisible: true
         ))
+    }
+
+    @Test("Synchronized output watchdog enforces an absolute deadline across re-arms")
+    func terminalSynchronizedOutputWatchdog() {
+        typealias Policy = TerminalSynchronizedOutputWatchdogPolicy
+
+        // The anchor starts at first activation and holds across re-arms.
+        #expect(Policy.activationStart(activeSince: nil, isActive: true, now: 10) == 10)
+        #expect(Policy.activationStart(activeSince: 10, isActive: true, now: 12) == 10)
+
+        // The anchor clears as soon as the update ends.
+        #expect(Policy.activationStart(activeSince: 10, isActive: false, now: 12) == nil)
+        #expect(Policy.activationStart(activeSince: nil, isActive: false, now: 12) == nil)
+
+        // Deadline math: force only at or past the absolute deadline.
+        #expect(!Policy.shouldForceEnd(
+            activeSince: 10, isActive: true, now: 10 + Policy.deadlineSeconds - 0.001
+        ))
+        #expect(Policy.shouldForceEnd(
+            activeSince: 10, isActive: true, now: 10 + Policy.deadlineSeconds
+        ))
+        #expect(!Policy.shouldForceEnd(activeSince: nil, isActive: true, now: 100))
+        #expect(!Policy.shouldForceEnd(activeSince: 10, isActive: false, now: 100))
+
+        // A child re-arming BSU every 0.9s never resets the deadline: the
+        // watchdog fires 3s after the first BSU even though SwiftTerm's own
+        // 1s timeout would have been re-armed forever.
+        var anchor: TimeInterval?
+        for now in [0.0, 0.9, 1.8, 2.7] {
+            anchor = Policy.activationStart(activeSince: anchor, isActive: true, now: now)
+            #expect(anchor == 0)
+            #expect(!Policy.shouldForceEnd(activeSince: anchor, isActive: true, now: now))
+        }
+        anchor = Policy.activationStart(activeSince: anchor, isActive: true, now: 3.0)
+        #expect(Policy.shouldForceEnd(activeSince: anchor, isActive: true, now: 3.0))
+
+        // ESU (here: the forced one) drops the flag and clears the anchor,
+        // so the next update starts a fresh deadline window.
+        anchor = Policy.activationStart(activeSince: anchor, isActive: false, now: 3.1)
+        #expect(anchor == nil)
+        anchor = Policy.activationStart(activeSince: anchor, isActive: true, now: 5.0)
+        #expect(anchor == 5.0)
+        #expect(!Policy.shouldForceEnd(activeSince: anchor, isActive: true, now: 5.5))
+
+        // DECRST 2026: ESC [ ? 2026 l fed through the public parser path.
+        #expect(Policy.endSequence == [0x1B, 0x5B, 0x3F, 0x32, 0x30, 0x32, 0x36, 0x6C])
     }
 
     @Test("Legacy terminal routes multiline input and TUI arrows")

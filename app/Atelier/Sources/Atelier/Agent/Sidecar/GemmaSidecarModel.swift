@@ -1,24 +1,95 @@
 import Foundation
 import Observation
+import Synchronization
+
+/// One-shot bridge between a background run's work task and the caller awaiting
+/// its result. The caller parks on `attach`; `finish` resumes it with the work
+/// result, and `abandon` unparks it with `CancellationError` even when the work
+/// task never completes (a wedged request that ignores cancellation). Whichever
+/// of `finish`/`abandon` arrives first wins; the loser is dropped.
+nonisolated final class SidecarRunHandoff: Sendable {
+    private enum State {
+        case waiting
+        case attached(CheckedContinuation<String, any Error>)
+        case finished(Result<String, any Error>)
+        case abandoned
+    }
+
+    private let state = Mutex<State>(.waiting)
+
+    func attach(_ continuation: CheckedContinuation<String, any Error>) {
+        let immediate: Result<String, any Error>? = state.withLock { current in
+            switch current {
+            case .waiting:
+                current = .attached(continuation)
+                return nil
+            case .finished(let result):
+                return result
+            case .attached, .abandoned:
+                return .failure(CancellationError())
+            }
+        }
+        if let immediate { continuation.resume(with: immediate) }
+    }
+
+    func finish(_ result: Result<String, any Error>) {
+        let attached: CheckedContinuation<String, any Error>? = state.withLock { current in
+            switch current {
+            case .waiting:
+                current = .finished(result)
+                return nil
+            case .attached(let continuation):
+                current = .finished(result)
+                return continuation
+            case .finished, .abandoned:
+                return nil
+            }
+        }
+        attached?.resume(with: result)
+    }
+
+    func abandon() {
+        let attached: CheckedContinuation<String, any Error>? = state.withLock { current in
+            switch current {
+            case .waiting:
+                current = .abandoned
+                return nil
+            case .attached(let continuation):
+                current = .abandoned
+                return continuation
+            case .finished, .abandoned:
+                return nil
+            }
+        }
+        attached?.resume(throwing: CancellationError())
+    }
+}
 
 /// Serializes background Gemma runs so at most one executes at a time. A new run
-/// cancels any in-flight run, then waits for it to unwind before starting. The
-/// runtime history is reset before each run so background calls stay one-shot.
+/// cancels any in-flight run before starting, and the runtime history is reset
+/// before each run so background calls stay one-shot. Every wait here is
+/// abandonable: preemption or `cancelAll` unparks the previous caller with
+/// `CancellationError`, and a successor waiting for its cancelled predecessor to
+/// unwind gives up as soon as the successor is itself cancelled, so one wedged
+/// request can never park the sidecar features forever.
 actor SidecarBackgroundRunner {
     private let runtime: GemmaAgentRuntime
-    private var chain: Task<Void, Never>
+    private var current: (work: Task<String, any Error>, handoff: SidecarRunHandoff)?
 
     init(runtime: GemmaAgentRuntime) {
         self.runtime = runtime
-        self.chain = Task {}
     }
 
     func run(prompt: String) async throws -> String {
-        let previous = chain
+        let previous = current
+        previous?.work.cancel()
+        previous?.handoff.abandon()
         await runtime.cancel()
         let runtime = self.runtime
-        let work = Task<String, Error> {
-            _ = await previous.value
+        let work = Task<String, any Error> {
+            if let previousWork = previous?.work {
+                await Self.waitAbandoningOnCancellation(for: previousWork)
+            }
             try Task.checkCancellation()
             await runtime.reset()
             var text = ""
@@ -29,12 +100,32 @@ actor SidecarBackgroundRunner {
             }
             return text
         }
-        chain = Task { _ = try? await work.value }
-        return try await work.value
+        let handoff = SidecarRunHandoff()
+        current = (work, handoff)
+        Task { handoff.finish(await work.result) }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { handoff.attach($0) }
+        } onCancel: {
+            work.cancel()
+            handoff.abandon()
+        }
+    }
+
+    /// Waits until `task` finishes or the current task is cancelled, whichever
+    /// comes first. A wedged `task` is abandoned, never awaited forever.
+    private static func waitAbandoningOnCancellation(for task: Task<String, any Error>) async {
+        let handoff = SidecarRunHandoff()
+        Task { handoff.finish(await task.result) }
+        _ = try? await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { handoff.attach($0) }
+        } onCancel: {
+            handoff.abandon()
+        }
     }
 
     func cancelAll() async {
-        chain.cancel()
+        current?.work.cancel()
+        current?.handoff.abandon()
         await runtime.cancel()
     }
 }

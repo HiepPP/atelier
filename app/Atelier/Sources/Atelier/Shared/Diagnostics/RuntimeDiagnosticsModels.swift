@@ -175,6 +175,9 @@ nonisolated struct RuntimeTerminalControllerMetric: Codable, Sendable, Equatable
     let attached: Bool
     let processRunning: Bool
     let firstResponder: Bool
+    /// Distinguishes a CSI 2026 synchronized-output stall from an occlusion
+    /// desync when the terminal shows a frozen frame.
+    let synchronizedOutputActive: Bool
 }
 
 nonisolated struct RuntimeTerminalSnapshot: Codable, Sendable, Equatable {

@@ -155,12 +155,11 @@ final class PrecommitWhisperModel {
             findings = PrecommitWhisperParser.parse(output)
             lastHandledFingerprint = fingerprint
             if currentTargetFingerprint == fingerprint { currentTargetFingerprint = nil }
-        } catch is CancellationError {
-            // Superseded by a newer diff; keep current findings for the new scan.
-        } catch let error as OllamaCloudError where error == .cancelled {
-            // Same as cancellation; the newer scan owns the state.
         } catch {
-            // Transport / Ollama error: stay quiet and allow a retry next change.
+            // Superseded by a newer diff (which owns the state), preempted by
+            // another feature's background run, or a transport error: release
+            // the fingerprint unless a newer scan took ownership, so a later
+            // tick can rescan. Findings stay for the surviving scan to replace.
             if currentTargetFingerprint == fingerprint { currentTargetFingerprint = nil }
         }
     }

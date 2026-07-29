@@ -80,6 +80,15 @@ nonisolated enum FileSaver {
         qos: .userInitiated
     )
 
+    /// Synchronous save for teardown paths (flush-on-close). Runs on the same
+    /// serial queue as `saveAsync`, so it lands after any in-flight async
+    /// write and the newest text always wins.
+    static func save(text: String, url: URL) throws {
+        try queue.sync {
+            try Data(text.utf8).write(to: url, options: .atomic)
+        }
+    }
+
     static func saveAsync(text: String, url: URL) async throws {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {

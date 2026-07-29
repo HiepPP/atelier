@@ -27,6 +27,28 @@ actor WhisperStub {
     }
 }
 
+/// Like `WhisperStub`, but the first `runBackground` call throws
+/// `CancellationError`, matching a scan preempted by another feature's
+/// serialized background run.
+actor FlakyWhisperStub {
+    private(set) var callCount = 0
+    private let diff: String
+    private let response: String
+
+    init(diff: String, response: String) {
+        self.diff = diff
+        self.response = response
+    }
+
+    func currentDiff() -> String { diff }
+
+    func run(_ prompt: String) throws -> String {
+        callCount += 1
+        if callCount == 1 { throw CancellationError() }
+        return response
+    }
+}
+
 @Suite("Pre-commit whisper")
 @MainActor
 struct PrecommitWhisperTests {
@@ -149,6 +171,37 @@ struct PrecommitWhisperTests {
         #expect(prompt?.contains("AAAA") == false)
     }
 
+    @Test("A preempted scan releases the fingerprint so the same diff rescans")
+    func preemptedScanRescans() async {
+        let stub = FlakyWhisperStub(
+            diff: "+print(\"x\")",
+            response: "DEBUG_PRINT | A.swift:3 | leftover print"
+        )
+        let model = PrecommitWhisperModel(
+            services: makeFlakyServices(stub),
+            debounceSeconds: 0.02
+        )
+        defer { model.cleanup() }
+
+        model.tick()
+        // The first scan throws CancellationError (a preempting feature run).
+        // Sequence on the scan fully finishing: the call happened and the
+        // isScanning flag dropped again, so the catch path already ran.
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if await stub.callCount == 1, !model.isScanning { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(model.findings.isEmpty)
+
+        // Same unchanged diff: the released fingerprint allows a rescan.
+        model.tick()
+        await waitUntil { !model.findings.isEmpty }
+        let count = await stub.callCount
+        #expect(count == 2)
+        #expect(model.findings.first?.category == .debugPrint)
+    }
+
     @Test("cleanup cancels a pending scan before it can call the model")
     func cleanupCancelsPendingScan() async {
         let stub = WhisperStub(diff: "+print(\"x\")",
@@ -174,6 +227,20 @@ struct PrecommitWhisperTests {
         SidecarServices(
             currentContext: { nil },
             runBackground: { prompt in await stub.run(prompt) },
+            runInteractive: { _ in },
+            readTerminalOutput: { _ in nil },
+            unstagedDiff: { await stub.currentDiff() },
+            changedFiles: { [] },
+            diffStat: { "" },
+            pasteIntoTerminal: { _ in false },
+            isOllamaConfigured: { true }
+        )
+    }
+
+    private func makeFlakyServices(_ stub: FlakyWhisperStub) -> SidecarServices {
+        SidecarServices(
+            currentContext: { nil },
+            runBackground: { prompt in try await stub.run(prompt) },
             runInteractive: { _ in },
             readTerminalOutput: { _ in nil },
             unstagedDiff: { await stub.currentDiff() },

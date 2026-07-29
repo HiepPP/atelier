@@ -197,6 +197,12 @@ final class EditorSession {
         )
     }
 
+    /// Fast path for the native editor: the surface resolves the line span
+    /// from its incremental line index, so no document text crosses over.
+    func updateSelection(lineRange: ClosedRange<Int>?) {
+        selectedLineRange = lineRange
+    }
+
     func selectionReference(workspaceRootURL: URL) -> String? {
         guard let selectedLineRange else { return nil }
         return EditorSelectionReferencePolicy.reference(

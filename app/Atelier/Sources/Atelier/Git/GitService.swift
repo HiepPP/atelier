@@ -7,6 +7,7 @@ enum GitServiceError: LocalizedError {
     case failed(arguments: [String], code: Int32, message: String)
     case outputRead(String)
     case busy(limit: Int)
+    case timedOut(arguments: [String], seconds: Double)
 
     var errorDescription: String? {
         switch self {
@@ -16,6 +17,9 @@ enum GitServiceError: LocalizedError {
             return "Could not read Git output: \(message)"
         case .busy(let limit):
             return "Git command queue is full (limit: \(limit))."
+        case .timedOut(let arguments, let seconds):
+            return "git \(arguments.joined(separator: " ")) timed out after "
+                + "\(String(format: "%g", seconds))s and was terminated."
         }
     }
 }
@@ -268,6 +272,48 @@ private nonisolated final class GitOutputBox: Sendable {
 private nonisolated struct GitCommandState {
     var process: Process?
     var isCancelled = false
+    var didTimeOut = false
+}
+
+/// Deadline policy for git subprocesses. A wedged network command (stalled
+/// SSH during push or fetch) must not hold an executor slot forever: four
+/// wedged commands saturate `GitCommandExecutor` and disable every git
+/// feature until app restart.
+nonisolated enum GitCommandTimeoutPolicy {
+    static let longRunningDeadline: Duration = .seconds(120)
+    static let standardDeadline: Duration = .seconds(30)
+    static let killEscalationGrace: Duration = .seconds(5)
+
+    private static let longRunningSubcommands: Set<String> = ["push", "fetch", "pull", "clone"]
+    private static let globalOptionsWithValue: Set<String> = [
+        "-c", "-C", "--git-dir", "--work-tree"
+    ]
+
+    static func deadline(for arguments: [String]) -> Duration {
+        guard let subcommand = subcommand(in: arguments) else { return standardDeadline }
+        return longRunningSubcommands.contains(subcommand) ? longRunningDeadline : standardDeadline
+    }
+
+    /// First argument that is neither a global option nor a global option's value.
+    static func subcommand(in arguments: [String]) -> String? {
+        var index = 0
+        while index < arguments.count {
+            let argument = arguments[index]
+            if globalOptionsWithValue.contains(argument) {
+                index += 2
+            } else if argument.hasPrefix("-") {
+                index += 1
+            } else {
+                return argument
+            }
+        }
+        return nil
+    }
+
+    static func seconds(_ duration: Duration) -> Double {
+        Double(duration.components.seconds)
+            + Double(duration.components.attoseconds) / 1e18
+    }
 }
 
 nonisolated enum GitProcessEnvironment {
@@ -290,6 +336,9 @@ nonisolated enum GitProcessEnvironment {
         }
         environment["PATH"] = paths.joined(separator: ":")
         environment["GIT_OPTIONAL_LOCKS"] = "0"
+        // No controlling terminal exists to answer credential prompts; a
+        // prompting command must fail fast instead of hanging to its deadline.
+        environment["GIT_TERMINAL_PROMPT"] = "0"
         return environment
     }
 }
@@ -301,7 +350,8 @@ nonisolated final class GitCommand: Sendable {
         arguments: [String],
         workspacePath: String,
         maxOutputBytes: Int? = nil,
-        allowedExitCodes: Set<Int32> = [0]
+        allowedExitCodes: Set<Int32> = [0],
+        deadline: Duration? = nil
     ) throws -> Data {
         let process = Process()
         let output = Pipe()
@@ -351,6 +401,36 @@ nonisolated final class GitCommand: Sendable {
         let cancelledAfterLaunch = state.withLock { $0.isCancelled }
         if cancelledAfterLaunch { process.terminate() }
 
+        // Deadline enforcement: terminate a wedged command instead of holding
+        // an executor slot forever. Both work items re-check the state-held
+        // process identity, so a normally exited command is never signalled.
+        let deadlineSeconds = GitCommandTimeoutPolicy.seconds(
+            deadline ?? GitCommandTimeoutPolicy.deadline(for: arguments)
+        )
+        let terminateOnDeadline = DispatchWorkItem { [self] in
+            let running = state.withLock { state -> Process? in
+                guard let process = state.process, process.isRunning else { return nil }
+                state.didTimeOut = true
+                return process
+            }
+            running?.terminate()
+        }
+        // git can catch SIGTERM while blocked on a hung transport; escalate.
+        let killAfterGrace = DispatchWorkItem { [self] in
+            let running = state.withLock { state -> Process? in
+                guard let process = state.process, process.isRunning else { return nil }
+                return process
+            }
+            if let running { kill(running.processIdentifier, SIGKILL) }
+        }
+        let timerQueue = DispatchQueue.global(qos: .utility)
+        timerQueue.asyncAfter(deadline: .now() + deadlineSeconds, execute: terminateOnDeadline)
+        timerQueue.asyncAfter(
+            deadline: .now() + deadlineSeconds
+                + GitCommandTimeoutPolicy.seconds(GitCommandTimeoutPolicy.killEscalationGrace),
+            execute: killAfterGrace
+        )
+
         let outputBox = GitOutputBox()
         let errorBox = GitOutputBox()
         let readers = DispatchGroup()
@@ -365,11 +445,24 @@ nonisolated final class GitCommand: Sendable {
             readers.leave()
         }
         process.waitUntilExit()
-        readers.wait()
+        terminateOnDeadline.cancel()
+        killAfterGrace.cancel()
+        let didTimeOut = state.withLock { $0.didTimeOut }
+        if didTimeOut {
+            // A grandchild (ssh, credential helper) can inherit the pipe write
+            // ends and keep them open past the git process's death; bound the
+            // reader wait so a timed-out command frees its executor slot.
+            _ = readers.wait(timeout: .now() + 2)
+        } else {
+            readers.wait()
+        }
         clear(process)
 
         let outputResult = outputBox.get()
         let errorResult = errorBox.get()
+        if didTimeOut, !allowedExitCodes.contains(process.terminationStatus) {
+            throw GitServiceError.timedOut(arguments: arguments, seconds: deadlineSeconds)
+        }
         if let readError = outputResult.readError ?? errorResult.readError {
             throw GitServiceError.outputRead(readError)
         }

@@ -246,6 +246,16 @@ struct FileViewer: NSViewRepresentable {
         // edit. Selection changes read this instead of rematerializing the whole
         // document string on every cursor move.
         private var cachedText = ""
+        // Shared incremental line index: serves the ruler, selection line math,
+        // and runtime line counts without any O(document) scan per keystroke.
+        private var lineIndex = EditorLineIndex()
+        // UTF-8 size maintained incrementally on edit; a full recount happens
+        // only when the whole document is (re)loaded.
+        private var cachedUTF8Count = 0
+        // Edit captured in shouldChangeTextInRanges, consumed by textDidChange
+        // to update the line index from the edited slice alone.
+        private var pendingEditRange: NSRange?
+        private var pendingEditReplacement = ""
         private weak var surfaceOwner: EditorSession?
         private var onEdit: () -> Void = {}
         private(set) var document: EditorDocument?
@@ -418,6 +428,7 @@ struct FileViewer: NSViewRepresentable {
             highlightTask?.cancel()
             highlightTask = nil
             saveGeneration += 1
+            flushPendingSave()
             saveTask?.cancel()
             saveTask = nil
             for token in runtimeObservationTokens {
@@ -451,6 +462,20 @@ struct FileViewer: NSViewRepresentable {
         func save() async throws {
             guard let text = textView?.string, let fileURL else { return }
             try await FileSaver.saveAsync(text: text, url: fileURL)
+        }
+
+        // A tab can close inside the save debounce window; write the pending
+        // text synchronously so the last edit is never dropped with the
+        // controller. FileSaver serializes this with any in-flight async save.
+        private func flushPendingSave() {
+            guard saveTask != nil, let text = textView?.string, let fileURL else { return }
+            do {
+                try FileSaver.save(text: text, url: fileURL)
+            } catch {
+                AppLogger.editor.error(
+                    "Flush-on-close save failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
         }
 
         func reveal(line: Int, column: Int) {
@@ -497,18 +522,68 @@ struct FileViewer: NSViewRepresentable {
             updateSelectionState(textView)
         }
 
+        func textView(
+            _ textView: NSTextView,
+            shouldChangeTextInRanges affectedRanges: [NSValue],
+            replacementStrings: [String]?
+        ) -> Bool {
+            // Capture single-range edits so textDidChange can update the line
+            // index incrementally; anything else falls back to a full rebuild.
+            if let replacementStrings,
+               affectedRanges.count == 1,
+               replacementStrings.count == 1,
+               let range = affectedRanges.first?.rangeValue {
+                pendingEditRange = range
+                pendingEditReplacement = replacementStrings[0]
+            } else {
+                pendingEditRange = nil
+                pendingEditReplacement = ""
+            }
+            return true
+        }
+
         func textDidChange(_ notification: Notification) {
             guard !isApplyingText,
                   let textView = notification.object as? NSTextView,
                   let fileURL else { return }
             let text = textView.string
+            let previousText = cachedText
             cachedText = text
-            updateRuntimeContentMetrics(text)
+            applyEditToLineIndex(previousText: previousText, newText: text)
+            runtimeContentBytes = cachedUTF8Count
+            runtimeLineCount = text.isEmpty ? 0 : lineIndex.lineCount
             beginRuntimeLayoutGrace()
-            lineNumberView?.updateLineStarts(for: text)
+            lineNumberView?.updateLineStarts(lineIndex.lineStartOffsets)
             onEdit()
             scheduleSave(text: text, url: fileURL)
-            scheduleHighlight(text: text, language: language, delayed: true)
+            scheduleHighlight(text: text, language: language, byteCount: cachedUTF8Count, delayed: true)
+        }
+
+        // Updates the shared line index and cached byte count from the edit
+        // captured in shouldChangeTextInRanges. Any mismatch (multi-range
+        // edits, paths that bypass the delegate) rebuilds from the new text
+        // instead of trusting stale edit info.
+        private func applyEditToLineIndex(previousText: String, newText: String) {
+            defer {
+                pendingEditRange = nil
+                pendingEditReplacement = ""
+            }
+            let previousLength = (previousText as NSString).length
+            let newLength = (newText as NSString).length
+            let replacementLength = (pendingEditReplacement as NSString).length
+            if let range = pendingEditRange,
+               range.location != NSNotFound,
+               previousLength == lineIndex.utf16Length,
+               NSMaxRange(range) <= previousLength,
+               previousLength - range.length + replacementLength == newLength {
+                let removed = (previousText as NSString).substring(with: range)
+                if lineIndex.applyEdit(range: range, replacement: pendingEditReplacement) {
+                    cachedUTF8Count += pendingEditReplacement.utf8.count - removed.utf8.count
+                    return
+                }
+            }
+            lineIndex = EditorLineIndex(text: newText)
+            cachedUTF8Count = newText.utf8.count
         }
 
         @MainActor
@@ -536,13 +611,14 @@ struct FileViewer: NSViewRepresentable {
                 )
             )
 
+            // apply(_:) above computed cachedUTF8Count for this same text.
             guard isText,
                   case .text(let text) = content,
-                  FileHighlightPolicy.usesSyntaxHighlighting(byteCount: text.utf8.count) else {
+                  FileHighlightPolicy.usesSyntaxHighlighting(byteCount: cachedUTF8Count) else {
                 return
             }
 
-            scheduleHighlight(text: text, language: language, delayed: false)
+            scheduleHighlight(text: text, language: language, byteCount: cachedUTF8Count, delayed: false)
         }
 
         @MainActor
@@ -558,6 +634,9 @@ struct FileViewer: NSViewRepresentable {
                     try await self?.save()
                     guard !Task.isCancelled,
                           self?.saveGeneration == expectedGeneration else { return }
+                    // Clear the pending marker so a later stop() does not
+                    // redundantly rewrite an already-saved document.
+                    self?.saveTask = nil
                     self?.textView?.toolTip = nil
                 } catch {
                     guard !(error is CancellationError),
@@ -574,6 +653,7 @@ struct FileViewer: NSViewRepresentable {
         private func scheduleHighlight(
             text: String,
             language: HighlightLanguage?,
+            byteCount: Int,
             delayed: Bool
         ) {
             highlightGeneration += 1
@@ -589,7 +669,7 @@ struct FileViewer: NSViewRepresentable {
             }
             highlightTask?.cancel()
             highlightTask = nil
-            guard FileHighlightPolicy.usesSyntaxHighlighting(byteCount: text.utf8.count) else {
+            guard FileHighlightPolicy.usesSyntaxHighlighting(byteCount: byteCount) else {
                 return
             }
 
@@ -715,12 +795,17 @@ struct FileViewer: NSViewRepresentable {
             let selection = textView.selectedRange()
             let string = text.string
             cachedText = string
-            updateRuntimeContentMetrics(string)
+            pendingEditRange = nil
+            pendingEditReplacement = ""
+            lineIndex = EditorLineIndex(text: string)
+            cachedUTF8Count = string.utf8.count
+            runtimeContentBytes = cachedUTF8Count
+            runtimeLineCount = string.isEmpty ? 0 : lineIndex.lineCount
             beginRuntimeLayoutGrace()
             isApplyingText = true
             textStorage.setAttributedString(text)
             isApplyingText = false
-            lineNumberView?.updateLineStarts(for: string)
+            lineNumberView?.updateLineStarts(lineIndex.lineStartOffsets)
             let length = (string as NSString).length
             if selection.location <= length {
                 textView.setSelectedRange(
@@ -939,13 +1024,6 @@ struct FileViewer: NSViewRepresentable {
             runtimeLayoutGraceUntil = Self.runtimeNow() + 1
         }
 
-        private func updateRuntimeContentMetrics(_ text: String) {
-            runtimeContentBytes = text.utf8.count
-            runtimeLineCount = text.isEmpty ? 0 : text.utf8.reduce(into: 1) { count, byte in
-                if byte == 0x0A { count += 1 }
-            }
-        }
-
         private var maximumRuntimeScrollY: Double {
             guard let scrollView else { return 0 }
             return max(0, (scrollView.documentView?.frame.height ?? 0) - scrollView.contentView.bounds.height)
@@ -984,13 +1062,14 @@ struct FileViewer: NSViewRepresentable {
 
         private func updateSelectionState(_ textView: NSTextView) {
             let selection = textView.selectedRange()
-            // A caret (empty selection) yields no line range; skip the cached
-            // text entirely so plain cursor moves stay O(1).
+            // Resolve the line span with the shared index (binary search) so
+            // drag-selection stays O(log lines) per mouse move instead of
+            // walking the whole document from offset 0.
             guard selection.length > 0 else {
-                surfaceOwner?.updateSelection(text: "", range: selection)
+                surfaceOwner?.updateSelection(lineRange: nil)
                 return
             }
-            surfaceOwner?.updateSelection(text: cachedText, range: selection)
+            surfaceOwner?.updateSelection(lineRange: lineIndex.lineRange(for: selection))
         }
     }
 }

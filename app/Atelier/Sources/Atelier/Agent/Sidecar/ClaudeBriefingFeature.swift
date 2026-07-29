@@ -133,7 +133,9 @@ final class ClaudeBriefingModel {
                 : .ready(trimmed)
             AppLogger.agent.info("Gemma sidecar generated a Claude briefing")
         } catch is CancellationError {
-            // Our own cancel(); phase was already reset by cancel().
+            // Our own cancel() already reset the phase. A preempting background
+            // run unparks this wait without cancelling the task; allow a retry.
+            if !Task.isCancelled { phase = .idle }
         } catch let error as OllamaCloudError where error == .cancelled {
             // Preempted by another serialized background run; allow a retry.
             if Task.isCancelled { return }

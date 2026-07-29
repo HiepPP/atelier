@@ -1,5 +1,6 @@
 import Foundation
 import MCP
+import Synchronization
 
 #if canImport(System)
 import System
@@ -51,6 +52,7 @@ nonisolated enum GitNexusMCPError: LocalizedError, Equatable, Sendable {
     case startupFailed
     case requestFailed(String)
     case invalidResponse
+    case timedOut
 
     var errorDescription: String? {
         switch self {
@@ -66,12 +68,15 @@ nonisolated enum GitNexusMCPError: LocalizedError, Equatable, Sendable {
             return "GitNexus MCP request failed."
         case .invalidResponse:
             return "GitNexus returned an invalid response."
+        case .timedOut:
+            return "GitNexus MCP request timed out."
         }
     }
 }
 
 actor GitNexusMCPClient: GitNexusCodeIntelligence {
     private static let requestTimeout = Duration.seconds(15)
+    private static let stopTimeout = Duration.seconds(2)
     private static let maximumResultCharacters = 16_000
 
     private let workspaceRoot: URL
@@ -80,6 +85,7 @@ actor GitNexusMCPClient: GitNexusCodeIntelligence {
     private var process: Process?
     private var inputPipe: Pipe?
     private var outputPipe: Pipe?
+    private var connectTask: Task<Client, any Error>?
 
     init(workspaceRoot: URL) {
         self.workspaceRoot = workspaceRoot.standardizedFileURL.resolvingSymlinksInPath()
@@ -136,18 +142,34 @@ actor GitNexusMCPClient: GitNexusCodeIntelligence {
     }
 
     func stop() async {
-        await client?.disconnect()
-        client = nil
-        await transport?.disconnect()
-        transport = nil
+        let client = self.client
+        let transport = self.transport
+        let process = self.process
+        let inputPipe = self.inputPipe
+        let outputPipe = self.outputPipe
+        self.client = nil
+        self.transport = nil
+        self.process = nil
+        self.inputPipe = nil
+        self.outputPipe = nil
+
+        // Terminate the child first so a wedged server cannot block teardown.
+        if let process {
+            process.terminationHandler = nil
+            if process.isRunning {
+                process.terminate()
+            }
+        }
         try? inputPipe?.fileHandleForWriting.close()
         try? outputPipe?.fileHandleForReading.close()
-        inputPipe = nil
-        outputPipe = nil
-        if let process, process.isRunning {
-            process.terminate()
+        await transport?.disconnect()
+        if let client {
+            // disconnect awaits the SDK message-loop task; bound it so a
+            // stuck loop cannot hang workspace teardown.
+            _ = try? await Self.withTimeout(Self.stopTimeout) {
+                await client.disconnect()
+            }
         }
-        self.process = nil
     }
 
     private func callTool(
@@ -159,17 +181,28 @@ actor GitNexusMCPClient: GitNexusCodeIntelligence {
             name: name,
             arguments: arguments
         )
-        let result = try await Self.withTimeout(Self.requestTimeout) {
-            try await withTaskCancellationHandler {
-                try await request.value
-            } onCancel: {
-                Task {
-                    try? await client.cancelRequest(
-                        request.requestID,
-                        reason: "Atelier workspace search cancelled"
-                    )
+        let result: CallTool.Result
+        do {
+            result = try await Self.withTimeout(Self.requestTimeout) {
+                try await withTaskCancellationHandler {
+                    try await request.value
+                } onCancel: {
+                    Task {
+                        try? await client.cancelRequest(
+                            request.requestID,
+                            reason: "Atelier workspace search cancelled"
+                        )
+                    }
                 }
             }
+        } catch {
+            if (error as? GitNexusMCPError) == .timedOut {
+                // A stalled request means the child is unhealthy. Tearing the
+                // connection down resolves any orphaned SDK continuation and
+                // lets the next call relaunch a fresh child.
+                await stop()
+            }
+            throw error
         }
         let text = result.content.compactMap { item -> String? in
             guard case .text(let text, _, _) = item else { return nil }
@@ -186,6 +219,18 @@ actor GitNexusMCPClient: GitNexusCodeIntelligence {
         if let client, process?.isRunning == true {
             return client
         }
+        // Concurrent first calls must share one launch; a second launch would
+        // orphan the first child process with no terminate path.
+        if let connectTask {
+            return try await connectTask.value
+        }
+        let task = Task { try await establishConnection() }
+        connectTask = task
+        defer { connectTask = nil }
+        return try await task.value
+    }
+
+    private func establishConnection() async throws -> Client {
         await stop()
         guard FileManager.default.fileExists(atPath: workspaceRoot.appending(path: ".gitnexus").path) else {
             throw GitNexusMCPError.missingIndex
@@ -225,20 +270,19 @@ actor GitNexusMCPClient: GitNexusCodeIntelligence {
         self.outputPipe = outputPipe
         self.transport = transport
         self.client = client
+        // A dead child leaves the SDK message loop spinning on a finished
+        // stream; stop() promptly tears the loop down instead of waiting for
+        // the next query to notice.
+        process.terminationHandler = { [weak self] terminated in
+            let identifier = ObjectIdentifier(terminated)
+            Task { await self?.childProcessDidTerminate(identifier) }
+        }
         do {
             _ = try await Self.withTimeout(Self.requestTimeout) {
-                try await withTaskCancellationHandler {
-                    try await client.connect(transport: transport)
-                } onCancel: {
-                    Task { await client.disconnect() }
-                }
+                try await client.connect(transport: transport)
             }
             let (tools, _) = try await Self.withTimeout(Self.requestTimeout) {
-                try await withTaskCancellationHandler {
-                    try await client.listTools()
-                } onCancel: {
-                    Task { await client.disconnect() }
-                }
+                try await client.listTools()
             }
             let names = Set(tools.map(\.name))
             guard names.contains("query"), names.contains("context") else {
@@ -251,6 +295,11 @@ actor GitNexusMCPClient: GitNexusCodeIntelligence {
             if let error = error as? GitNexusMCPError { throw error }
             throw GitNexusMCPError.startupFailed
         }
+    }
+
+    private func childProcessDidTerminate(_ identifier: ObjectIdentifier) async {
+        guard let process, ObjectIdentifier(process) == identifier else { return }
+        await stop()
     }
 
     private func searchMode() -> String {
@@ -309,22 +358,88 @@ actor GitNexusMCPClient: GitNexusCodeIntelligence {
         String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maximum))
     }
 
-    private nonisolated static func withTimeout<Value: Sendable>(
+    /// Races `operation` against a deadline. The first finisher wins; the
+    /// loser is cancelled but never awaited, so a stalled operation cannot
+    /// block the caller past the deadline. An abandoned operation task keeps
+    /// running until its awaits resolve; callers that time out must tear down
+    /// the underlying connection so those awaits terminate.
+    nonisolated static func withTimeout<Value: Sendable>(
         _ duration: Duration,
         operation: @escaping @Sendable () async throws -> Value
     ) async throws -> Value {
-        try await withThrowingTaskGroup(of: Value.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await Task.sleep(for: duration)
-                throw GitNexusMCPError.requestFailed("Timed out.")
+        let race = TimeoutRaceState<Value>()
+        let operationTask = Task {
+            do {
+                race.finish(.success(try await operation()))
+            } catch {
+                race.finish(.failure(error))
             }
-            guard let value = try await group.next() else {
-                throw GitNexusMCPError.requestFailed("No response.")
-            }
-            group.cancelAll()
-            return value
         }
+        let timeoutTask = Task {
+            try await Task.sleep(for: duration)
+            race.finish(.failure(GitNexusMCPError.timedOut))
+        }
+        defer {
+            operationTask.cancel()
+            timeoutTask.cancel()
+        }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                race.install(continuation)
+            }
+        } onCancel: {
+            operationTask.cancel()
+            timeoutTask.cancel()
+            race.finish(.failure(CancellationError()))
+        }
+    }
+}
+
+/// Resumes a single continuation exactly once, no matter which racer
+/// (operation, timeout, or outer cancellation) finishes first, including
+/// finishes that arrive before the continuation is installed.
+private nonisolated final class TimeoutRaceState<Value: Sendable>: Sendable {
+    private enum State {
+        case idle
+        case pending(CheckedContinuation<Value, any Error>)
+        case finished(Result<Value, any Error>)
+        case resumed
+    }
+
+    private let state = Mutex<State>(.idle)
+
+    func install(_ continuation: CheckedContinuation<Value, any Error>) {
+        let immediate: Result<Value, any Error>? = state.withLock { current in
+            switch current {
+            case .idle:
+                current = .pending(continuation)
+                return nil
+            case .finished(let result):
+                current = .resumed
+                return result
+            case .pending, .resumed:
+                return nil
+            }
+        }
+        if let immediate {
+            continuation.resume(with: immediate)
+        }
+    }
+
+    func finish(_ result: Result<Value, any Error>) {
+        let continuation: CheckedContinuation<Value, any Error>? = state.withLock { current in
+            switch current {
+            case .idle:
+                current = .finished(result)
+                return nil
+            case .pending(let pending):
+                current = .resumed
+                return pending
+            case .finished, .resumed:
+                return nil
+            }
+        }
+        continuation?.resume(with: result)
     }
 }
 

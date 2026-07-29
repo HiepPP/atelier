@@ -94,6 +94,28 @@ struct TerminalGuardianTests {
         await #expect(counter.count == 1)
     }
 
+    @Test("Guard resets after a cancelled run so the next failure diagnoses again")
+    func cancelledRunResetsGuard() async {
+        let counter = CallCounter()
+        let model = TerminalGuardianModel(
+            services: makeServices { _ in
+                await counter.bump()
+                if await counter.count == 1 { throw CancellationError() }
+                return "diag"
+            },
+            defaults: freshDefaults()
+        )
+        model.handleCommandFinished(exitCode: 1)
+        while model.isRunning { await Task.yield() }
+        #expect(model.card == nil)
+
+        // The cancelled run must not latch the single-flight guard.
+        model.handleCommandFinished(exitCode: 1)
+        while model.isRunning { await Task.yield() }
+        await #expect(counter.count == 2)
+        #expect(model.card?.message == "diag")
+    }
+
     @Test("Non-zero exit publishes a diagnosis card carrying the exit code")
     func publishesCard() async {
         let model = TerminalGuardianModel(
