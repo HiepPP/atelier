@@ -1249,7 +1249,10 @@ struct AtelierTests {
         let environment = TerminalProcessService.configuredEnvironment(from: [
             "TERM": "dumb",
             "NO_COLOR": "1",
-            "PATH": "/usr/bin"
+            "PATH": "/usr/bin",
+            "CLAUDE_CODE_CHILD_SESSION": "1",
+            "CLAUDE_CODE_SESSION_ID": "abc",
+            "CLAUDE_CONFIG_DIR": "/keep"
         ])
 
         #expect(environment["TERM"] == "xterm-256color")
@@ -1258,6 +1261,9 @@ struct AtelierTests {
         #expect(environment["TERM_PROGRAM"] == "Atelier")
         #expect(environment["NO_COLOR"] == nil)
         #expect(environment["PATH"] == "/usr/bin")
+        #expect(environment["CLAUDE_CODE_CHILD_SESSION"] == nil)
+        #expect(environment["CLAUDE_CODE_SESSION_ID"] == nil)
+        #expect(environment["CLAUDE_CONFIG_DIR"] == "/keep")
     }
 
     @Test("Legacy terminal routes multiline input and TUI arrows")

@@ -26,6 +26,11 @@ struct TerminalProcessService {
         from environment: [String: String]
     ) -> [String: String] {
         var environment = environment
+        // Launching Atelier from an agent shell leaks that agent's session markers into the
+        // app process, and a nested CLI would then treat this terminal as its own child.
+        for key in environment.keys where key.hasPrefix("CLAUDE_CODE_") {
+            environment.removeValue(forKey: key)
+        }
         environment["TERM"] = "xterm-256color"
         environment["COLORTERM"] = "truecolor"
         environment["CLICOLOR"] = "1"
