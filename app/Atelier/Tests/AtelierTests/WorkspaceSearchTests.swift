@@ -645,12 +645,15 @@ struct WorkspaceSearchTests {
         model.present(revision: 0)
         model.updateQuery("slow")
 
-        try await Task.sleep(for: .milliseconds(20))
+        while await searcher.recordedQueries().isEmpty {
+            await Task.yield()
+        }
 
         model.updateQuery("fast")
         await model.settleSearch()
 
-        #expect(await searcher.recordedQueries() == ["slow", "fast"])
+        let recorded = await searcher.recordedQueries()
+        #expect(recorded == ["slow", "fast"])
         #expect(model.matches.map(\.matchedText) == ["fast"])
         #expect(model.selection?.matchedText == "fast")
         #expect(!model.isSearching)
