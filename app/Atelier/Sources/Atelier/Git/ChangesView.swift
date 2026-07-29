@@ -776,7 +776,7 @@ struct ChangesView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(repositoryName)
-                    .atelierFont(size: AtelierTypography.uiSize, weight: .semibold)
+                    .atelierFont(size: AtelierTypography.body, weight: .semibold)
                     .lineLimit(1)
                 Text(repositorySubtitle)
                     .atelierFont(size: AtelierTypography.micro, design: .monospaced)
@@ -835,13 +835,13 @@ struct ChangesView: View {
     private var commitInput: some View {
         VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
             Text("Commit message")
-                .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+                .atelierFont(size: AtelierTypography.caption, weight: .medium)
                 .foregroundStyle(.secondary)
 
             ZStack(alignment: .topLeading) {
                 if commitMessage.isEmpty {
                     Text("Write a commit message...")
-                        .atelierFont(size: AtelierTypography.uiSize)
+                        .atelierFont(size: AtelierTypography.body)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, AtelierMetrics.spaceS + 2)
                         .padding(.top, AtelierMetrics.spaceS + 1)
@@ -853,7 +853,7 @@ struct ChangesView: View {
                         TextEditor(text: $commitMessage)
                             .scrollContentBackground(.hidden)
                             .atelierScrollChrome(backgroundColor: AppKitThemeAdapter.editor)
-                            .atelierFont(size: AtelierTypography.uiSize)
+                            .atelierFont(size: AtelierTypography.body)
                             .focused($isCommitFieldFocused)
                             .padding(AtelierMetrics.spaceXS)
                     } else {
@@ -886,7 +886,7 @@ struct ChangesView: View {
                 }
                 Text(pushLabel)
             }
-            .atelierFont(size: AtelierTypography.uiSize, weight: .semibold)
+            .atelierFont(size: AtelierTypography.body, weight: .semibold)
             .foregroundStyle(model.canPush ? AtelierTheme.accentInk : Color.secondary)
             .frame(maxWidth: .infinity)
             .frame(height: 36)
@@ -934,7 +934,7 @@ struct ChangesView: View {
                         .frame(width: AtelierMetrics.spaceL)
 
                     Text(group.title)
-                        .atelierFont(size: AtelierTypography.headline, weight: .semibold)
+                        .atelierFont(size: AtelierTypography.body, weight: .semibold)
 
                     Spacer(minLength: AtelierMetrics.spaceS)
 
@@ -1079,7 +1079,7 @@ struct ChangesView: View {
         VStack(alignment: .leading, spacing: AtelierMetrics.spaceS) {
             HStack {
                 Text("Recent commits")
-                    .atelierFont(size: AtelierTypography.headline, weight: .semibold)
+                    .atelierFont(size: AtelierTypography.body, weight: .semibold)
 
                 Spacer(minLength: 0)
 
@@ -1218,7 +1218,7 @@ private struct RecentCommitRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: AtelierMetrics.spaceXS) {
                     Text(commit.subject)
-                        .atelierFont(size: AtelierTypography.label, weight: .medium)
+                        .atelierFont(size: AtelierTypography.body)
                         .lineLimit(1)
 
                     if isHead {
@@ -1278,34 +1278,35 @@ private struct GitChangeRow: View {
     @FocusState private var isActionFocused: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            GitTreeGuideColumns(depths: guideDepths)
+        Button(action: onOpen) {
+            HStack(spacing: 0) {
+                GitTreeGuideColumns(depths: guideDepths)
 
-            Button(action: onOpen) {
                 HStack(spacing: AtelierMetrics.spaceS) {
                     GitChangeFileIcon(path: change.path)
 
                     Text(URL(fileURLWithPath: change.path).lastPathComponent)
-                        .atelierFont(size: AtelierTypography.label, weight: .medium)
+                        .atelierFont(size: AtelierTypography.body)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     Text(statusLabel)
-                        .atelierFont(size: AtelierTypography.uiSize, weight: .medium)
+                        .atelierFont(size: AtelierTypography.caption, weight: .semibold)
                         .foregroundStyle(statusColor)
                         .frame(width: AtelierMetrics.spaceL)
                 }
             }
-            .buttonStyle(.plain)
+            .padding(.trailing, AtelierMetrics.spaceXS)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: AtelierMetrics.rowHeight)
             .contentShape(Rectangle())
-            .accessibilityLabel("Open diff for \(change.path)")
-            .accessibilityValue(
-                isSelected ? "\(statusDescription), selected" : statusDescription
-            )
-            .accessibilityAddTraits(isSelected ? .isSelected : [])
         }
-        .padding(.trailing, AtelierMetrics.spaceXS)
-        .frame(height: AtelierMetrics.rowHeight)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open diff for \(change.path)")
+        .accessibilityValue(
+            isSelected ? "\(statusDescription), selected" : statusDescription
+        )
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .background {
             RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
                 .fill(rowFill)
@@ -1444,63 +1445,61 @@ private struct GitChangeFolderRow: View {
     @FocusState private var isActionFocused: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            Button(action: onToggle) {
-                HStack(spacing: 0) {
-                    GitTreeGuideColumns(depths: guideDepths)
+        Button(action: onToggle) {
+            HStack(spacing: 0) {
+                GitTreeGuideColumns(depths: guideDepths)
 
-                    HStack(spacing: AtelierMetrics.spaceS) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .atelierFont(size: AtelierTypography.micro, weight: .semibold)
-                            .frame(width: AtelierMetrics.spaceM)
+                HStack(spacing: AtelierMetrics.spaceS) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .atelierFont(size: AtelierTypography.micro, weight: .semibold)
+                        .frame(width: AtelierMetrics.spaceM)
 
-                        Image(
-                            nsImage: MaterialFileIconStore.shared.cachedFolderImage(
-                                forPath: node.path,
-                                isExpanded: isExpanded
-                            )
+                    Image(
+                        nsImage: MaterialFileIconStore.shared.cachedFolderImage(
+                            forPath: node.path,
+                            isExpanded: isExpanded
                         )
-                            .resizable()
-                            .scaledToFit()
-                            .frame(
-                                width: AtelierTypography.uiSize,
-                                height: AtelierTypography.uiSize
+                    )
+                        .resizable()
+                        .scaledToFit()
+                        .frame(
+                            width: AtelierTypography.uiSize,
+                            height: AtelierTypography.uiSize
+                        )
+                        .accessibilityHidden(true)
+
+                    Text(node.name)
+                        .atelierFont(size: AtelierTypography.body)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if !isExpanded {
+                        Text(node.changeCount.formatted())
+                            .atelierFont(
+                                size: AtelierTypography.micro,
+                                weight: .medium,
+                                design: .monospaced
                             )
-                            .accessibilityHidden(true)
-
-                        Text(node.name)
-                            .atelierFont(size: AtelierTypography.label, weight: .medium)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        if !isExpanded {
-                            Text(node.changeCount.formatted())
-                                .atelierFont(
-                                    size: AtelierTypography.micro,
-                                    weight: .medium,
-                                    design: .monospaced
-                                )
-                                .foregroundStyle(.secondary)
-                        }
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(.trailing, AtelierMetrics.spaceXS)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .padding(.trailing, AtelierMetrics.spaceXS)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Folder \(node.path)")
-            .accessibilityValue(
-                "\(isExpanded ? "Expanded" : "Collapsed"), \(node.changeCount) files"
-            )
-            .accessibilityHint("Option-click toggles the entire branch")
-            .help(
-                "\(isExpanded ? "Collapse" : "Expand") \(node.path). "
-                    + "Option-click toggles the entire branch."
-            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: AtelierMetrics.rowHeight)
+            .contentShape(Rectangle())
         }
-        .frame(height: AtelierMetrics.rowHeight)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Folder \(node.path)")
+        .accessibilityValue(
+            "\(isExpanded ? "Expanded" : "Collapsed"), \(node.changeCount) files"
+        )
+        .accessibilityHint("Option-click toggles the entire branch")
+        .help(
+            "\(isExpanded ? "Collapse" : "Expand") \(node.path). "
+                + "Option-click toggles the entire branch."
+        )
         .background {
             RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
                 .fill(rowFill)
@@ -1587,7 +1586,7 @@ private struct GitChangeSectionCountBadge: View {
 
     var body: some View {
         Text(value.formatted())
-            .atelierFont(size: AtelierTypography.micro, weight: .bold, design: .monospaced)
+            .atelierFont(size: AtelierTypography.micro, weight: .semibold, design: .monospaced)
             .foregroundStyle(AtelierTheme.accentInk)
             .padding(.horizontal, 6)
             .frame(minWidth: 22, minHeight: 22)

@@ -698,6 +698,11 @@ Persistence boundaries:
   chains into one workspace-relative path while keeping changed files as actionable leaf rows.
 - Keep each change row at `rowHeight` 28. Show Git status in the trailing slot at rest, then
   overlay row actions in that slot on hover or keyboard focus without reserving extra width.
+- Keep the whole change row clickable, including its indent guides and full row height. Text width
+  is not the hit target.
+- Set change rows, folder rows, commit subjects, and the commit composer at `body` regular. Reserve
+  semibold for section headers, repository identity, and Push. Keep section headers at `body` so the
+  panel header stays the only `headline`.
 - Show Discard Changes for every unstaged file and folder on hover or keyboard focus. Folder
   actions cover every descendant change.
 - Confirm every discard. Restore tracked files from Git and move untracked files to Trash.
