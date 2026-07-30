@@ -647,6 +647,396 @@ struct AtelierTests {
         #expect(status.ignoredPaths == ["tmp/"])
     }
 
+    @Test("Git upstream count parser reads behind and ahead in rev-list order")
+    func gitUpstreamCountParsing() {
+        let counts = GitUpstreamCounts.parse(Data("2\t5\n".utf8))
+        #expect(counts.behind == 2)
+        #expect(counts.ahead == 5)
+
+        // No upstream: git exits 128 with empty output. Malformed output, a
+        // short record, and negative values must all read as zero.
+        let zeroSamples = ["0\t0\n", "", "fatal: no upstream\n", "3\n", "-1\t4\n"]
+        for sample in zeroSamples {
+            let parsed = GitUpstreamCounts.parse(Data(sample.utf8))
+            #expect(parsed.ahead == 0, "ahead should be zero for \(sample.debugDescription)")
+            #expect(parsed.behind == 0, "behind should be zero for \(sample.debugDescription)")
+        }
+    }
+
+    @Test("Git snapshot reports zero upstream counts without a remote")
+    nonisolated func gitUpstreamCountsWithoutRemote() async throws {
+        let repository = temporaryDirectory("git-upstream-counts")
+        try FileManager.default.createDirectory(at: repository, withIntermediateDirectories: true)
+
+        let command = GitCommand()
+        _ = try command.run(arguments: ["init", "-q"], workspacePath: repository.path)
+        try Data("first\n".utf8).write(to: repository.appendingPathComponent("file.txt"))
+
+        let service = GitService()
+        let snapshot = try await service.snapshot(workspacePath: repository.path)
+
+        #expect(snapshot.ahead == 0)
+        #expect(snapshot.behind == 0)
+        #expect(snapshot.status.untracked.map(\.path) == ["file.txt"])
+    }
+
+    @Test("Git snapshot counts commits waiting to push and waiting to pull")
+    nonisolated func gitUpstreamCountsAgainstRemote() async throws {
+        let root = temporaryDirectory("git-upstream-remote")
+        let remote = root.appendingPathComponent("remote.git", isDirectory: true)
+        let local = root.appendingPathComponent("local", isDirectory: true)
+        let peer = root.appendingPathComponent("peer", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let command = GitCommand()
+        func git(_ arguments: [String], at url: URL) throws {
+            _ = try command.run(arguments: arguments, workspacePath: url.path)
+        }
+        func commit(_ name: String, at url: URL) throws {
+            try Data("\(name)\n".utf8).write(to: url.appendingPathComponent(name))
+            try git(["add", "-A"], at: url)
+            try git(["commit", "-q", "-m", name], at: url)
+        }
+        func identify(_ url: URL) throws {
+            try git(["config", "user.email", "test@example.com"], at: url)
+            try git(["config", "user.name", "Atelier Test"], at: url)
+        }
+
+        try git(["init", "-q", "--bare", "--initial-branch=main", remote.path], at: root)
+        try git(["clone", "-q", remote.path, local.path], at: root)
+        try identify(local)
+        try commit("base.txt", at: local)
+        try git(["push", "-q", "-u", "origin", "HEAD:refs/heads/main"], at: local)
+
+        // A peer publishes one commit the local clone has not merged yet.
+        try git(["clone", "-q", remote.path, peer.path], at: root)
+        try identify(peer)
+        try commit("peer.txt", at: peer)
+        try git(["push", "-q", "origin", "HEAD:refs/heads/main"], at: peer)
+
+        try commit("local-first.txt", at: local)
+        try commit("local-second.txt", at: local)
+        // Counts read the remote-tracking ref, so they only move after a fetch.
+        try git(["fetch", "-q", "origin"], at: local)
+
+        let snapshot = try await GitService().snapshot(workspacePath: local.path)
+
+        #expect(snapshot.ahead == 2)
+        #expect(snapshot.behind == 1)
+    }
+
+    @Test("Git fetch, pull, and push clear the upstream counts they report")
+    nonisolated func gitUpstreamSyncActions() async throws {
+        let root = temporaryDirectory("git-upstream-sync")
+        let remote = root.appendingPathComponent("remote.git", isDirectory: true)
+        let local = root.appendingPathComponent("local", isDirectory: true)
+        let peer = root.appendingPathComponent("peer", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let command = GitCommand()
+        func git(_ arguments: [String], at url: URL) throws {
+            _ = try command.run(arguments: arguments, workspacePath: url.path)
+        }
+        func commit(_ name: String, at url: URL) throws {
+            try Data("\(name)\n".utf8).write(to: url.appendingPathComponent(name))
+            try git(["add", "-A"], at: url)
+            try git(["commit", "-q", "-m", name], at: url)
+        }
+        func identify(_ url: URL) throws {
+            try git(["config", "user.email", "test@example.com"], at: url)
+            try git(["config", "user.name", "Atelier Test"], at: url)
+        }
+
+        try git(["init", "-q", "--bare", "--initial-branch=main", remote.path], at: root)
+        try git(["clone", "-q", remote.path, local.path], at: root)
+        try identify(local)
+        try commit("base.txt", at: local)
+        try git(["push", "-q", "-u", "origin", "HEAD:refs/heads/main"], at: local)
+
+        try git(["clone", "-q", remote.path, peer.path], at: root)
+        try identify(peer)
+        try commit("peer.txt", at: peer)
+        try git(["push", "-q", "origin", "HEAD:refs/heads/main"], at: peer)
+
+        let service = GitService()
+
+        // Before any fetch the local clone still believes it is in sync.
+        let stale = try await service.snapshot(workspacePath: local.path)
+        #expect(stale.behind == 0)
+
+        try await service.fetch(workspacePath: local.path)
+        let afterFetch = try await service.snapshot(workspacePath: local.path)
+        #expect(afterFetch.behind == 1)
+        #expect(afterFetch.ahead == 0)
+
+        try await service.pull(workspacePath: local.path)
+        let afterPull = try await service.snapshot(workspacePath: local.path)
+        #expect(afterPull.behind == 0)
+        #expect(afterPull.ahead == 0)
+
+        try commit("local.txt", at: local)
+        let afterCommit = try await service.snapshot(workspacePath: local.path)
+        #expect(afterCommit.ahead == 1)
+
+        try await service.push(workspacePath: local.path)
+        let afterPush = try await service.snapshot(workspacePath: local.path)
+        #expect(afterPush.ahead == 0)
+        #expect(afterPush.behind == 0)
+    }
+
+    @Test("Fast-forward pull refuses a diverged branch instead of merging")
+    nonisolated func gitPullRefusesDivergedBranch() async throws {
+        let root = temporaryDirectory("git-upstream-diverged")
+        let remote = root.appendingPathComponent("remote.git", isDirectory: true)
+        let local = root.appendingPathComponent("local", isDirectory: true)
+        let peer = root.appendingPathComponent("peer", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let command = GitCommand()
+        func git(_ arguments: [String], at url: URL) throws {
+            _ = try command.run(arguments: arguments, workspacePath: url.path)
+        }
+        func commit(_ name: String, at url: URL) throws {
+            try Data("\(name)\n".utf8).write(to: url.appendingPathComponent(name))
+            try git(["add", "-A"], at: url)
+            try git(["commit", "-q", "-m", name], at: url)
+        }
+        func identify(_ url: URL) throws {
+            try git(["config", "user.email", "test@example.com"], at: url)
+            try git(["config", "user.name", "Atelier Test"], at: url)
+        }
+
+        try git(["init", "-q", "--bare", "--initial-branch=main", remote.path], at: root)
+        try git(["clone", "-q", remote.path, local.path], at: root)
+        try identify(local)
+        try commit("base.txt", at: local)
+        try git(["push", "-q", "-u", "origin", "HEAD:refs/heads/main"], at: local)
+
+        try git(["clone", "-q", remote.path, peer.path], at: root)
+        try identify(peer)
+        try commit("peer.txt", at: peer)
+        try git(["push", "-q", "origin", "HEAD:refs/heads/main"], at: peer)
+
+        // Diverge: one local commit the remote lacks, one remote commit we lack.
+        try commit("local.txt", at: local)
+        let service = GitService()
+        try await service.fetch(workspacePath: local.path)
+
+        let diverged = try await service.snapshot(workspacePath: local.path)
+        #expect(diverged.ahead == 1)
+        #expect(diverged.behind == 1)
+
+        await #expect(throws: (any Error).self) {
+            try await service.pull(workspacePath: local.path)
+        }
+
+        // The refusal must leave the branch exactly as it was: no merge commit.
+        let afterRefusal = try await service.snapshot(workspacePath: local.path)
+        #expect(afterRefusal.ahead == 1)
+        #expect(afterRefusal.behind == 1)
+    }
+
+    @Test("Git ref parser classifies refs and drops symbolic remote pointers")
+    func gitRefParsing() {
+        func record(_ fields: [String]) -> String {
+            fields.joined(separator: "\u{001F}") + "\u{001E}"
+        }
+
+        let sample = [
+            record([
+                "refs/heads/main", "main", "b6a6c58", "", "Phuoc Hiep", "",
+                "1721600000", "", "fix(terminal): stop the scroll monitor", "", "*"
+            ]),
+            record([
+                "refs/remotes/origin/feat/diff-runtime-probe", "origin/feat/diff-runtime-probe",
+                "64a5a60", "", "Phuoc Hiep", "", "1721500000",
+                "", "feat(diagnostics): add a diff runtime probe", "", ""
+            ]),
+            // Symbolic pointer that duplicates a real remote branch row.
+            record([
+                "refs/remotes/origin/HEAD", "origin/HEAD", "b6a6c58", "", "Phuoc Hiep", "",
+                "1721600000", "", "fix(terminal): stop the scroll monitor", "", ""
+            ]),
+            // Annotated tag: every commit field only exists on the dereferenced twin.
+            record([
+                "refs/tags/v1.0", "v1.0", "aaaaaaa", "ccccccc", "", "Atelier Bot",
+                "", "1721400000", "", "chore: release v1.0", ""
+            ]),
+            record(["refs/heads/broken", "broken"])
+        ].joined()
+
+        let refs = GitRefParser.parse(Data(sample.utf8))
+
+        #expect(refs.map(\.name) == ["main", "origin/feat/diff-runtime-probe", "v1.0"])
+        #expect(refs[0].kind == .localBranch)
+        #expect(refs[0].isCurrent)
+        #expect(refs[0].shortHash == "b6a6c58")
+        #expect(refs[0].subject == "fix(terminal): stop the scroll monitor")
+        #expect(refs[1].kind == .remoteBranch)
+        #expect(!refs[1].isCurrent)
+        // The dereferenced twin wins for an annotated tag.
+        #expect(refs[2].kind == .tag)
+        #expect(refs[2].shortHash == "ccccccc")
+        #expect(refs[2].author == "Atelier Bot")
+        #expect(refs[2].subject == "chore: release v1.0")
+        #expect(refs[2].date == Date(timeIntervalSince1970: 1_721_400_000))
+    }
+
+    @Test("Remote refs resolve the local branch name they check out as")
+    func gitRefLocalTrackingName() {
+        func ref(_ name: String, _ kind: GitRefKind) -> GitRef {
+            GitRef(
+                name: name,
+                kind: kind,
+                shortHash: "abcdef1",
+                author: "Tester",
+                subject: "subject",
+                date: Date(timeIntervalSince1970: 0),
+                isCurrent: false
+            )
+        }
+
+        #expect(ref("origin/main", .remoteBranch).localTrackingName == "main")
+        #expect(ref("origin/feat/nested/name", .remoteBranch).localTrackingName == "feat/nested/name")
+        // Local branches and tags are checked out under their own name.
+        #expect(ref("feat/x", .localBranch).localTrackingName == "feat/x")
+        #expect(ref("v1.0", .tag).localTrackingName == "v1.0")
+    }
+
+    @Test("Ref filter matches name, author, and subject and keeps order")
+    func gitRefFiltering() {
+        let refs = [
+            GitRef(
+                name: "main", kind: .localBranch, shortHash: "aaaaaaa",
+                author: "Phuoc Hiep", subject: "fix the terminal",
+                date: Date(timeIntervalSince1970: 200), isCurrent: true
+            ),
+            GitRef(
+                name: "origin/release", kind: .remoteBranch, shortHash: "bbbbbbb",
+                author: "Atelier Bot", subject: "cut a release",
+                date: Date(timeIntervalSince1970: 100), isCurrent: false
+            )
+        ]
+
+        #expect(GitRefFilter.apply("", to: refs).count == 2)
+        #expect(GitRefFilter.apply("  ", to: refs).count == 2)
+        #expect(GitRefFilter.apply("MAIN", to: refs).map(\.name) == ["main"])
+        #expect(GitRefFilter.apply("bot", to: refs).map(\.name) == ["origin/release"])
+        #expect(GitRefFilter.apply("terminal", to: refs).map(\.name) == ["main"])
+        #expect(GitRefFilter.apply("nothing", to: refs).isEmpty)
+    }
+
+    @Test("Git service lists local branches, remote branches, and tags with metadata")
+    nonisolated func gitRefListing() async throws {
+        let root = temporaryDirectory("git-ref-listing")
+        let remote = root.appendingPathComponent("remote.git", isDirectory: true)
+        let local = root.appendingPathComponent("local", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let command = GitCommand()
+        func git(_ arguments: [String], at url: URL) throws {
+            _ = try command.run(arguments: arguments, workspacePath: url.path)
+        }
+
+        try git(["init", "-q", "--bare", "--initial-branch=main", remote.path], at: root)
+        try git(["clone", "-q", remote.path, local.path], at: root)
+        try git(["config", "user.email", "test@example.com"], at: local)
+        try git(["config", "user.name", "Atelier Test"], at: local)
+        try Data("base\n".utf8).write(to: local.appendingPathComponent("base.txt"))
+        try git(["add", "-A"], at: local)
+        try git(["commit", "-q", "-m", "feat: base commit"], at: local)
+        try git(["push", "-q", "-u", "origin", "HEAD:refs/heads/main"], at: local)
+        try git(["tag", "-a", "v1.0", "-m", "release v1.0"], at: local)
+
+        let refs = try await GitService().refs(workspacePath: local.path)
+
+        let mainBranch = refs.first { $0.kind == .localBranch }
+        #expect(mainBranch?.name == "main")
+        #expect(mainBranch?.isCurrent == true)
+        #expect(mainBranch?.author == "Atelier Test")
+        #expect(mainBranch?.subject == "feat: base commit")
+        #expect(mainBranch?.shortHash.isEmpty == false)
+
+        #expect(refs.contains { $0.kind == .remoteBranch && $0.name == "origin/main" })
+        // The symbolic origin/HEAD must never reach the picker.
+        #expect(!refs.contains { $0.name.hasSuffix("/HEAD") })
+
+        // An annotated tag row describes the commit it points at, not the tag
+        // object, so it matches the branch rows beside it.
+        let tag = refs.first { $0.kind == .tag }
+        #expect(tag?.name == "v1.0")
+        #expect(tag?.subject == "feat: base commit")
+        #expect(tag?.author == "Atelier Test")
+        #expect(tag?.shortHash == mainBranch?.shortHash)
+    }
+
+    @Test("Git service creates branches, tracks remotes, and detaches HEAD")
+    nonisolated func gitRefActions() async throws {
+        let root = temporaryDirectory("git-ref-actions")
+        let remote = root.appendingPathComponent("remote.git", isDirectory: true)
+        let local = root.appendingPathComponent("local", isDirectory: true)
+        let peer = root.appendingPathComponent("peer", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let command = GitCommand()
+        func git(_ arguments: [String], at url: URL) throws {
+            _ = try command.run(arguments: arguments, workspacePath: url.path)
+        }
+        func identify(_ url: URL) throws {
+            try git(["config", "user.email", "test@example.com"], at: url)
+            try git(["config", "user.name", "Atelier Test"], at: url)
+        }
+        func currentBranch(at url: URL) throws -> String {
+            let data = try command.run(
+                arguments: ["branch", "--show-current"],
+                workspacePath: url.path
+            )
+            return String(decoding: data, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        try git(["init", "-q", "--bare", "--initial-branch=main", remote.path], at: root)
+        try git(["clone", "-q", remote.path, local.path], at: root)
+        try identify(local)
+        try Data("base\n".utf8).write(to: local.appendingPathComponent("base.txt"))
+        try git(["add", "-A"], at: local)
+        try git(["commit", "-q", "-m", "base"], at: local)
+        try git(["push", "-q", "-u", "origin", "HEAD:refs/heads/main"], at: local)
+
+        // A peer publishes a branch the local clone has no local copy of.
+        try git(["clone", "-q", remote.path, peer.path], at: root)
+        try identify(peer)
+        try git(["checkout", "-q", "-b", "feature", "origin/main"], at: peer)
+        try Data("peer\n".utf8).write(to: peer.appendingPathComponent("peer.txt"))
+        try git(["add", "-A"], at: peer)
+        try git(["commit", "-q", "-m", "peer"], at: peer)
+        try git(["push", "-q", "origin", "HEAD:refs/heads/feature"], at: peer)
+
+        let service = GitService()
+
+        try await service.createBranch("scratch", from: nil, workspacePath: local.path)
+        #expect(try currentBranch(at: local) == "scratch")
+
+        try await service.createBranch("from-main", from: "main", workspacePath: local.path)
+        #expect(try currentBranch(at: local) == "from-main")
+
+        try await service.fetch(workspacePath: local.path)
+        try await service.checkoutTracking(
+            "origin/feature",
+            as: "feature",
+            workspacePath: local.path
+        )
+        #expect(try currentBranch(at: local) == "feature")
+        let tracked = try await service.snapshot(workspacePath: local.path)
+        // A tracking checkout has an upstream, so counts read as in sync.
+        #expect(tracked.ahead == 0)
+        #expect(tracked.behind == 0)
+
+        try await service.checkoutDetached("main", workspacePath: local.path)
+        // Detached HEAD reports no current branch.
+        #expect(try currentBranch(at: local).isEmpty)
+    }
+
     @Test("Git log parser preserves commit metadata")
     func gitCommitLogParsing() {
         let sample = [

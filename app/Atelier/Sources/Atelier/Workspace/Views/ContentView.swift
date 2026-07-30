@@ -423,6 +423,9 @@ struct ContentView: View {
                     .accessibilityHidden(!workspace.workspaceSearchModel.isPresented)
                     .zIndex(workspace.workspaceSearchModel.isPresented ? 11 : -1)
             }
+
+            branchPickerLayer
+                .zIndex(12)
         }
         .background(AtelierTheme.canvas)
         .tint(AtelierTheme.accent)
@@ -619,6 +622,29 @@ struct ContentView: View {
             )
             .padding(.horizontal, AtelierMetrics.spaceL)
             .padding(.top, 54)
+        }
+        .transition(.opacity)
+        .accessibilityAddTraits(.isModal)
+    }
+
+    @ViewBuilder
+    private var branchPickerLayer: some View {
+        if let picker = app.workspace?.gitModel.branchPicker, picker.isPresented {
+            branchPickerOverlay(model: picker)
+        }
+    }
+
+    private func branchPickerOverlay(model: GitBranchPickerModel) -> some View {
+        ZStack(alignment: .top) {
+            AtelierTheme.scrim
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { model.dismiss() }
+                .atelierPointerCursor()
+
+            GitBranchPickerView(model: model, onDismiss: model.dismiss)
+                .padding(.horizontal, AtelierMetrics.spaceL)
+                .padding(.top, 54)
         }
         .transition(.opacity)
         .accessibilityAddTraits(.isModal)
@@ -1276,6 +1302,7 @@ struct WorkspaceView: View {
     private var statusBar: some View {
         HStack(spacing: AtelierMetrics.spaceM) {
             GitBranchLabel(gitModel: gitModel)
+            GitSyncControls(gitModel: gitModel)
             Spacer()
             if zoom.isFocusMode {
                 Text("Focus")
@@ -1440,7 +1467,7 @@ private struct GitRefreshButton: View {
 
     var body: some View {
         Button {
-            gitModel.refresh()
+            gitModel.refresh(fetchingRemote: true)
         } label: {
             if gitModel.isLoading {
                 ProgressView().controlSize(.mini)
@@ -1458,10 +1485,93 @@ private struct GitBranchLabel: View {
     let gitModel: GitWorkspaceModel
 
     var body: some View {
-        Label(
-            gitModel.snapshot.branch.isEmpty ? "detached" : gitModel.snapshot.branch,
-            systemImage: "arrow.triangle.branch"
+        Button {
+            gitModel.branchPicker.present()
+        } label: {
+            Label(
+                gitModel.snapshot.branch.isEmpty ? "detached" : gitModel.snapshot.branch,
+                systemImage: "arrow.triangle.branch"
+            )
+            .lineLimit(1)
+        }
+        .buttonStyle(AtelierGhostButtonStyle(tint: .secondary))
+        .accessibilityLabel("Current branch")
+        .accessibilityValue(
+            gitModel.snapshot.branch.isEmpty ? "Detached HEAD" : gitModel.snapshot.branch
         )
+        .help("Checkout a branch or tag")
+    }
+}
+
+/// Upstream sync controls beside the branch. Each one hides at zero, so the
+/// status bar stays quiet on a branch that is already in sync.
+private struct GitSyncControls: View {
+    let gitModel: GitWorkspaceModel
+
+    var body: some View {
+        let ahead = gitModel.snapshot.ahead
+        let behind = gitModel.snapshot.behind
+
+        HStack(spacing: AtelierMetrics.spaceXS) {
+            if ahead > 0 {
+                GitSyncButton(
+                    systemImage: "arrow.up",
+                    count: ahead,
+                    tint: AtelierTheme.gitAdded,
+                    isRunning: gitModel.syncPhase == .pushing,
+                    isEnabled: gitModel.canPushCommits,
+                    label: "Push \(ahead) \(GitSyncButton.commitWord(ahead)) to the upstream",
+                    action: gitModel.pushCommits
+                )
+            }
+
+            if behind > 0 {
+                GitSyncButton(
+                    systemImage: "arrow.down",
+                    count: behind,
+                    tint: AtelierTheme.gitOrange,
+                    isRunning: gitModel.syncPhase == .pulling,
+                    isEnabled: gitModel.canPullCommits,
+                    label: "Pull \(behind) \(GitSyncButton.commitWord(behind)) from the upstream",
+                    action: gitModel.pullCommits
+                )
+            }
+        }
+    }
+}
+
+private struct GitSyncButton: View {
+    let systemImage: String
+    let count: Int
+    let tint: Color
+    let isRunning: Bool
+    let isEnabled: Bool
+    let label: String
+    let action: () -> Void
+
+    static func commitWord(_ value: Int) -> String {
+        value == 1 ? "commit" : "commits"
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                // The spinner replaces the arrow in place so the control keeps
+                // its width and the rest of the status bar never shifts.
+                if isRunning {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Image(systemName: systemImage)
+                }
+                Text(count.formatted())
+                    .monospacedDigit()
+            }
+        }
+        .buttonStyle(AtelierGhostButtonStyle(tint: tint))
+        .disabled(!isEnabled)
+        .accessibilityLabel(label)
+        .accessibilityValue(isRunning ? "Running" : "\(count)")
+        .help(label)
     }
 }
 

@@ -112,7 +112,7 @@ final class WorkspaceSession {
     func start(agentResponsesActive: Bool = true) {
         guard !isStarted else { return }
         isStarted = true
-        gitModel.refresh()
+        gitModel.refresh(fetchingRemote: true)
         let watchtowerRoot = rootURL.path
         Task { [weak self] in await self?.watchtower.setRoot(watchtowerRoot) }
         if agentResponsesActive {

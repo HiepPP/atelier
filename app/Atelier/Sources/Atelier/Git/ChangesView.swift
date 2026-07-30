@@ -197,6 +197,23 @@ nonisolated enum GitPushPhase: Equatable {
     }
 }
 
+/// Upstream sync work started from the status bar. It stays separate from
+/// `GitPushPhase` because that pipeline also generates a message and commits,
+/// while these two only move existing commits between HEAD and its upstream.
+nonisolated enum GitSyncPhase: Equatable {
+    case idle
+    case pushing
+    case pulling
+
+    var label: String {
+        switch self {
+        case .idle: "Idle"
+        case .pushing: "Pushing..."
+        case .pulling: "Pulling..."
+        }
+    }
+}
+
 nonisolated enum GitCommitMessageError: LocalizedError, Equatable, Sendable {
     case timedOut
 
@@ -299,19 +316,23 @@ final class GitWorkspaceModel {
     private(set) var isGeneratingCommitMessage = false
     private(set) var commitMessageGenerationError: String?
     private(set) var pushPhase = GitPushPhase.idle
+    private(set) var syncPhase = GitSyncPhase.idle
     private(set) var recentCommits: [GitCommit] = []
 
     let workspacePath: String
+    let branchPicker: GitBranchPickerModel
     private let service = GitService()
     private let commitMessageGenerator: GitCommitMessageGenerator
     private let onRepositoryChange: () -> Void
     private var refreshTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
     private var actionTask: Task<Void, Never>?
+    private var syncTask: Task<Void, Never>?
     private var invalidateTask: Task<Void, Never>?
     private var commitMessageTask: Task<Void, Never>?
     private var refreshID = UUID()
     private var statusRefreshID = UUID()
+    private var syncID = UUID()
     private var pendingRepositoryMetadataRefresh = false
     private var lastFilesystemRefreshSpawn: ContinuousClock.Instant?
     private var firstPendingFilesystemEvent: ContinuousClock.Instant?
@@ -324,6 +345,16 @@ final class GitWorkspaceModel {
         self.workspacePath = workspacePath
         self.onRepositoryChange = onRepositoryChange
         commitMessageGenerator = GitCommitMessageGenerator(client: commitMessageClient)
+        branchPicker = GitBranchPickerModel(
+            workspacePath: workspacePath,
+            service: service
+        )
+        // A checkout changes HEAD, so the snapshot and the upstream counts both
+        // have to be re-read against the new branch.
+        branchPicker.onRefChanged = { [weak self] in
+            self?.onRepositoryChange()
+            self?.refresh(fetchingRemote: true)
+        }
     }
 
     var canGenerateCommitMessage: Bool {
@@ -338,13 +369,28 @@ final class GitWorkspaceModel {
             && pushPhase == .idle
     }
 
-    func refresh() {
+    var canPushCommits: Bool {
+        snapshot.ahead > 0 && syncPhase == .idle && pushPhase == .idle
+    }
+
+    var canPullCommits: Bool {
+        snapshot.behind > 0 && syncPhase == .idle && pushPhase == .idle
+    }
+
+    /// `fetchingRemote` is opt-in because a fetch is a network round trip:
+    /// only explicit refreshes and completed syncs may pay for it. Watcher- and
+    /// action-driven refreshes stay local.
+    func refresh(fetchingRemote: Bool = false) {
         refreshTask?.cancel()
         let requestID = UUID()
         refreshID = requestID
         isLoading = true
         refreshTask = Task { [weak self] in
             guard let self else { return }
+            if fetchingRemote {
+                await fetchRemote()
+                guard !Task.isCancelled, refreshID == requestID else { return }
+            }
             do {
                 let result = try await service.snapshot(workspacePath: workspacePath)
                 guard !Task.isCancelled, refreshID == requestID else { return }
@@ -383,10 +429,26 @@ final class GitWorkspaceModel {
         }
     }
 
-    /// Refresh only the working-tree status, keeping the current branch and
-    /// branch list. Filesystem bursts use this so an edit spawns one `git
-    /// status` instead of the full three-subprocess snapshot. No `isLoading`
-    /// flag: a background status update must not flash the spinner on save.
+    /// Refresh the remote-tracking refs the ahead/behind counts read from.
+    /// A failed fetch stays silent: being offline is normal and must not raise
+    /// a repository error banner or discard the last known counts.
+    private func fetchRemote() async {
+        do {
+            try await service.fetch(workspacePath: workspacePath)
+        } catch is CancellationError {
+            return
+        } catch {
+            AppLogger.git.warning(
+                "Git fetch failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    /// Refresh only the working-tree status, keeping the current branch, branch
+    /// list, and upstream counts. Filesystem bursts use this so an edit spawns
+    /// one `git status` instead of the full four-subprocess snapshot. No
+    /// `isLoading` flag: a background status update must not flash the spinner
+    /// on save.
     func refreshStatus() {
         statusTask?.cancel()
         let requestID = UUID()
@@ -401,7 +463,9 @@ final class GitWorkspaceModel {
                     snapshot = GitSnapshot(
                         status: status,
                         branch: snapshot.branch,
-                        branches: snapshot.branches
+                        branches: snapshot.branches,
+                        ahead: snapshot.ahead,
+                        behind: snapshot.behind
                     )
                 }
                 errorMessage = nil
@@ -460,12 +524,67 @@ final class GitWorkspaceModel {
         refreshTask?.cancel()
         statusTask?.cancel()
         actionTask?.cancel()
+        syncTask?.cancel()
+        syncTask = nil
         invalidateTask?.cancel()
         invalidateTask = nil
         pendingRepositoryMetadataRefresh = false
         firstPendingFilesystemEvent = nil
         cancelCommitMessageGeneration()
+        branchPicker.dismiss()
         pushPhase = .idle
+        syncPhase = .idle
+    }
+
+    /// Push the commits already on HEAD. Unlike the sidebar Push pipeline this
+    /// never generates a message or commits: the badge counts existing commits.
+    func pushCommits() {
+        guard canPushCommits else { return }
+        sync(.pushing) { service, path in
+            try await service.push(workspacePath: path)
+        }
+    }
+
+    func pullCommits() {
+        guard canPullCommits else { return }
+        sync(.pulling) { service, path in
+            try await service.pull(workspacePath: path)
+        }
+    }
+
+    /// Kept off `perform` so a sync never cancels a staging or discard action,
+    /// and so the follow-up refresh can fetch the counts it just changed.
+    private func sync(
+        _ phase: GitSyncPhase,
+        operation: @escaping (GitService, String) async throws -> Void
+    ) {
+        syncTask?.cancel()
+        let requestID = UUID()
+        syncID = requestID
+        syncPhase = phase
+        errorMessage = nil
+        syncTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await operation(service, workspacePath)
+                // A newer sync owns the phase now; leave its state alone.
+                guard !Task.isCancelled, syncID == requestID else { return }
+                syncPhase = .idle
+                syncTask = nil
+                onRepositoryChange()
+                refresh(fetchingRemote: true)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled, syncID == requestID else { return }
+                syncPhase = .idle
+                syncTask = nil
+                errorMessage = error.localizedDescription
+                AppLogger.git.error(
+                    "Git \(phase.label, privacy: .public) failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
     }
 
     func generateCommitMessage(onSuccess: @escaping (String) -> Void) {
@@ -747,6 +866,7 @@ struct ChangesView: View {
                         loadingCard
                     } else {
                         commitInput
+                        upstreamStatus
                         pushButton
                         changeList
                         recentCommitsSection
@@ -768,7 +888,7 @@ struct ChangesView: View {
         AtelierPanelHeader(title: "Source Control") {
             HStack(spacing: AtelierMetrics.spaceXS) {
                 Button {
-                    model.refresh()
+                    model.refresh(fetchingRemote: true)
                 } label: {
                     if model.isLoading {
                         ProgressView().controlSize(.small)
@@ -819,28 +939,15 @@ struct ChangesView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Menu {
-                if model.snapshot.branches.isEmpty {
-                    Text("No local branches")
-                } else {
-                    Section("Switch branch") {
-                        ForEach(model.snapshot.branches, id: \.self) { branch in
-                            Button {
-                                model.switchBranch(branch)
-                            } label: {
-                                if branch == model.snapshot.branch {
-                                    Label(branch, systemImage: "checkmark")
-                                } else {
-                                    Text(branch)
-                                }
-                            }
-                            .disabled(branch == model.snapshot.branch)
-                        }
-                    }
+                // One shared branch surface: the picker is the only place that
+                // can also create branches, reach remotes, and detach.
+                Button("Switch Branch...", systemImage: "arrow.triangle.branch") {
+                    model.branchPicker.present()
                 }
 
                 Divider()
                 Button("Refresh Repository", systemImage: "arrow.clockwise") {
-                    model.refresh()
+                    model.refresh(fetchingRemote: true)
                 }
             } label: {
                 Image(systemName: "chevron.down")
@@ -906,6 +1013,63 @@ struct ChangesView: View {
         .padding(.horizontal, AtelierMetrics.spaceS)
         .padding(.vertical, AtelierMetrics.spaceS)
         .atelierCard(fill: AtelierTheme.panel.opacity(0.72))
+    }
+
+    /// Read-only upstream sync status. It performs no action on click, so it
+    /// keeps the arrow cursor and stays out of the accessibility action tree.
+    @ViewBuilder
+    private var upstreamStatus: some View {
+        if model.snapshot.ahead > 0 || model.snapshot.behind > 0 {
+            HStack(spacing: AtelierMetrics.spaceS) {
+                if model.snapshot.ahead > 0 {
+                    upstreamCount(
+                        systemImage: "arrow.up",
+                        value: model.snapshot.ahead,
+                        color: AtelierTheme.gitAdded
+                    )
+                }
+                if model.snapshot.behind > 0 {
+                    upstreamCount(
+                        systemImage: "arrow.down",
+                        value: model.snapshot.behind,
+                        color: AtelierTheme.gitOrange
+                    )
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(height: 18)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(upstreamStatusLabel)
+            .help(upstreamStatusLabel)
+        }
+    }
+
+    private func upstreamCount(systemImage: String, value: Int, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: systemImage)
+            Text(value.formatted())
+        }
+        .atelierFont(size: AtelierTypography.micro, weight: .bold, design: .monospaced)
+        .foregroundStyle(color)
+        .padding(.horizontal, 6)
+        .frame(minHeight: 18)
+        .background(color.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: AtelierTheme.rowRadius))
+    }
+
+    private var upstreamStatusLabel: String {
+        var parts: [String] = []
+        if model.snapshot.ahead > 0 {
+            parts.append("\(model.snapshot.ahead) \(commitWord(model.snapshot.ahead)) to push")
+        }
+        if model.snapshot.behind > 0 {
+            parts.append("\(model.snapshot.behind) \(commitWord(model.snapshot.behind)) to pull")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private func commitWord(_ value: Int) -> String {
+        value == 1 ? "commit" : "commits"
     }
 
     private var pushButton: some View {

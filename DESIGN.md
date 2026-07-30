@@ -411,6 +411,13 @@ Interaction geometry rules:
 - Keep branch, focus state, estimated LLM tokens for the selected text file, and zoom in the
   26-point status bar. Place the token estimate immediately before zoom and prefix it with `~`
   because exact tokenization depends on the selected model.
+- Place upstream sync controls immediately after the branch label. Show an outgoing control with
+  the count of commits waiting to push and an incoming control with the count waiting to pull.
+- Hide each control when its count is zero. Hide both when the branch has no upstream.
+- Make both controls real actions: outgoing pushes the existing commits, incoming fast-forwards.
+  They carry the full hover, pressed, and disabled states plus the pointing-hand cursor.
+- Show progress in place while a sync runs and disable both controls for its whole duration.
+  Never resize the status bar or shift its other items while a sync runs.
 - Use thin dividers between sidebar, center, inspector, and status bar.
 - Give the sidebar a very light shadow that extends rightward into the center from its trailing
   edge. Mirror it leftward from the inspector's leading edge. Use `panelEdgeShadow`; fade each
@@ -692,6 +699,23 @@ Persistence boundaries:
 - Keep repository, branch, commit input, and change groups in the sidebar.
 - Present repository identity as one compact card with the workspace name, shortened path,
   current branch, and branch-switch menu.
+- Open one shared branch picker from both the status bar branch label and the repository card
+  menu. Never ship two branch-switching surfaces with different capabilities.
+- Present the picker as a centered overlay on the palette surface: 640-point width, filter field
+  on top, scrolling ref list, keyboard-hint footer, dimmed scrim that dismisses on click.
+- Open the picker with three actions above the refs: create a branch from HEAD, create a branch
+  from a chosen ref, and check out a ref detached.
+- Group refs as local branches, remote branches, then tags. Mark the current branch and keep it
+  unselectable for checkout.
+- Give every ref row its name, relative commit time, author, short hash, and commit subject.
+- Hide `origin/HEAD` and any other symbolic remote pointer. It duplicates a real branch.
+- Filter every row and action from one field. Match against ref name, author, and subject.
+- Drive the whole picker from the keyboard: arrows move, Return activates, Escape steps back one
+  stage and closes from the first stage.
+- Load refs when the picker opens and show a spinner in the filter field while they load. Never
+  block opening on the ref read.
+- Report a failed checkout, branch creation, or detach in the picker itself and keep it open so
+  the input can be corrected. Close it only on success.
 - Show Staged and Changes as separate, always-visible sections. Count untracked files under
   Changes. Do not add a summary selector above the composer.
 - Render each change section as an expandable directory tree. Collapse single-child directory
@@ -734,6 +758,17 @@ Persistence boundaries:
   push while the pipeline runs.
 - Stop commit-message generation after 30 seconds. Restore the idle Push state and show a
   retryable error without staging, committing, or pushing.
+- Mirror the upstream sync counts as their own read-only row directly above Push: outgoing commits
+  waiting to push and incoming commits waiting to pull. Keep Push full width and free of any
+  trailing segment. The status-bar controls own the push and pull actions, so this row takes no
+  action, pointer cursor, hover state, or focus ring.
+- Read the counts from the current branch's upstream only. Show no row when the branch has no
+  upstream or when both counts are zero.
+- Fetch only on an explicit refresh: workspace start, the Source Control refresh button, the status
+  bar refresh button, and after a completed push or pull. Never fetch on a timer, a file change, or
+  a repository metadata change.
+- Treat a failed fetch as silent. Log it and keep the last known counts. Being offline must not
+  raise a repository error banner.
 - Open file diffs as center tabs, not inside the Git sidebar.
 - Omit raw Git file metadata such as `diff --git`, `index`, `---`, and `+++` from text
   diff previews. Keep hunk dividers, line numbers, context, additions, deletions, and file notes.

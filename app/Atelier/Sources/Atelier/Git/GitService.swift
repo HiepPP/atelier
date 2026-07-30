@@ -174,6 +174,26 @@ nonisolated struct GitSnapshot: Equatable, Sendable {
     let status: GitStatus
     let branch: String
     let branches: [String]
+    /// Commits on HEAD that the upstream does not have. Zero when the branch
+    /// has no upstream, so a missing remote never reads as pending work.
+    let ahead: Int
+    /// Commits on the upstream that HEAD does not have. Only as fresh as the
+    /// last external fetch: Atelier never fetches on its own.
+    let behind: Int
+
+    init(
+        status: GitStatus,
+        branch: String,
+        branches: [String],
+        ahead: Int = 0,
+        behind: Int = 0
+    ) {
+        self.status = status
+        self.branch = branch
+        self.branches = branches
+        self.ahead = ahead
+        self.behind = behind
+    }
 }
 
 nonisolated struct GitCommit: Identifiable, Equatable, Sendable {
@@ -228,6 +248,26 @@ nonisolated enum GitCommitLogParser {
                     subject: String(fields[5]).trimmingCharacters(in: .whitespacesAndNewlines)
                 )
             }
+    }
+}
+
+/// Parses `git rev-list --left-right --count <upstream>...HEAD`, which prints
+/// one `behind<TAB>ahead` record. A branch with no upstream fails with exit 128
+/// and empty output, so anything unparsable reads as zero rather than an error.
+nonisolated enum GitUpstreamCounts {
+    static func parse(_ data: Data) -> (ahead: Int, behind: Int) {
+        let fields = String(decoding: data, as: UTF8.self)
+            .split(whereSeparator: \Character.isWhitespace)
+        guard
+            fields.count == 2,
+            let behind = Int(fields[0]),
+            let ahead = Int(fields[1]),
+            behind >= 0,
+            ahead >= 0
+        else {
+            return (ahead: 0, behind: 0)
+        }
+        return (ahead: ahead, behind: behind)
     }
 }
 
@@ -525,10 +565,12 @@ nonisolated final class GitService: Sendable {
             arguments: ["branch", "--format=%(refname:short)"],
             workspacePath: workspacePath
         )
-        let (statusOutput, branchOutput, branchesOutput) = try await (
+        async let upstreamCounts = upstreamCounts(workspacePath: workspacePath)
+        let (statusOutput, branchOutput, branchesOutput, counts) = try await (
             statusData,
             branchData,
-            branchesData
+            branchesData,
+            upstreamCounts
         )
         return GitSnapshot(
             status: GitStatus.parse(statusOutput),
@@ -536,13 +578,33 @@ nonisolated final class GitService: Sendable {
                 .trimmingCharacters(in: .whitespacesAndNewlines),
             branches: String(decoding: branchesOutput, as: UTF8.self)
                 .split(whereSeparator: \Character.isNewline)
-                .map(String.init)
+                .map(String.init),
+            ahead: counts.ahead,
+            behind: counts.behind
         )
     }
 
+    /// Ahead/behind against the branch upstream. A missing upstream, a fresh
+    /// repository with no HEAD, and any other failure all read as zero: sync
+    /// counts are informational, so they must never fail the whole snapshot.
+    @concurrent
+    func upstreamCounts(workspacePath: String) async -> (ahead: Int, behind: Int) {
+        do {
+            let data = try await run(
+                arguments: ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"],
+                workspacePath: workspacePath,
+                allowedExitCodes: [0, 128]
+            )
+            return GitUpstreamCounts.parse(data)
+        } catch {
+            return (ahead: 0, behind: 0)
+        }
+    }
+
     /// Working-tree status only. Filesystem-driven refreshes use this so a burst
-    /// of file edits spawns one `git status` instead of the three subprocesses a
-    /// full snapshot needs; branch and branch-list refresh stay on git actions.
+    /// of file edits spawns one `git status` instead of the four subprocesses a
+    /// full snapshot needs; branch, branch list, and upstream counts refresh
+    /// stay on git actions.
     @concurrent
     func status(workspacePath: String) async throws -> GitStatus {
         let data = try await run(
@@ -682,8 +744,67 @@ nonisolated final class GitService: Sendable {
         _ = try await run(arguments: ["push"], workspacePath: workspacePath)
     }
 
+    /// Updates the remote-tracking refs the ahead/behind counts read from.
+    /// Only explicit refreshes call this: a fetch is a network round trip.
+    func fetch(workspacePath: String) async throws {
+        _ = try await run(arguments: ["fetch", "--quiet"], workspacePath: workspacePath)
+    }
+
+    /// Fast-forward only. A diverged branch fails here with git's own message
+    /// instead of silently creating a merge commit from a one-click control.
+    func pull(workspacePath: String) async throws {
+        _ = try await run(arguments: ["pull", "--ff-only"], workspacePath: workspacePath)
+    }
+
     func switchBranch(_ branch: String, workspacePath: String) async throws {
         _ = try await run(arguments: ["checkout", branch], workspacePath: workspacePath)
+    }
+
+    /// Every local branch, remote branch, and tag with the commit metadata the
+    /// branch picker shows. Sorted newest first inside each section by git, so
+    /// the picker never re-sorts.
+    @concurrent
+    func refs(workspacePath: String) async throws -> [GitRef] {
+        let data = try await run(
+            arguments: [
+                "for-each-ref",
+                "--sort=-committerdate",
+                "--format=\(GitRefParser.format)",
+                "refs/heads", "refs/remotes", "refs/tags"
+            ],
+            workspacePath: workspacePath,
+            maxOutputBytes: 512_000,
+            allowedExitCodes: [0, 128]
+        )
+        return GitRefParser.parse(data)
+    }
+
+    func createBranch(
+        _ name: String,
+        from base: String?,
+        workspacePath: String
+    ) async throws {
+        var arguments = ["checkout", "-b", name]
+        if let base, !base.isEmpty {
+            arguments.append(base)
+        }
+        _ = try await run(arguments: arguments, workspacePath: workspacePath)
+    }
+
+    /// Checks out a remote branch as a local branch that tracks it, matching
+    /// what `git checkout <name>` does when the name is unambiguous.
+    func checkoutTracking(_ remoteRef: String, as localName: String, workspacePath: String) async throws {
+        _ = try await run(
+            arguments: ["checkout", "-b", localName, "--track", remoteRef],
+            workspacePath: workspacePath
+        )
+    }
+
+    func checkoutDetached(_ ref: String, workspacePath: String) async throws {
+        _ = try await run(
+            arguments: ["checkout", "--detach", ref],
+            workspacePath: workspacePath
+        )
     }
 
     private func hasHead(workspacePath: String) async throws -> Bool {
