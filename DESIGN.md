@@ -1083,6 +1083,11 @@ The five background features, all read-only and cancellable:
   last three days. A transcript older than that window is never opened, and a response older than
   that window never reaches the panel. Older history stays on disk for other tools to read.
 - Treat restored responses as read, then count only newly monitored responses as unread.
+- Follow the newest session until the user picks one. While the selection is automatic, every refresh
+  that adds responses moves it to the session with the newest response, so a response written into a
+  brand-new agent thread appears without opening the session picker. Once the user picks a session in
+  the picker, that session stays selected even when a newer session appears. Clearing the selection
+  returns to automatic follow.
 - Start transcript restore only when a workspace first becomes active. Keep live monitoring
   running after activation, including while another workspace is selected.
 - Bound startup discovery to the 100 newest transcript files per source root and 16 MiB of
@@ -1092,10 +1097,22 @@ The five background features, all read-only and cancellable:
   agent writing its own transcript emits a continuous event stream, and a per-event refresh
   re-walks and re-parses every transcript file. Keep the existing longer trailing refresh that
   covers files created inside the source's discovery throttle window.
+- Keep the transcript watcher coalescing latency at 0.3 seconds. A shorter kernel latency only
+  shortens the wait before a final answer reaches the panel: a callback inside a burst reschedules
+  the pending debounce instead of starting work, so it adds no refresh and no parse.
+- Coalesce a refresh that arrives while one is in flight. Never drop it: the dropped call can be the
+  one that covers the final answer, and when the agent has stopped writing no further filesystem
+  event follows, so the panel would stay stale until the user clicks Refresh. A call that finds a
+  refresh in flight marks one more pass, and that single pass runs after the current one finishes.
+  Keep one pending pass, never a queue, so a burst still collapses into one extra refresh.
 - Skip unchanged transcript files before parsing. Fingerprint every discovered file with one cheap
   size and modification date read. A refresh where no file changed returns the previous merged
   result: it reads no full file attributes, parses nothing, rebuilds no response list, and publishes
   no state change. Only a file whose size or modification date moved reaches the parse path.
+- Never reuse the unchanged-fingerprint shortcut after a pass that skipped a discovered file it did
+  not cache, such as a file dropped by the per-refresh uncached-byte budget or one whose read failed.
+  That file's fingerprint is recorded, so the shortcut would hide its responses until the file changed
+  again. The next refresh must retry it with a fresh byte budget.
 - Cache the transcript discovery walk. A discovery pass records the modification date of every
   directory it visits. The next pass re-stats only those directories, and when none moved it
   reuses the previous file list without listing any directory contents or reading any per-file
@@ -1113,6 +1130,31 @@ The five background features, all read-only and cancellable:
   can reach 8 MB and only the newest 100 responses can reach the panel. Keep the header in the parsed
   buffer: a codex response is only accepted while the session workspace is known, and that comes from
   the `session_meta` line at the top of the file. Later appends still read from the real file end.
+- Show the user question that produced the answer above the answer, inside the same card. Give it its
+  own quiet container: a raised fill, a row-radius corner, a hairline border, and an accent left rule,
+  so the reader sees at a glance where the question ends and the answer begins. Label it `Question` in
+  caption-size accent text, matching the provider name in the card header. Set the question at
+  headline size in medium weight and primary ink, clearly above the answer body size, so the question
+  reads as the heading of the card. Render it as plain text, never as Markdown, so a pasted prompt cannot
+  restyle the card. Clamp it to 3 lines and expand or collapse it with a disclosure control that
+  carries the pointer cursor. Store at most 4000 characters and end a cut question with a trailing
+  `...`. Render nothing at all, no container, no label, and no empty row, when the question is unknown.
+- Pair each answer with the newest preceding user message in the same transcript. Carry that pending
+  question inside the resumable parser state so a question read in one pass still pairs with an answer
+  that arrives in a later appended read. Two answers in one turn share one question. A question line
+  outside the parsed window leaves the question unknown.
+- Trust the recorded reason a user line exists before reading its text. A Claude transcript line that
+  carries an `origin` object is a question only when its `kind` is `human`. A harness injection such as
+  a background task notification is also written with the user role, so text alone cannot tell them
+  apart. Only a line with no `origin` at all, written by an older CLI, falls back to reading its text.
+- Never treat an injected or synthetic user line as a question: a Claude meta or sidechain line, a
+  content block set holding only tool results, text opening with `<local-command-caveat>`,
+  `<command-name>`, `<command-message>`, `<system-reminder>`, `<task-notification>`, or `<skill>`,
+  codex text opening with `# AGENTS.md instructions`, `<INSTRUCTIONS>`, `<environment_context>`,
+  `## Referenced ChatGPT conversation:`, or `The following is the Codex agent history`, and any text
+  that trims to empty. A skipped line keeps the previous question instead of clearing it.
+- Build a response id from its answer alone. The question never changes an id, so read state and
+  unread counts survive a relaunch.
 - Keep status, navigation, refresh, copy, and close actions keyboard accessible.
 - Keep the transcript Markdown treatment consistent with the file-preview surface: pull-quote block
   quotes with an accent left rule and serif italic secondary text, completed task items in secondary

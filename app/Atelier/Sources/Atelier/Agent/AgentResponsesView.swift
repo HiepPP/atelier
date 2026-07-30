@@ -379,6 +379,10 @@ struct AgentResponsesView: View {
                     .lineLimit(1)
             }
 
+            if let question = response.question {
+                AgentResponseQuestionView(question: question)
+            }
+
             selectableMarkdown(response.markdown)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -466,4 +470,71 @@ struct AgentResponsesView: View {
         "\(summary.provider.rawValue) session \(shortSessionID(summary.sessionID)), "
             + "\(summary.responseCount) responses, \(summary.unreadCount) unread"
     }
+}
+
+/// The question that produced the answer above it. It owns its own disclosure
+/// state, so expanding it re-evaluates this view alone, not the whole panel.
+/// The card's `.id(response.id)` resets that state when the shown response
+/// changes.
+private struct AgentResponseQuestionView: View {
+    let question: String
+
+    @State private var isExpanded = false
+
+    private static let collapsedLineLimit = 3
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AtelierMetrics.spaceXS) {
+            Button {
+                isExpanded.toggle()
+            } label: {
+                HStack(spacing: AtelierMetrics.spaceXS) {
+                    Text("Question")
+                        .atelierFont(size: AtelierTypography.caption, weight: .semibold)
+                        .foregroundStyle(AtelierTheme.accent)
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .atelierFont(size: AtelierTypography.micro, weight: .semibold)
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .atelierPointerCursor()
+            .accessibilityLabel(isExpanded ? "Collapse question" : "Expand question")
+            .help(isExpanded ? "Collapse Question" : "Expand Question")
+
+            // Plain text, never Markdown: a pasted prompt must not restyle the
+            // card. A String argument already skips localization.
+            Text(question)
+                .atelierFont(size: AtelierTypography.headline, weight: .medium)
+                .foregroundStyle(.primary)
+                .lineSpacing(3)
+                .lineLimit(isExpanded ? nil : Self.collapsedLineLimit)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, AtelierMetrics.spaceS)
+        .padding(.leading, AtelierMetrics.spaceM)
+        .padding(.trailing, AtelierMetrics.spaceS)
+        .background(alignment: .leading) {
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+                    .fill(AtelierTheme.raised)
+                RoundedRectangle(cornerRadius: AtelierTheme.rowRadius, style: .continuous)
+                    .strokeBorder(AtelierTheme.border, lineWidth: AtelierTheme.strokeHairline)
+                // Accent left rule: it marks the question as the lead-in to the
+                // answer below without competing with the answer's own text.
+                UnevenRoundedRectangle(
+                    topLeadingRadius: AtelierTheme.rowRadius,
+                    bottomLeadingRadius: AtelierTheme.rowRadius,
+                    style: .continuous
+                )
+                .fill(AtelierTheme.accent)
+                .frame(width: Self.accentRuleWidth)
+            }
+        }
+    }
+
+    private static let accentRuleWidth: CGFloat = 2
 }

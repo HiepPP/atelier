@@ -40,7 +40,10 @@ nonisolated enum AgentResponseMemoryFixture {
             provider: .codex,
             sessionID: "memory-fixture",
             timestamp: Date(timeIntervalSince1970: TimeInterval(index)),
-            markdown: markdown(index: index, rowCount: rowCount, byteCount: byteCount)
+            markdown: markdown(index: index, rowCount: rowCount, byteCount: byteCount),
+            // The last fixture response carries no question, so the profile run
+            // covers both the question block and its absence.
+            question: index == 3 ? nil : "Deterministic fixture question \(index)."
         )
     }
 

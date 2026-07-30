@@ -90,6 +90,230 @@ struct AgentResponsesTests {
         #expect(codexFallback != claudeFallback)
     }
 
+    @Test("Each final answer carries the newest preceding user question")
+    func pairsQuestionWithAnswer() {
+        let codex = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-session","cwd":"/tmp/project"}}
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"type":"message","id":"msg_1","role":"user","content":[{"type":"input_text","text":"Fix the stale panel"}]}}
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"response_item","payload":{"type":"message","id":"answer-1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Fixed"}]}}
+        {"timestamp":"2026-07-17T08:00:03.000Z","type":"response_item","payload":{"type":"message","id":"answer-2","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Also verified"}]}}
+        """
+        let claudeString = """
+        {"uuid":"q1","timestamp":"2026-07-17T08:00:01.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"Show the question"}}
+        {"uuid":"a1","timestamp":"2026-07-17T08:00:02.000Z","type":"assistant","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Shown"}]}}
+        """
+        let claudeBlocks = """
+        {"uuid":"q1","timestamp":"2026-07-17T08:00:01.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":[{"type":"tool_result","content":"ignored"},{"type":"text","text":"Block form question"}]}}
+        {"uuid":"a1","timestamp":"2026-07-17T08:00:02.000Z","type":"assistant","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Shown"}]}}
+        """
+
+        let codexResponses = AgentTranscriptParser.extractAll(
+            from: codex,
+            workspacePath: "/tmp/project",
+            sourceID: "codex.jsonl",
+            modifiedAfter: .distantPast
+        )
+        let stringResponses = AgentTranscriptParser.extractAll(
+            from: claudeString,
+            workspacePath: "/tmp/project",
+            sourceID: "claude.jsonl",
+            modifiedAfter: .distantPast
+        )
+        let blockResponses = AgentTranscriptParser.extractAll(
+            from: claudeBlocks,
+            workspacePath: "/tmp/project",
+            sourceID: "claude.jsonl",
+            modifiedAfter: .distantPast
+        )
+
+        // Two answers in one turn share the one question.
+        #expect(codexResponses.map(\.question) == ["Fix the stale panel", "Fix the stale panel"])
+        #expect(stringResponses.map(\.question) == ["Show the question"])
+        #expect(blockResponses.map(\.question) == ["Block form question"])
+    }
+
+    @Test("Injected, meta, and tool-only user lines never become a question")
+    func skipsInjectedQuestionLines() {
+        let answer = """
+        {"uuid":"a1","timestamp":"2026-07-17T08:00:09.000Z","type":"assistant","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}}
+        """
+        let skipped = [
+            #"{"uuid":"m","timestamp":"2026-07-17T08:00:01.000Z","type":"user","isMeta":true,"cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"Real looking text"}}"#,
+            #"{"uuid":"s","timestamp":"2026-07-17T08:00:02.000Z","type":"user","isSidechain":true,"cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"Sidechain text"}}"#,
+            #"{"uuid":"c","timestamp":"2026-07-17T08:00:03.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"<command-name>/watchtower</command-name>"}}"#,
+            #"{"uuid":"r","timestamp":"2026-07-17T08:00:04.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"<system-reminder>Do not log</system-reminder>"}}"#,
+            #"{"uuid":"l","timestamp":"2026-07-17T08:00:05.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"<local-command-caveat>Caveat</local-command-caveat>"}}"#,
+            #"{"uuid":"t","timestamp":"2026-07-17T08:00:06.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":[{"type":"tool_result","content":"file contents"}]}}"#,
+            #"{"uuid":"e","timestamp":"2026-07-17T08:00:07.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"   \n  "}}"#
+        ]
+
+        for line in skipped {
+            let responses = AgentTranscriptParser.extractAll(
+                from: "\(line)\n\(answer)",
+                workspacePath: "/tmp/project",
+                sourceID: "claude.jsonl",
+                modifiedAfter: .distantPast
+            )
+            #expect(responses.count == 1)
+            #expect(responses.first?.question == nil)
+        }
+
+        let codexInjections = [
+            "# AGENTS.md instructions\\n\\nFollow them",
+            "<INSTRUCTIONS>Injected</INSTRUCTIONS>",
+            "<environment_context>cwd</environment_context>",
+            "## Referenced ChatGPT conversation:\\n\\nText"
+        ]
+        for text in codexInjections {
+            let codex = """
+            {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-session","cwd":"/tmp/project"}}
+            {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"type":"message","id":"msg_1","role":"user","content":[{"type":"input_text","text":"\(text)"}]}}
+            {"timestamp":"2026-07-17T08:00:02.000Z","type":"response_item","payload":{"type":"message","id":"answer-1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Done"}]}}
+            """
+            let responses = AgentTranscriptParser.extractAll(
+                from: codex,
+                workspacePath: "/tmp/project",
+                sourceID: "codex.jsonl",
+                modifiedAfter: .distantPast
+            )
+            #expect(responses.count == 1)
+            #expect(responses.first?.question == nil)
+        }
+    }
+
+    @Test("Only a human origin user line becomes a question")
+    func skipsNonHumanOriginLines() {
+        let answer = """
+        {"uuid":"a1","timestamp":"2026-07-17T08:00:09.000Z","type":"assistant","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}}
+        """
+        // A task notification is written with the user role and plain text, so
+        // only its origin tells it apart from a real turn.
+        let notification = #"""
+        {"uuid":"n","timestamp":"2026-07-17T08:00:01.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","promptSource":"system","origin":{"kind":"task-notification"},"message":{"role":"user","content":"Workflow finished. Both tasks shipped."}}
+        """#
+        let notified = AgentTranscriptParser.extractAll(
+            from: "\(notification)\n\(answer)",
+            workspacePath: "/tmp/project",
+            sourceID: "claude.jsonl",
+            modifiedAfter: .distantPast
+        )
+        #expect(notified.count == 1)
+        #expect(notified.first?.question == nil)
+
+        let human = #"""
+        {"uuid":"h","timestamp":"2026-07-17T08:00:01.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","promptSource":"typed","origin":{"kind":"human"},"message":{"role":"user","content":"Why is the panel stale?"}}
+        """#
+        let asked = AgentTranscriptParser.extractAll(
+            from: "\(human)\n\(answer)",
+            workspacePath: "/tmp/project",
+            sourceID: "claude.jsonl",
+            modifiedAfter: .distantPast
+        )
+        #expect(asked.count == 1)
+        #expect(asked.first?.question == "Why is the panel stale?")
+
+        // An older CLI records no origin, so its plain turn still pairs.
+        let legacy = #"""
+        {"uuid":"o","timestamp":"2026-07-17T08:00:01.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"Legacy question"}}
+        """#
+        let legacyPaired = AgentTranscriptParser.extractAll(
+            from: "\(legacy)\n\(answer)",
+            workspacePath: "/tmp/project",
+            sourceID: "claude.jsonl",
+            modifiedAfter: .distantPast
+        )
+        #expect(legacyPaired.count == 1)
+        #expect(legacyPaired.first?.question == "Legacy question")
+    }
+
+    @Test("Notification and skill blocks in a transcript with no origin stay out of the question")
+    func skipsNotificationAndSkillPrefixes() {
+        let answer = """
+        {"uuid":"a1","timestamp":"2026-07-17T08:00:09.000Z","type":"assistant","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}}
+        """
+        let skipped = [
+            #"{"uuid":"t","timestamp":"2026-07-17T08:00:01.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"<task-notification>\n<task-id>abc</task-id>\n</task-notification>"}}"#,
+            #"{"uuid":"m","timestamp":"2026-07-17T08:00:02.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"<command-message>clear</command-message>"}}"#,
+            #"{"uuid":"k","timestamp":"2026-07-17T08:00:03.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"<skill>\n<name>commit</name>\n</skill>"}}"#
+        ]
+        for line in skipped {
+            let responses = AgentTranscriptParser.extractAll(
+                from: "\(line)\n\(answer)",
+                workspacePath: "/tmp/project",
+                sourceID: "claude.jsonl",
+                modifiedAfter: .distantPast
+            )
+            #expect(responses.count == 1)
+            #expect(responses.first?.question == nil)
+        }
+
+        let codex = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-session","cwd":"/tmp/project"}}
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"type":"message","id":"msg_1","role":"user","content":[{"type":"input_text","text":"The following is the Codex agent history added since the last summary"}]}}
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"response_item","payload":{"type":"message","id":"answer-1","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Done"}]}}
+        """
+        let codexResponses = AgentTranscriptParser.extractAll(
+            from: codex,
+            workspacePath: "/tmp/project",
+            sourceID: "codex.jsonl",
+            modifiedAfter: .distantPast
+        )
+        #expect(codexResponses.count == 1)
+        #expect(codexResponses.first?.question == nil)
+    }
+
+    @Test("A skipped user line keeps the previous question and long questions are capped")
+    func keepsPreviousQuestionAndCapsLength() {
+        let long = String(repeating: "q", count: AgentTranscriptParser.questionCharacterLimit + 500)
+        let transcript = """
+        {"uuid":"q1","timestamp":"2026-07-17T08:00:01.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"Real question"}}
+        {"uuid":"m","timestamp":"2026-07-17T08:00:02.000Z","type":"user","isMeta":true,"cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"Meta noise"}}
+        {"uuid":"a1","timestamp":"2026-07-17T08:00:03.000Z","type":"assistant","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}}
+        {"uuid":"q2","timestamp":"2026-07-17T08:00:04.000Z","type":"user","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"user","content":"\(long)"}}
+        {"uuid":"a2","timestamp":"2026-07-17T08:00:05.000Z","type":"assistant","cwd":"/tmp/project","sessionId":"claude-session","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Done again"}]}}
+        """
+        let responses = AgentTranscriptParser.extractAll(
+            from: transcript,
+            workspacePath: "/tmp/project",
+            sourceID: "claude.jsonl",
+            modifiedAfter: .distantPast
+        )
+
+        #expect(responses.count == 2)
+        #expect(responses.first?.question == "Real question")
+        #expect(responses.last?.question?.count == AgentTranscriptParser.questionCharacterLimit + 3)
+        #expect(responses.last?.question?.hasSuffix("...") == true)
+        #expect(
+            responses.last?.question
+                == String(long.prefix(AgentTranscriptParser.questionCharacterLimit)) + "..."
+        )
+    }
+
+    @Test("A question never changes a response id")
+    func questionKeepsResponseIDStable() {
+        let question = #"{"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"type":"message","id":"msg_1","role":"user","content":[{"type":"input_text","text":"Ask"}]}}"#
+        let header = #"{"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"codex-session","cwd":"/tmp/project"}}"#
+        // No record id on the answer, so the id falls back to its digest.
+        let answer = #"{"timestamp":"2026-07-17T08:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Done"}]}}"#
+
+        let withQuestion = AgentTranscriptParser.extractAll(
+            from: "\(header)\n\(question)\n\(answer)",
+            workspacePath: "/tmp/project",
+            sourceID: "codex.jsonl",
+            modifiedAfter: .distantPast
+        )
+        let withoutQuestion = AgentTranscriptParser.extractAll(
+            from: "\(header)\n\(answer)",
+            workspacePath: "/tmp/project",
+            sourceID: "codex.jsonl",
+            modifiedAfter: .distantPast
+        )
+
+        #expect(withQuestion.first?.question == "Ask")
+        #expect(withoutQuestion.first?.question == nil)
+        #expect(withQuestion.map(\.id) == withoutQuestion.map(\.id))
+    }
+
     @Test("Monitor loads every matching transcript and deduplicates scans")
     func multiSessionMonitor() async throws {
         let root = temporaryDirectory("monitor")
@@ -313,6 +537,93 @@ struct AgentResponsesTests {
         #expect(third.map(\.markdown) == ["One", "Two"])
         #expect(await monitor.mergeCount == mergeCountAfterFirst + 1)
         #expect(await monitor.parsedByteCount - parsedBytesAfterFirst == appended.count)
+    }
+
+    @Test("Monitor retries a file the uncached byte budget skipped")
+    func byteBudgetSkipRetriedOnNextRefresh() async throws {
+        let root = temporaryDirectory("byte-budget-skip")
+        let transcriptRoot = root.appendingPathComponent("transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptRoot, withIntermediateDirectories: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+
+        let older = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"older","cwd":"\(workspace.path)"}}
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"id":"older-1","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Older"}]}}
+        """
+        let newer = """
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"session_meta","payload":{"id":"newer","cwd":"\(workspace.path)"}}
+        {"timestamp":"2026-07-17T08:00:03.000Z","type":"response_item","payload":{"id":"newer-1","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Newer"}]}}
+        """
+        let olderURL = transcriptRoot.appendingPathComponent("older.jsonl")
+        let newerURL = transcriptRoot.appendingPathComponent("newer.jsonl")
+        try older.write(to: olderURL, atomically: true, encoding: .utf8)
+        try newer.write(to: newerURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1)],
+            ofItemAtPath: olderURL.path
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 2)],
+            ofItemAtPath: newerURL.path
+        )
+
+        // The budget admits only the newest file, so the older one is skipped
+        // without being cached.
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            modifiedAfter: .distantPast,
+            roots: [transcriptRoot],
+            uncachedBytesLimit: newer.utf8.count
+        )
+
+        let first = await monitor.loadResponses()
+        #expect(first.map(\.markdown) == ["Newer"])
+
+        // No file changed in between. The unchanged-fingerprint shortcut must
+        // not hide the skipped file: the next pass retries it.
+        let second = await monitor.loadResponses()
+        #expect(second.map(\.markdown) == ["Older", "Newer"])
+
+        // Once every discovered file is parsed or cached, the shortcut returns.
+        let mergeCountAfterSecond = await monitor.mergeCount
+        let third = await monitor.loadResponses()
+        #expect(third.map(\.markdown) == ["Older", "Newer"])
+        #expect(await monitor.mergeCount == mergeCountAfterSecond)
+    }
+
+    @Test("A pending question survives into an appended read")
+    func pendingQuestionSurvivesAppendedRead() async throws {
+        let root = temporaryDirectory("pending-question-append")
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        let transcriptURL = root.appendingPathComponent("session.jsonl")
+        let initial = """
+        {"timestamp":"2026-07-17T08:00:00.000Z","type":"session_meta","payload":{"id":"one","cwd":"\(workspace.path)"}}
+        {"timestamp":"2026-07-17T08:00:01.000Z","type":"response_item","payload":{"type":"message","id":"msg_1","role":"user","content":[{"type":"input_text","text":"Asked before the append"}]}}
+        """
+        try initial.write(to: transcriptURL, atomically: true, encoding: .utf8)
+        let monitor = AgentTranscriptMonitor(
+            workspacePath: workspace.path,
+            modifiedAfter: .distantPast,
+            roots: [root]
+        )
+
+        let first = await monitor.loadResponses()
+        #expect(first.isEmpty)
+
+        let appended = Data("""
+
+        {"timestamp":"2026-07-17T08:00:02.000Z","type":"response_item","payload":{"id":"answer","type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Answered"}]}}
+        """.utf8)
+        let handle = try FileHandle(forWritingTo: transcriptURL)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: appended)
+
+        let second = await monitor.loadResponses()
+        #expect(second.map(\.markdown) == ["Answered"])
+        #expect(second.first?.question == "Asked before the append")
     }
 
     @Test("Monitor reuses the discovery walk while directory dates hold still")
@@ -600,7 +911,8 @@ struct AgentResponsesTests {
             provider: .codex,
             sessionID: "session",
             timestamp: Date(timeIntervalSince1970: 1),
-            markdown: "Ready"
+            markdown: "Ready",
+            question: nil
         )
         let model = AgentResponsesModel(source: StaticAgentResponseSource([response]))
         await model.refresh()
@@ -708,6 +1020,64 @@ struct AgentResponsesTests {
         model.markRead(model.selectedResponses.prefix(1))
         #expect(model.unreadCount == 1)
         #expect(model.sessionSummaries.first(where: { $0.session == codexFirst.session })?.unreadCount == 1)
+    }
+
+    @Test("Automatic session selection follows the newest session")
+    func automaticSelectionFollowsNewestSession() async {
+        let sessionA = response(id: "a", provider: .codex, sessionID: "A", time: 1, markdown: "A one")
+        let sessionB = response(id: "b", provider: .codex, sessionID: "B", time: 2, markdown: "B one")
+        let source = SequencedAgentResponseSource([[sessionA], [sessionA, sessionB]])
+        let model = AgentResponsesModel(source: source)
+
+        await model.refresh()
+        #expect(model.selectedSession == sessionA.session)
+        #expect(model.selectedResponses.map(\.markdown) == ["A one"])
+
+        await model.refresh()
+        #expect(model.selectedSession == sessionB.session)
+        #expect(model.selectedResponses.map(\.markdown) == ["B one"])
+    }
+
+    @Test("A hand-picked session stays selected when a newer session appears")
+    func manualSelectionSurvivesNewerSession() async {
+        let sessionA = response(id: "a", provider: .codex, sessionID: "A", time: 1, markdown: "A one")
+        let sessionB = response(id: "b", provider: .codex, sessionID: "B", time: 2, markdown: "B one")
+        let source = SequencedAgentResponseSource([[sessionA], [sessionA, sessionB]])
+        let model = AgentResponsesModel(source: source)
+
+        await model.refresh()
+        model.selectSession(sessionA.session)
+
+        await model.refresh()
+        #expect(model.selectedSession == sessionA.session)
+        #expect(model.selectedResponses.map(\.markdown) == ["A one"])
+
+        // Clearing the selection returns to automatic follow.
+        model.selectSession(nil)
+        #expect(model.selectedSession == nil)
+    }
+
+    @Test("A refresh arriving during a refresh runs exactly one more pass")
+    func refreshDuringRefreshRunsOnceMore() async {
+        let source = SuspendingAgentResponseSource()
+        var starts = source.started.makeAsyncIterator()
+        let model = AgentResponsesModel(source: source)
+
+        let first = Task { await model.refresh() }
+        _ = await starts.next()
+        #expect(await source.callCount == 1)
+
+        // This call finds the first refresh still parsing.
+        await Task { await model.refresh() }.value
+        #expect(await source.callCount == 1)
+
+        await source.resume([])
+        _ = await starts.next()
+        #expect(await source.callCount == 2)
+
+        await source.resume([])
+        await first.value
+        #expect(await source.callCount == 2)
     }
 
     @Test("Opening sidecar does not clear hidden session unread state")
@@ -2876,14 +3246,16 @@ struct AgentResponsesTests {
         provider: AgentProvider,
         sessionID: String,
         time: TimeInterval,
-        markdown: String = "Ready"
+        markdown: String = "Ready",
+        question: String? = nil
     ) -> AgentResponse {
         AgentResponse(
             id: id,
             provider: provider,
             sessionID: sessionID,
             timestamp: Date(timeIntervalSince1970: time),
-            markdown: markdown
+            markdown: markdown,
+            question: question
         )
     }
 
@@ -2925,6 +3297,7 @@ nonisolated actor SuspendingAgentResponseSource: AgentResponseSource {
     nonisolated let started: AsyncStream<Void>
     private let startedContinuation: AsyncStream<Void>.Continuation
     private var continuation: CheckedContinuation<[AgentResponse], Never>?
+    private(set) var callCount = 0
 
     init() {
         var continuation: AsyncStream<Void>.Continuation!
@@ -2933,6 +3306,7 @@ nonisolated actor SuspendingAgentResponseSource: AgentResponseSource {
     }
 
     func loadResponses() async -> [AgentResponse] {
+        callCount += 1
         startedContinuation.yield()
         return await withCheckedContinuation { continuation = $0 }
     }

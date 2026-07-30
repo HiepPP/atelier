@@ -22,6 +22,10 @@ nonisolated struct AgentResponse: Identifiable, Equatable, Sendable {
     let sessionID: String
     let timestamp: Date
     let markdown: String
+    /// The newest user message that preceded this answer in the same
+    /// transcript, or nil when it sat outside the parsed window. It never
+    /// takes part in `id`, so read state survives a relaunch.
+    let question: String?
 
     var session: AgentSessionIdentity {
         AgentSessionIdentity(provider: provider, sessionID: sessionID)
@@ -66,7 +70,30 @@ nonisolated enum AgentTranscriptParser {
         var codexWorkspace: String?
         var codexSessionID: String?
         var pendingData = Data()
+        /// The newest kept user message. It lives in the resumable state so a
+        /// question read in one pass still pairs with an answer that arrives in
+        /// a later appended read.
+        var pendingQuestion: String?
     }
+
+    static let questionCharacterLimit = 4_000
+
+    /// Openings of injected or synthetic user lines. They are transcript
+    /// plumbing, never a question the reader asked. This list is the fallback
+    /// for a transcript that records no origin; see `claudeUserText`.
+    private static let injectedQuestionPrefixes = [
+        "<local-command-caveat>",
+        "<command-name>",
+        "<command-message>",
+        "<system-reminder>",
+        "<task-notification>",
+        "<skill>",
+        "# AGENTS.md instructions",
+        "<INSTRUCTIONS>",
+        "<environment_context>",
+        "## Referenced ChatGPT conversation:",
+        "The following is the Codex agent history"
+    ]
 
     struct ParseResult: Sendable {
         let responses: [AgentResponse]
@@ -211,6 +238,20 @@ nonisolated enum AgentTranscriptParser {
             return
         }
 
+        // A kept user line replaces the pending question. A skipped one leaves
+        // the previous question in place instead of clearing it.
+        if state.codexWorkspace == expectedWorkspace,
+           let question = codexUserText(from: object) {
+            state.pendingQuestion = question
+            return
+        }
+        if let question = claudeUserText(from: object),
+           let cwd = object["cwd"] as? String,
+           standardizedPath(cwd) == expectedWorkspace {
+            state.pendingQuestion = question
+            return
+        }
+
         let provider: AgentProvider
         let sessionID: String
         let markdown: String
@@ -255,7 +296,9 @@ nonisolated enum AgentTranscriptParser {
             provider: provider,
             sessionID: sessionID,
             timestamp: date,
-            markdown: markdown
+            markdown: markdown,
+            // Keep the question pending: two answers in one turn share it.
+            question: state.pendingQuestion
         ))
     }
 
@@ -290,6 +333,62 @@ nonisolated enum AgentTranscriptParser {
             guard item["type"] as? String == "text" else { return nil }
             return item["text"] as? String
         }.joined(separator: "\n")
+    }
+
+    private static func codexUserText(from object: [String: Any]) -> String? {
+        guard object["type"] as? String == "response_item",
+              let payload = object["payload"] as? [String: Any],
+              payload["type"] as? String == "message",
+              payload["role"] as? String == "user",
+              let content = payload["content"] as? [[String: Any]] else {
+            return nil
+        }
+        return questionText(content.compactMap { item in
+            guard item["type"] as? String == "input_text" else { return nil }
+            return item["text"] as? String
+        }.joined(separator: "\n"))
+    }
+
+    private static func claudeUserText(from object: [String: Any]) -> String? {
+        guard object["type"] as? String == "user",
+              object["isMeta"] as? Bool != true,
+              object["isSidechain"] as? Bool != true,
+              let message = object["message"] as? [String: Any],
+              message["role"] as? String == "user" else {
+            return nil
+        }
+        // A harness injection, such as a background task notification, is also
+        // written with the user role, so text alone cannot tell it from a real
+        // turn. Newer transcripts record why the line exists, so trust that.
+        // A line with no origin comes from an older CLI and falls back to the
+        // prefix list in `questionText`.
+        if let origin = object["origin"] as? [String: Any] {
+            guard origin["kind"] as? String == "human" else { return nil }
+        }
+        // A plain turn stores content as a string; a tool turn stores blocks.
+        // Only text blocks carry the question: tool results and tool calls are
+        // transcript plumbing.
+        if let text = message["content"] as? String {
+            return questionText(text)
+        }
+        guard let blocks = message["content"] as? [[String: Any]] else { return nil }
+        return questionText(blocks.compactMap { block in
+            guard block["type"] as? String == "text" else { return nil }
+            return block["text"] as? String
+        }.joined(separator: "\n"))
+    }
+
+    /// Trimmed question text, or nil when the line is not a question. A question
+    /// above the limit is cut and marked, so a giant pasted prompt cannot bloat
+    /// retained memory or panel layout.
+    private static func questionText(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !injectedQuestionPrefixes.contains(where: { trimmed.hasPrefix($0) }) else {
+            return nil
+        }
+        guard trimmed.count > questionCharacterLimit else { return trimmed }
+        return String(trimmed.prefix(questionCharacterLimit)) + "..."
     }
 
     private static func recordID(from object: [String: Any]) -> String? {
@@ -562,6 +661,11 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
 
         var responses: [AgentResponse] = []
         var remainingUncachedBytes = uncachedBytesLimit
+        // A discovered file this pass neither parsed nor cached must not be
+        // covered by the unchanged-fingerprint shortcut: its fingerprint is
+        // recorded, so the shortcut would hide its responses until the file
+        // changed again.
+        var skippedUncachedFile = false
 
         for fingerprint in fingerprints {
             guard !isCurrentTaskCancelled else { return [] }
@@ -585,6 +689,7 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
                   let size = (attributes[.size] as? NSNumber)?.intValue,
                   size <= Self.maximumTranscriptBytes,
                   let fileNumber = attributes[.systemFileNumber] as? NSNumber else {
+                skippedUncachedFile = true
                 continue
             }
             // Store the fingerprint date, not the attribute date, so the next
@@ -623,9 +728,11 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
             let offset = canReadAppend ? previous?.size ?? 0 : firstReadOffset
             let uncachedBytes = size - offset
             guard uncachedBytes <= remainingUncachedBytes else {
+                skippedUncachedFile = true
                 continue
             }
             guard let tail = readData(from: url, offset: offset) else {
+                skippedUncachedFile = true
                 continue
             }
             remainingUncachedBytes -= tail.count
@@ -674,7 +781,7 @@ nonisolated actor AgentTranscriptMonitor: AgentResponseSource {
         mergeCount += 1
         lastFingerprints = fingerprints
         lastMergedResponses = merged
-        hasMergedResult = true
+        hasMergedResult = !skippedUncachedFile
         return merged
     }
 
@@ -893,7 +1000,12 @@ nonisolated final class TranscriptDirectoryWatcher: @unchecked Sendable {
             &context,
             roots.map(\.path) as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-            1.0,
+            // Kernel coalescing latency. The refresh path is debounced and the
+            // source throttles discovery, so a shorter latency only shortens the
+            // wait before the final answer reaches the panel; it never adds a
+            // refresh, because a callback during a burst reschedules the pending
+            // debounce instead of starting work.
+            0.3,
             FSEventStreamCreateFlags(
                 kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents
             )
@@ -945,6 +1057,8 @@ final class AgentResponsesModel {
     private var debouncedRefreshTask: Task<Void, Never>?
     private var trailingRefreshTask: Task<Void, Never>?
     private var isRefreshInFlight = false
+    private var needsAnotherRefresh = false
+    private var hasUserSelectedSession = false
 
     var unreadCount: Int {
         responses.reduce(into: 0) { count, response in
@@ -1052,14 +1166,31 @@ final class AgentResponsesModel {
         showProgress: Bool,
         markLoadedResponsesRead: Bool
     ) async {
-        guard !isRefreshInFlight else { return }
+        // Coalesce instead of dropping. A dropped call can be the one covering
+        // the final answer, and once the agent stops writing no further
+        // filesystem event arrives to retry it.
+        guard !isRefreshInFlight else {
+            needsAnotherRefresh = true
+            return
+        }
         isRefreshInFlight = true
+        needsAnotherRefresh = false
         if showProgress { isRefreshing = true }
         defer {
             isRefreshInFlight = false
             if showProgress { isRefreshing = false }
         }
 
+        await load(markLoadedResponsesRead: markLoadedResponsesRead)
+        // One pending pass at a time, never a queue, so a burst still collapses
+        // into a single extra refresh.
+        while needsAnotherRefresh, !Task.isCancelled {
+            needsAnotherRefresh = false
+            await load(markLoadedResponsesRead: false)
+        }
+    }
+
+    private func load(markLoadedResponsesRead: Bool) async {
         let loaded = await source.loadResponses()
         guard !Task.isCancelled else { return }
         if markLoadedResponsesRead {
@@ -1075,17 +1206,26 @@ final class AgentResponsesModel {
         if responses.count > 300 {
             responses.removeFirst(responses.count - 300)
         }
-        if selectedSession == nil {
-            selectedSession = sessionSummaries.first?.session
+        // Follow the newest session while the selection is automatic, so a
+        // response written into a brand-new agent thread reaches the panel
+        // without the user opening the picker. A session the user picked stays
+        // picked. Assign only on a real change: an @Observable write notifies
+        // observers even when the value did not move.
+        guard !hasUserSelectedSession else { return }
+        let newest = sessionSummaries.first?.session
+        if selectedSession != newest {
+            selectedSession = newest
         }
     }
 
     func selectSession(_ session: AgentSessionIdentity?) {
         guard let session else {
+            hasUserSelectedSession = false
             selectedSession = nil
             return
         }
         guard sessionSummaries.contains(where: { $0.session == session }) else { return }
+        hasUserSelectedSession = true
         selectedSession = session
     }
 
