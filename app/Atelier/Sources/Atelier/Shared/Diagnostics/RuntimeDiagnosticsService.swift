@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import OSLog
+import Synchronization
 
 nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
     static let shared = RuntimeDiagnosticsService()
@@ -51,6 +52,14 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
     private var lastMailboxInode: UInt64 = 0
     private var lastMailboxModification = timespec()
 
+    // Mirrors of queue-owned state that the main actor reads. Reading through
+    // `queue.sync` parked the main thread behind whatever the serial queue was
+    // doing, which includes snapshot encoding and the atomic snapshot write, so
+    // the code measuring main-thread stalls could cause one. A mutex read costs
+    // an uncontended lock acquisition instead.
+    private let mirroredLastHeartbeatAt: Mutex<Double>
+    private let mirroredLiveControllerCount = Mutex<Int>(0)
+
     init(
         clock: RuntimeMonotonicClock = SystemRuntimeMonotonicClock(),
         sampler: ProcessMetricsSampling = ProcessMetrics(),
@@ -62,6 +71,7 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
         self.policy = policy
         startedAt = clock.now()
         heartbeat = RuntimeHeartbeatState(startedAt: startedAt)
+        mirroredLastHeartbeatAt = Mutex(startedAt)
         self.cacheDirectory = cacheDirectory ?? Self.defaultCacheDirectory()
     }
 
@@ -152,6 +162,7 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
     func registerEditorController(id: String) {
         queue.async { [self] in
             liveControllerIDs.insert(id)
+            mirroredLiveControllerCount.withLock { $0 = liveControllerIDs.count }
             recorder.append(RuntimeEvent(
                 monotonicTimeSeconds: clock.now(),
                 category: "editor",
@@ -164,6 +175,7 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
     func unregisterEditorController(id: String) {
         queue.async { [self] in
             liveControllerIDs.remove(id)
+            mirroredLiveControllerCount.withLock { $0 = liveControllerIDs.count }
             recorder.append(RuntimeEvent(
                 monotonicTimeSeconds: clock.now(),
                 category: "editor",
@@ -173,12 +185,15 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
         }
     }
 
+    /// Read off the mirror, never through `queue.sync`: both callers are on the
+    /// main actor and must not block behind a snapshot flush.
     func currentHeartbeatAgeMilliseconds() -> Double {
-        queue.sync { heartbeat.ageMilliseconds(at: clock.now()) }
+        let lastAcknowledgedAt = mirroredLastHeartbeatAt.withLock { $0 }
+        return max(0, clock.now() - lastAcknowledgedAt) * 1_000
     }
 
     func currentLiveControllerCount() -> Int {
-        queue.sync { liveControllerIDs.count }
+        mirroredLiveControllerCount.withLock { $0 }
     }
 
     private func tick() {
@@ -217,6 +232,7 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
             guard let self else { return }
             let snapshot = shouldCaptureSnapshot ? provider() : nil
             let acknowledgedAt = self.clock.now()
+            self.mirroredLastHeartbeatAt.withLock { $0 = acknowledgedAt }
             self.queue.async { [self] in
                 heartbeat.acknowledge(at: acknowledgedAt)
                 // The main thread answered, so the measurement is live again.
