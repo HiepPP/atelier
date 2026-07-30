@@ -14,6 +14,19 @@ struct RuntimeDiagnosticsTests {
         #expect(buffer.droppedCount == 88)
     }
 
+    @Test("Ring buffer sequence marks appends so an idle flush can skip writing")
+    func ringBufferSequenceTracksAppends() {
+        var buffer = RuntimeRingBuffer<Int>(capacity: 4)
+        #expect(buffer.sequence == 0)
+        buffer.append(1)
+        let afterFirst = buffer.sequence
+        #expect(afterFirst == 1)
+        for value in 2...6 { buffer.append(value) }
+        // Evictions still count as changes: the encoded window moved.
+        #expect(buffer.sequence == 6)
+        #expect(buffer.droppedCount == 2)
+    }
+
     @Test("Snapshot schema round-trips without private content")
     func schemaAndPrivacy() throws {
         let snapshot = RuntimeSnapshot(
@@ -53,7 +66,13 @@ struct RuntimeDiagnosticsTests {
         let encoded = try #require(String(data: data, encoding: .utf8))
         #expect(!encoded.contains("SECRET_FILE_CONTENT"))
         #expect(!encoded.contains("/Users/"))
-        #expect(encoded.contains("\"lastWriteError\" : null"))
+        // The key stays explicit rather than omitted; formatting is not part of
+        // the contract, so assert on structure instead of whitespace.
+        #expect(encoded.contains("\"lastWriteError\""))
+        #expect(!encoded.contains("\n"))
+        let reencoded = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let diagnostics = reencoded?["diagnostics"] as? [String: Any]
+        #expect(diagnostics?["lastWriteError"] is NSNull)
         #expect(try JSONDecoder().decode(RuntimeSnapshot.self, from: data) == snapshot)
     }
 
@@ -124,6 +143,25 @@ struct RuntimeDiagnosticsTests {
         try RuntimeAtomicWriter.write(["value": 2], to: url)
         let decoded = try JSONDecoder().decode([String: Int].self, from: Data(contentsOf: url))
         #expect(decoded == ["value": 2])
+        let mode = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions]
+        #expect(mode as? Int == 0o600)
+    }
+
+    @Test("Prepared runtime directory is created once with owner-only access")
+    func preparedDirectoryPermissions() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("atelier-runtime-prepare-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("current/snapshot.json")
+        try RuntimeAtomicWriter.prepareDirectory(for: url)
+        let parent = url.deletingLastPathComponent().path
+        #expect(FileManager.default.fileExists(atPath: parent))
+        let mode = try FileManager.default.attributesOfItem(atPath: parent)[.posixPermissions]
+        #expect(mode as? Int == 0o700)
+        // Idempotent: a second call must not throw on an existing directory.
+        try RuntimeAtomicWriter.prepareDirectory(for: url)
+        try RuntimeAtomicWriter.write(["value": 1], to: url)
+        #expect(FileManager.default.fileExists(atPath: url.path))
     }
 
     @Test("Heartbeat fake clock detects lag and blocks backlog")
