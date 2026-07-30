@@ -1002,6 +1002,9 @@ Persistence boundaries:
 - Promote a preview before the first edit is saved.
 - Preserve first responder across palette, zoom, inspector, and sidecar transitions.
 - Keep the terminal's structural parent and proposed size stable while a sidecar opens or closes. Never reserve terminal width for agent responses.
+- Route pointer input to the surface on top of the terminal. A window-level terminal event monitor
+  must claim an event only when normal window dispatch would reach that terminal. Scrolling inside
+  an overlay that covers the terminal frame scrolls the overlay, never the terminal buffer.
 - Preserve terminal keyboard protocols. In legacy mode, `Shift-Enter` must send a newline distinct
   from `Enter`, and unmodified arrow keys must reach interactive TUI prompts. When enhanced keyboard
   reporting is active, defer to its negotiated encoding.

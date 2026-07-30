@@ -583,11 +583,24 @@ final class AtelierTerminalNativeView: LocalProcessTerminalView {
                   self.renderingIsActive,
                   !self.isHidden,
                   event.window === window,
-                  self.bounds.contains(self.convert(event.locationInWindow, from: nil)) else {
+                  self.bounds.contains(self.convert(event.locationInWindow, from: nil)),
+                  self.isFrontmostScrollTarget(at: event.locationInWindow, in: window) else {
                 return event
             }
             return self.handlePreciseScroll(event) ? nil : event
         }
+    }
+
+    /// The monitor runs before window dispatch, so containment alone would also
+    /// consume scrolls aimed at an overlay panel covering the terminal frame
+    /// (agent responses, palette). Only claim the event when normal dispatch
+    /// would have reached this terminal.
+    private func isFrontmostScrollTarget(at locationInWindow: NSPoint, in window: NSWindow) -> Bool {
+        guard let contentView = window.contentView else { return true }
+        let rootPoint = contentView.superview?.convert(locationInWindow, from: nil)
+            ?? locationInWindow
+        guard let hit = contentView.hitTest(rootPoint) else { return false }
+        return hit === self || hit.isDescendant(of: self)
     }
 
     private func updateRendererForDisplay() {
