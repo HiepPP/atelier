@@ -56,6 +56,18 @@ final class ThreadsPanelModel {
 
     private(set) var groups: [WorkspaceThreadGroup] = []
     private var runStates: [UUID: RunState] = [:]
+    /// Shell-reported finish times, keyed by terminal tab. The poll observes the
+    /// running -> done edge up to one interval late, and later still while the
+    /// window is off screen, so the edge alone cannot date the row.
+    private var shellFinishTimes: [UUID: Date] = [:]
+
+    /// Records an OSC 133 command-finished mark. Only the timestamp is kept: the
+    /// mark fires for every command, so whether an agent actually exited is
+    /// still decided by the next probe.
+    func recordShellCommandFinished(terminalID: UUID, at time: Date) {
+        guard runStates[terminalID]?.status == .running else { return }
+        shellFinishTimes[terminalID] = time
+    }
 
     /// Main-actor phase: read terminal identity and PTY handles only.
     func makeProbes(sessions: [WorkspaceSession]) -> [TerminalAgentProbe] {
@@ -94,6 +106,7 @@ final class ThreadsPanelModel {
     func refresh(snapshots: [TerminalSnapshot], now: Date) {
         let liveTerminalIDs = Set(snapshots.map(\.terminalID))
         runStates = runStates.filter { liveTerminalIDs.contains($0.key) }
+        shellFinishTimes = shellFinishTimes.filter { liveTerminalIDs.contains($0.key) }
 
         for snapshot in snapshots {
             updateRunState(for: snapshot, now: now)
@@ -135,8 +148,12 @@ final class ThreadsPanelModel {
         switch (snapshot.agentName, runStates[snapshot.terminalID]) {
         case (.some(let agentName), .some(let current))
             where current.status == .running && current.agentName == agentName:
+            // Still the same run, so any mark seen since the last poll closed
+            // some other command and must not date this one.
+            shellFinishTimes[snapshot.terminalID] = nil
             return
         case (.some(let agentName), _):
+            shellFinishTimes[snapshot.terminalID] = nil
             runStates[snapshot.terminalID] = RunState(
                 agentName: agentName,
                 status: .running,
@@ -144,14 +161,35 @@ final class ThreadsPanelModel {
                 finishedAt: nil
             )
         case (.none, .some(let current)) where current.status == .running:
+            let shellFinishedAt = shellFinishTimes.removeValue(forKey: snapshot.terminalID)
             runStates[snapshot.terminalID] = RunState(
                 agentName: current.agentName,
                 status: .done,
                 startedAt: current.startedAt,
-                finishedAt: now
+                finishedAt: Self.finishTime(
+                    shellReported: shellFinishedAt,
+                    startedAt: current.startedAt,
+                    now: now
+                )
             )
         case (.none, _):
             return
         }
+    }
+
+    /// Prefer the shell's own finish time; fall back to the poll time. A mark
+    /// dated before the run started, or after the poll, belongs to a different
+    /// command and is discarded rather than shown as a negative or future age.
+    nonisolated static func finishTime(
+        shellReported: Date?,
+        startedAt: Date,
+        now: Date
+    ) -> Date {
+        guard let shellReported,
+              shellReported >= startedAt,
+              shellReported <= now else {
+            return now
+        }
+        return shellReported
     }
 }

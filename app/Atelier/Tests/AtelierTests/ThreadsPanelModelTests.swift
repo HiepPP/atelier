@@ -64,6 +64,98 @@ struct ThreadsPanelModelTests {
         #expect(group.threads.isEmpty)
     }
 
+    @Test("A shell mark dates the done row instead of the poll time")
+    func shellMarkDatesDoneRow() throws {
+        let model = ThreadsPanelModel()
+        let terminalID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 100)
+        let exitedAt = Date(timeIntervalSince1970: 150)
+        // Far later than the exit: stands in for a poll delayed by occlusion.
+        let polledAt = Date(timeIntervalSince1970: 900)
+
+        model.refresh(snapshots: [snapshot(id: terminalID, agentName: "claude")], now: startedAt)
+        model.recordShellCommandFinished(terminalID: terminalID, at: exitedAt)
+        model.refresh(snapshots: [snapshot(id: terminalID, agentName: nil)], now: polledAt)
+
+        let done = try #require(model.groups.first?.threads.first)
+        #expect(done.status == .done)
+        #expect(done.finishedAt == exitedAt)
+    }
+
+    @Test("A mark seen while the agent keeps running does not date a later run")
+    func markDuringRunIsDiscarded() throws {
+        let model = ThreadsPanelModel()
+        let terminalID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 100)
+        let subcommandAt = Date(timeIntervalSince1970: 120)
+        let polledAt = Date(timeIntervalSince1970: 300)
+
+        model.refresh(snapshots: [snapshot(id: terminalID, agentName: "claude")], now: startedAt)
+        model.recordShellCommandFinished(terminalID: terminalID, at: subcommandAt)
+        // The agent is still there, so the mark belonged to another command.
+        model.refresh(snapshots: [snapshot(id: terminalID, agentName: "claude")], now: subcommandAt)
+        model.refresh(snapshots: [snapshot(id: terminalID, agentName: nil)], now: polledAt)
+
+        let done = try #require(model.groups.first?.threads.first)
+        #expect(done.finishedAt == polledAt)
+    }
+
+    @Test("Without a shell mark the poll time still dates the done row")
+    func pollTimeRemainsTheFallback() throws {
+        let model = ThreadsPanelModel()
+        let terminalID = UUID()
+        let polledAt = Date(timeIntervalSince1970: 300)
+
+        model.refresh(
+            snapshots: [snapshot(id: terminalID, agentName: "codex")],
+            now: Date(timeIntervalSince1970: 100)
+        )
+        model.refresh(snapshots: [snapshot(id: terminalID, agentName: nil)], now: polledAt)
+
+        let done = try #require(model.groups.first?.threads.first)
+        #expect(done.finishedAt == polledAt)
+    }
+
+    @Test("A mark outside the run window falls back to the poll time")
+    func outOfRangeMarkFallsBack() {
+        let startedAt = Date(timeIntervalSince1970: 100)
+        let now = Date(timeIntervalSince1970: 300)
+
+        // Before the run started.
+        #expect(
+            ThreadsPanelModel.finishTime(
+                shellReported: Date(timeIntervalSince1970: 50),
+                startedAt: startedAt,
+                now: now
+            ) == now
+        )
+        // After the poll.
+        #expect(
+            ThreadsPanelModel.finishTime(
+                shellReported: Date(timeIntervalSince1970: 500),
+                startedAt: startedAt,
+                now: now
+            ) == now
+        )
+        // Absent.
+        #expect(
+            ThreadsPanelModel.finishTime(
+                shellReported: nil,
+                startedAt: startedAt,
+                now: now
+            ) == now
+        )
+        // Inside the window.
+        let exitedAt = Date(timeIntervalSince1970: 200)
+        #expect(
+            ThreadsPanelModel.finishTime(
+                shellReported: exitedAt,
+                startedAt: startedAt,
+                now: now
+            ) == exitedAt
+        )
+    }
+
     private func snapshot(
         id: UUID = UUID(),
         agentName: String?

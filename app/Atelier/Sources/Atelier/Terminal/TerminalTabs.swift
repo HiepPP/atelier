@@ -168,6 +168,10 @@ final class TerminalTabsModel {
     /// can debounce-persist the session. Nil during init/restore to stay quiet.
     var onSessionChange: (() -> Void)?
 
+    /// Fires with the terminal tab id when its shell reports a finished command
+    /// (OSC 133 `D`). Silent when the shell emits no marks.
+    var onTerminalCommandFinished: ((UUID) -> Void)?
+
     fileprivate let workspacePath: String
     private var nextNumber = 1
 
@@ -233,7 +237,6 @@ final class TerminalTabsModel {
                 if !persisted.isPreview { recentFiles.record(url) }
             case .terminal:
                 let terminal = TerminalSession(number: nextNumber, workspacePath: workspacePath)
-                terminal.controller.onCommandFinished = terminalCommandFinished
                 nextNumber += 1
                 restoredTab = CenterTab(
                     content: .terminal(terminal),
@@ -248,6 +251,7 @@ final class TerminalTabsModel {
             add()
             return
         }
+        refreshCommandFinishedHandlers()
         let selection = selectedTabID ?? tabs.last?.id
         selectedID = selection
         if let selection,
@@ -260,9 +264,21 @@ final class TerminalTabsModel {
     /// current and future. Used by the Gemma sidecar's Terminal Guardian.
     func setTerminalCommandFinishedHandler(_ handler: ((Int32) -> Void)?) {
         terminalCommandFinished = handler
+        refreshCommandFinishedHandlers()
+    }
+
+    /// Rebinds every terminal controller's command-finished callback. A
+    /// controller exposes a single slot, so this fans out to both the Terminal
+    /// Guardian (exit code only) and the thread tracker, which needs the tab id
+    /// the thread is keyed by.
+    private func refreshCommandFinishedHandlers() {
         for tab in tabs {
-            if case .terminal(let session) = tab.content {
-                session.controller.onCommandFinished = handler
+            guard case .terminal(let session) = tab.content else { continue }
+            let tabID = tab.id
+            session.controller.onCommandFinished = { [weak self] exitCode in
+                guard let self else { return }
+                terminalCommandFinished?(exitCode)
+                onTerminalCommandFinished?(tabID)
             }
         }
     }
@@ -661,10 +677,10 @@ final class TerminalTabsModel {
 
     func add() {
         let session = TerminalSession(number: nextNumber, workspacePath: workspacePath)
-        session.controller.onCommandFinished = terminalCommandFinished
         let tab = CenterTab(content: .terminal(session))
         nextNumber += 1
         tabs.append(tab)
+        refreshCommandFinishedHandlers()
         select(tab)
     }
 

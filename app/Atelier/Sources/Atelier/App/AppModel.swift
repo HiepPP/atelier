@@ -394,6 +394,14 @@ final class AppModel {
             layoutProfiles.selectedProfile.snapshot.panels,
             requestsAnimation: false
         )
+        // The poll sees the agent exit up to one interval late, and later still
+        // while the window is off screen. The shell's own mark dates the row.
+        session.terminalTabs.onTerminalCommandFinished = { [weak self] terminalID in
+            self?.threadsPanel.recordShellCommandFinished(
+                terminalID: terminalID,
+                at: Date()
+            )
+        }
         sessionsByID[state.id] = session
         session.start(agentResponsesActive: state.id == selectedWorkspaceID)
     }
