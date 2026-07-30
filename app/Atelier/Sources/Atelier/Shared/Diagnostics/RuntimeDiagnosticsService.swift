@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OSLog
 
@@ -5,6 +6,10 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
     static let shared = RuntimeDiagnosticsService()
     static let eventCapacity = 512
     static let fileMetricCapacity = 128
+    /// Backstop for a missed or unarmed mailbox watcher. Stays well inside the
+    /// CLI's 3 s probe deadline while costing one `stat` instead of four
+    /// open-and-decode attempts per second.
+    static let mailboxFallbackInterval = 2.0
 
     typealias MainSnapshotProvider = @MainActor @Sendable () -> RuntimeMainSnapshot
     typealias ProbeHandler = @MainActor @Sendable (RuntimeProbeRequest) async -> RuntimeProbeResponse
@@ -36,6 +41,12 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
     private var probeHandler: ProbeHandler?
     private var activeProbeID: UUID?
     private var lastHandledProbeID: UUID?
+    private var isRuntimeDirectoryPrepared = false
+    private var lastFlushedEventSequence = -1
+    private var mailboxSource: DispatchSourceFileSystemObject?
+    private var lastMailboxCheckAt = 0.0
+    private var lastMailboxInode: UInt64 = 0
+    private var lastMailboxModification = timespec()
 
     init(
         clock: RuntimeMonotonicClock = SystemRuntimeMonotonicClock(),
@@ -70,6 +81,8 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
             self.sampleInternally = sampleInternally
             self.mainSnapshotProvider = mainSnapshotProvider
             self.probeHandler = probeHandler
+            prepareRuntimeDirectoryIfNeeded()
+            armMailboxWatcher()
             let source = DispatchSource.makeTimerSource(queue: queue)
             source.schedule(deadline: .now(), repeating: .milliseconds(250), leeway: .milliseconds(25))
             source.setEventHandler { [weak self] in self?.tick() }
@@ -82,6 +95,7 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
         queue.async { [self] in
             timer?.cancel()
             timer = nil
+            disarmMailboxWatcher()
             activeProbeID = nil
             mainSnapshotProvider = nil
             probeHandler = nil
@@ -151,7 +165,15 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
         let shouldFlush = now - lastFlushAt >= 1
         if shouldFlush { mainSnapshotCaptureRequested = true }
         requestHeartbeatIfNeeded()
-        checkMailbox(at: now)
+        // The mailbox is kqueue-driven. Re-arm a watcher that could not attach
+        // yet, and keep a bounded fallback check for a missed directory event.
+        if mailboxSource == nil {
+            prepareRuntimeDirectoryIfNeeded()
+            armMailboxWatcher()
+        }
+        if now - lastMailboxCheckAt >= Self.mailboxFallbackInterval {
+            checkMailbox(at: now)
+        }
         guard shouldFlush else { return }
         lastFlushAt = now
         if sampleInternally {
@@ -290,20 +312,32 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
             diagnostics: diagnostics,
             verdicts: verdicts
         )
-        let flightRecorder = RuntimeFlightRecorderSnapshot(
-            schemaVersion: 1,
-            generatedAt: generatedAt,
-            events: recorder.elements,
-            droppedEventCount: recorder.droppedCount
-        )
+        let eventSequence = recorder.sequence
         let signpost = RuntimeSignposts.signposter.beginInterval("RuntimeSnapshotFlush")
+        prepareRuntimeDirectoryIfNeeded()
         do {
             try RuntimeAtomicWriter.write(snapshot, to: snapshotURL)
-            try RuntimeAtomicWriter.write(flightRecorder, to: flightRecorderURL)
+            // An idle app records no events, so re-encoding 512 unchanged
+            // entries every second was the dominant diagnostics cost.
+            if eventSequence != lastFlushedEventSequence {
+                try RuntimeAtomicWriter.write(
+                    RuntimeFlightRecorderSnapshot(
+                        schemaVersion: 1,
+                        generatedAt: generatedAt,
+                        events: recorder.elements,
+                        droppedEventCount: recorder.droppedCount
+                    ),
+                    to: flightRecorderURL
+                )
+                lastFlushedEventSequence = eventSequence
+            }
             lastWriteError = nil
         } catch {
             let message = error.localizedDescription
             lastWriteError = message
+            // The directory may have been removed underneath us; recreate it
+            // on the next flush instead of failing forever.
+            isRuntimeDirectoryPrepared = false
             recorder.append(RuntimeEvent(
                 monotonicTimeSeconds: now,
                 category: "diagnostics",
@@ -321,8 +355,72 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
         lastFlushDurationMs = max(0, clock.now() - flushStartedAt) * 1_000
     }
 
+    private func prepareRuntimeDirectoryIfNeeded() {
+        guard !isRuntimeDirectoryPrepared else { return }
+        do {
+            try RuntimeAtomicWriter.prepareDirectory(for: snapshotURL)
+            isRuntimeDirectoryPrepared = true
+        } catch {
+            isRuntimeDirectoryPrepared = false
+        }
+    }
+
+    /// Watches the mailbox directory instead of polling it. `atelier-doctor`
+    /// renames `request.json` into place, so a directory write event covers both
+    /// the first request and every replacement.
+    private func armMailboxWatcher() {
+        guard mailboxSource == nil, isRuntimeDirectoryPrepared else { return }
+        let directoryPath = requestURL.deletingLastPathComponent().path
+        let descriptor = open(directoryPath, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .delete, .rename, .revoke],
+            queue: queue
+        )
+        source.setEventHandler { [weak self] in
+            guard let self, let events = mailboxSource?.data else { return }
+            if events.contains(.write) {
+                checkMailbox(at: clock.now())
+            }
+            if !events.intersection([.delete, .rename, .revoke]).isEmpty {
+                disarmMailboxWatcher()
+                isRuntimeDirectoryPrepared = false
+            }
+        }
+        source.setCancelHandler { close(descriptor) }
+        mailboxSource = source
+        source.resume()
+        checkMailbox(at: clock.now())
+    }
+
+    private func disarmMailboxWatcher() {
+        mailboxSource?.cancel()
+        mailboxSource = nil
+    }
+
+    /// True only when `request.json` appeared or was replaced since the last
+    /// check, so the idle path costs one `stat` and never decodes JSON.
+    private func mailboxRequestChanged() -> Bool {
+        var info = Darwin.stat()
+        guard stat(requestURL.path, &info) == 0 else {
+            lastMailboxInode = 0
+            return false
+        }
+        let inode = UInt64(info.st_ino)
+        let modification = info.st_mtimespec
+        guard inode != lastMailboxInode
+            || modification.tv_sec != lastMailboxModification.tv_sec
+            || modification.tv_nsec != lastMailboxModification.tv_nsec else { return false }
+        lastMailboxInode = inode
+        lastMailboxModification = modification
+        return true
+    }
+
     private func checkMailbox(at now: Double) {
+        lastMailboxCheckAt = now
         guard activeProbeID == nil,
+              mailboxRequestChanged(),
               let data = try? Data(contentsOf: requestURL),
               let request = try? JSONDecoder().decode(RuntimeProbeRequest.self, from: data),
               request.schemaVersion == 1,

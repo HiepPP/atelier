@@ -277,7 +277,17 @@ def collect_capture(
         source = source_directory / name
         destination = artifact_directory / name
         try:
-            shutil.copy2(source, destination)
+            # The app writes compact JSON; expand it here so captured artifacts
+            # stay readable line by line.
+            raw = source.read_text(encoding="utf-8")
+            try:
+                destination.write_text(
+                    json.dumps(json.loads(raw), indent=2, sort_keys=True, ensure_ascii=False)
+                    + "\n",
+                    encoding="utf-8",
+                )
+            except json.JSONDecodeError:
+                shutil.copy2(source, destination)
             collectors[name] = {"status": "ok", "output": str(destination)}
         except OSError as error:
             collectors[name] = {"status": "degraded", "error": str(error)}

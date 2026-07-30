@@ -84,6 +84,9 @@ nonisolated struct RuntimeEvent: Codable, Sendable, Equatable, Identifiable {
 nonisolated struct RuntimeRingBuffer<Element: Sendable>: Sendable {
     private(set) var elements: [Element] = []
     private(set) var droppedCount = 0
+    /// Monotonic append counter. Writers compare it against the last flushed
+    /// value so an idle app never re-encodes an unchanged flight recorder.
+    private(set) var sequence = 0
     let capacity: Int
 
     init(capacity: Int) {
@@ -97,6 +100,7 @@ nonisolated struct RuntimeRingBuffer<Element: Sendable>: Sendable {
             droppedCount += 1
         }
         elements.append(element)
+        sequence &+= 1
     }
 }
 
@@ -557,26 +561,38 @@ nonisolated struct RuntimeVerdictPolicy: Sendable {
 }
 
 nonisolated enum RuntimeAtomicWriter {
-    static func write<T: Encodable>(_ value: T, to url: URL) throws {
-        let manager = FileManager.default
-        let directory = url.deletingLastPathComponent()
-        try manager.createDirectory(
-            at: directory,
+    /// Creates the owning directory with current-user permissions. Callers do
+    /// this once per session instead of per write, so a 1 Hz flush costs one
+    /// atomic replace plus one chmod rather than an extra mkdir every time.
+    static func prepareDirectory(for url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+    }
+
+    /// Expects `prepareDirectory(for:)` to have succeeded for this URL. The
+    /// atomic replace creates a new inode, so the mode is reapplied per write.
+    static func write<T: Encodable>(_ value: T, to url: URL) throws {
         let data = try JSONEncoder.runtimeDiagnostics.encode(value)
         try data.write(to: url, options: [.atomic])
-        try? manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try? FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: url.path
+        )
     }
 }
 
 nonisolated extension JSONEncoder {
-    static var runtimeDiagnostics: JSONEncoder {
+    // One shared encoder: a computed property rebuilt an encoder on every write.
+    // Output stays compact; `atelier-doctor` pretty-prints what it displays and
+    // what it copies into capture artifacts.
+    static let runtimeDiagnostics: JSONEncoder = {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return encoder
-    }
+    }()
 }
 
 nonisolated enum RuntimeProbeCommand: String, Codable, Sendable {
