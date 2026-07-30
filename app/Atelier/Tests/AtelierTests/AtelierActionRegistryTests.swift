@@ -63,7 +63,7 @@ struct AtelierActionRegistryTests {
         )
         #expect(
             AtelierActionRegistry.descriptor(for: .toggleAgentResponses).shortcutLabel
-                == "Command-Shift-E"
+                == "Command-D"
         )
         #expect(
             AtelierActionRegistry.descriptor(for: .toggleWatchtower).shortcutLabel

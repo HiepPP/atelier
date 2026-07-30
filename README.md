@@ -185,7 +185,7 @@ Terminal tabs restore as fresh shells. Missing files and unavailable workspaces 
 | `Command-R` | Toggle Source and Preview |
 | `Command-Q` | Close active closable tab |
 | `Command-W` | Toggle Watchtower panel |
-| `Command-Shift-E` | Toggle Agent Responses |
+| `Command-D` | Toggle Agent Responses |
 | `Command-Shift-R` | Toggle left panel |
 | `Command-Shift-T` | Toggle right panel |
 | `Command-Shift-C` | Send selected line reference to terminal |

@@ -1078,7 +1078,7 @@ The five background features, all read-only and cancellable:
   overlay never becomes a split peer or consumes terminal, editor, diff, or Gemma layout space.
 - Open the response overlay at a trailing half-width below the tab strip.
 - Provide one header control that toggles between full width and a trailing half-width mode.
-- Opening the overlay from the Response action or `Cmd-Shift-E` always restores half-width mode.
+- Opening the overlay from the Response action or `Cmd-D` always restores half-width mode.
 - Restore at most 100 newest final responses for the current workspace at startup, and only from the
   last three days. A transcript older than that window is never opened, and a response older than
   that window never reaches the panel. Older history stays on disk for other tools to read.
@@ -1148,7 +1148,7 @@ The five background features, all read-only and cancellable:
 | `Cmd-R` | Toggle Source and Preview for the active Markdown or HTML file |
 | `Cmd-Q` | Close active closable center tab |
 | `Cmd-W` | Toggle Watchtower Panel |
-| `Cmd-Shift-E` | Toggle Agent Responses at the default half width |
+| `Cmd-D` | Toggle Agent Responses at the default half width |
 | `Cmd-Shift-R` | Toggle Left Panel |
 | `Cmd-Shift-T` | Toggle Right Panel |
 | `Cmd-Shift-C` | Insert selected editor line reference into terminal |

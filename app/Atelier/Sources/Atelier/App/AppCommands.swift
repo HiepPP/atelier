@@ -123,7 +123,7 @@ struct AppCommands: Commands {
             Button(title(.toggleAgentResponses)) {
                 perform(.toggleAgentResponses)
             }
-            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .keyboardShortcut("d", modifiers: .command)
             .disabled(!isEnabled(.toggleAgentResponses))
 
             Button(title(.toggleWatchtower)) {
