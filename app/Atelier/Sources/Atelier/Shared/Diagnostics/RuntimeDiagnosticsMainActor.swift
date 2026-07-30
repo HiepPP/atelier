@@ -76,6 +76,22 @@ extension AppModel {
                 break
             }
             response = ("ok", [:], enrichedRuntimeEditorSnapshot(editorSession), nil)
+        case .diff:
+            guard let tabs = workspace?.terminalTabs else {
+                response = (
+                    "notApplicable",
+                    ["reason": .string("No active workspace.")],
+                    nil,
+                    nil
+                )
+                break
+            }
+            var result: [String: RuntimeScalar] = [
+                "selectedTabKind": .string(tabs.selectedTabKind ?? "none"),
+                "gitDiffTabCount": .integer(tabs.gitDiffTabCount)
+            ]
+            result.merge(Self.diffProbeMetrics(tabs.selectedGitDiff)) { _, new in new }
+            response = ("ok", result, nil, nil)
         case .editorScroll:
             guard let editorSession = workspace?.terminalTabs.selectedEditor else {
                 response = (
@@ -105,6 +121,39 @@ extension AppModel {
             editor: response.editor,
             error: response.error
         )
+    }
+
+    /// Read-only view of the selected diff tab. Reports the same numbers the
+    /// truncation footer renders, so diff UI state is checkable from the CLI
+    /// instead of the accessibility tree. Paths stay workspace-relative and no
+    /// diff content is reported.
+    static func diffProbeMetrics(_ session: GitDiffSession?) -> [String: RuntimeScalar] {
+        guard let session else { return ["diffState": .string("noSelectedDiff")] }
+        var result: [String: RuntimeScalar] = [
+            "diffPath": .string(session.selection.change.path),
+            "diffStaged": .boolean(session.selection.staged),
+            "showsFullDiff": .boolean(session.showsFullDiff),
+            "needsReload": .boolean(session.needsReload)
+        ]
+        switch session.state {
+        case .loading:
+            result["diffState"] = .string("loading")
+        case .loaded(let document):
+            result["diffState"] = .string("loaded")
+            result["lineCount"] = .integer(document.lines.count)
+            result["hiddenLineCount"] = .integer(document.hiddenLineCount)
+            result["additions"] = .integer(document.additions)
+            result["deletions"] = .integer(document.deletions)
+            result["showsTruncationFooter"] = .boolean(document.hiddenLineCount > 0)
+        case .image(let data):
+            result["diffState"] = .string("image")
+            result["imageBytes"] = .integer(data.count)
+        case .message:
+            result["diffState"] = .string("message")
+        case .failed:
+            result["diffState"] = .string("failed")
+        }
+        return result
     }
 
     private func enrichedRuntimeEditorSnapshot(

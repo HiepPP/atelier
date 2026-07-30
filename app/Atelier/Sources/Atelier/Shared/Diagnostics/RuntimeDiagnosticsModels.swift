@@ -620,6 +620,7 @@ nonisolated enum RuntimeProbeCommand: String, Codable, Sendable {
     case main
     case editor
     case editorScroll = "editor-scroll"
+    case diff
 }
 
 nonisolated struct RuntimeProbeRequest: Codable, Sendable, Equatable {
