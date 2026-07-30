@@ -277,6 +277,9 @@ If `selectedTabKind` is `terminal`, an unattached editor and zero editor geometr
 | `main` | Main actor acknowledged and returned latency | Not normally expected | Main actor did not answer before the mailbox timeout |
 | `editor` | Fresh selected-editor snapshot was read without forcing layout | No selected text editor or no mounted editor | Main actor could not return editor state |
 | `editor-scroll` | Origin moved toward the clamped target and cleanup ran | No editor, no scroll range, or request already at an edge | Probe could not finish before timeout |
+| `diff` | Center-tab state was read: `selectedTabKind`, `gitDiffTabCount`, and the selected diff's `diffState` | No active workspace | Main actor could not return tab state |
+
+For `diff`, read `diffState` before the counts. Only `loaded` carries `lineCount`, `hiddenLineCount`, `additions`, `deletions`, and `showsTruncationFooter`; `showsFullDiff` reports whether the reader expanded a capped diff. A `hiddenLineCount` above zero with `showsTruncationFooter` true means the truncation footer is on screen, so diff UI state needs no accessibility-tree walk.
 
 For `editor-scroll`, compare `originBeforeY`, `originAfterY`, `movementY`, `maximumScrollY`, elapsed time, and `restored`. Positive movement with `restored: true` supports that the reversible probe and cleanup path completed.
 

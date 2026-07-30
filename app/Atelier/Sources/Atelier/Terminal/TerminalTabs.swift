@@ -340,6 +340,23 @@ final class TerminalTabsModel {
         return editor
     }
 
+    /// Selected git diff tab, for the `diff` runtime probe.
+    var selectedGitDiff: GitDiffSession? {
+        guard let selectedTab,
+              case .gitDiff(let session) = selectedTab.content else { return nil }
+        return session
+    }
+
+    var selectedTabKind: String? {
+        guard let selectedTab else { return nil }
+        switch selectedTab.content {
+        case .terminal: return "terminal"
+        case .file: return "file"
+        case .gitDiff: return "gitDiff"
+        case .gemma: return "gemma"
+        }
+    }
+
     var terminalCount: Int {
         tabs.reduce(into: 0) { count, tab in
             if case .terminal = tab.content {
@@ -386,23 +403,14 @@ final class TerminalTabsModel {
                 workspace.gemmaTabCount += 1
             }
         }
-        if let selectedTab {
-            switch selectedTab.content {
-            case .terminal:
-                workspace.selectedTabKind = "terminal"
-            case .file(let session):
-                workspace.selectedTabKind = "file"
-                workspace.selectedFileRelativePath = FileTreePathPolicy.relativePath(
-                    of: session.document.url,
-                    within: workspaceRoot
-                )
-                editor = session.runtimeEditorSnapshot()
-                editor.selectedControllerID = session.runtimeControllerID
-            case .gitDiff:
-                workspace.selectedTabKind = "gitDiff"
-            case .gemma:
-                workspace.selectedTabKind = "gemma"
-            }
+        workspace.selectedTabKind = selectedTabKind
+        if let selectedTab, case .file(let session) = selectedTab.content {
+            workspace.selectedFileRelativePath = FileTreePathPolicy.relativePath(
+                of: session.document.url,
+                within: workspaceRoot
+            )
+            editor = session.runtimeEditorSnapshot()
+            editor.selectedControllerID = session.runtimeControllerID
         }
         return RuntimeMainSnapshot(workspace: workspace, editor: editor)
     }

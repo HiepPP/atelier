@@ -332,6 +332,67 @@ struct RuntimeDiagnosticsTests {
         #expect(try JSONDecoder().decode(RuntimeProbeResponse.self, from: responseData) == response)
     }
 
+    @Test("Diff probe reports footer numbers without diff content")
+    @MainActor
+    func diffProbeMetrics() throws {
+        #expect(RuntimeProbeCommand(rawValue: "diff") == .diff)
+
+        let none = AppModel.diffProbeMetrics(nil)
+        #expect(none["diffState"] == .string("noSelectedDiff"))
+        #expect(none["lineCount"] == nil)
+
+        let change = GitChange(
+            path: "src/big.txt",
+            originalPath: nil,
+            kind: .untracked,
+            isStaged: false,
+            isUnstaged: true
+        )
+        // A workspace path that is not a repository leaves the session in a
+        // terminal non-loaded state, which the probe must still describe.
+        let session = GitDiffSession(
+            selection: DiffSelection(change: change, staged: false),
+            workspacePath: FileManager.default.temporaryDirectory.path
+        )
+        defer { session.close() }
+        let pending = AppModel.diffProbeMetrics(session)
+        #expect(pending["diffPath"] == .string("src/big.txt"))
+        #expect(pending["diffStaged"] == .boolean(false))
+        #expect(pending["showsFullDiff"] == .boolean(false))
+        // Never report diff text, only counts and identifiers.
+        let encoded = try JSONEncoder.runtimeDiagnostics.encode(pending)
+        let text = try #require(String(data: encoded, encoding: .utf8))
+        #expect(!text.contains("line "))
+        #expect(!text.contains("@@"))
+    }
+
+    @Test("Diff probe response round-trips with the loaded document counts")
+    func diffProbeResponseEncoding() throws {
+        let response = RuntimeProbeResponse(
+            schemaVersion: 1,
+            id: UUID(),
+            command: .diff,
+            status: "ok",
+            completedAt: "2026-07-30T00:00:00Z",
+            elapsedMs: 1,
+            result: [
+                "selectedTabKind": .string("gitDiff"),
+                "gitDiffTabCount": .integer(1),
+                "diffState": .string("loaded"),
+                "lineCount": .integer(20_000),
+                "hiddenLineCount": .integer(501),
+                "additions": .integer(20_500),
+                "showsTruncationFooter": .boolean(true)
+            ],
+            editor: nil,
+            error: nil
+        )
+        let data = try JSONEncoder.runtimeDiagnostics.encode(response)
+        let decoded = try JSONDecoder().decode(RuntimeProbeResponse.self, from: data)
+        #expect(decoded == response)
+        #expect(decoded.command.rawValue == "diff")
+    }
+
     @Test("Diagnostics gate disables selftest and environment override")
     func disabledMode() {
         #expect(!RuntimeDiagnosticsService.shouldRun(arguments: ["Atelier", "--selftest"], environment: [:]))
