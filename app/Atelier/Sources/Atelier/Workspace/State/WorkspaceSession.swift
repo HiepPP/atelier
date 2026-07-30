@@ -25,6 +25,7 @@ final class WorkspaceSession {
     private var fileWatcher: FileWatcher?
     @ObservationIgnored private var fileTreeInvalidationTask: Task<Void, Never>?
     @ObservationIgnored private var lastFileTreeInvalidationSpawn: ContinuousClock.Instant?
+    @ObservationIgnored private var firstPendingFileTreeEvent: ContinuousClock.Instant?
     private(set) var isStarted = false
     private let workspaceAccess: WorkspaceAccessController?
 
@@ -147,6 +148,7 @@ final class WorkspaceSession {
             fileWatcher = nil
             fileTreeInvalidationTask?.cancel()
             fileTreeInvalidationTask = nil
+            firstPendingFileTreeEvent = nil
             watchtower.setRoot(nil)
             gitModel.stop()
             gemmaAgent.close()
@@ -245,18 +247,36 @@ final class WorkspaceSession {
     /// events about twice per second, and each revision bump re-renders every
     /// consumer and re-lists expanded file-tree directories. Space bumps at
     /// least two seconds apart with a trailing delay, so the burst collapses
-    /// while the final state still lands. Direct user actions (create, rename,
-    /// trash) keep calling `invalidateFileTree` for an immediate update.
+    /// while the final state still lands. The max-wait bound keeps a sustained
+    /// burst from deferring the bump forever. Direct user actions (create,
+    /// rename, trash) keep calling `invalidateFileTree` for an immediate update.
     private func scheduleFileTreeInvalidation() {
         fileTreeInvalidationTask?.cancel()
-        let elapsed = lastFileTreeInvalidationSpawn.map { ContinuousClock.now - $0 }
-        let delay = GitRefreshThrottlePolicy.delay(sinceLastSpawn: elapsed)
+        if firstPendingFileTreeEvent == nil {
+            firstPendingFileTreeEvent = .now
+        }
+        let delay = GitRefreshThrottlePolicy.delay(
+            sinceLastSpawn: lastFileTreeInvalidationSpawn.map { ContinuousClock.now - $0 },
+            sinceFirstPendingEvent: firstPendingFileTreeEvent.map { ContinuousClock.now - $0 }
+        )
+        // Past the deadline the next event would cancel any scheduled task, so
+        // bump inline. This runs from the watcher callback, never a layout pass.
+        guard delay > .zero else {
+            fileTreeInvalidationTask = nil
+            spawnFileTreeInvalidation()
+            return
+        }
         fileTreeInvalidationTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
-            lastFileTreeInvalidationSpawn = .now
-            invalidateFileTree()
+            spawnFileTreeInvalidation()
         }
+    }
+
+    private func spawnFileTreeInvalidation() {
+        lastFileTreeInvalidationSpawn = .now
+        firstPendingFileTreeEvent = nil
+        invalidateFileTree()
     }
 
     isolated deinit {
