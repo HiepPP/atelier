@@ -500,7 +500,12 @@ nonisolated final class GitCommand: Sendable {
     }
 }
 
+// Every entry point is `@concurrent`: the package enables
+// `NonisolatedNonsendingByDefault`, so a plain `nonisolated async func` runs in
+// the caller's isolation. Called from `@MainActor` models, that put every status,
+// history, and diff parse on the main thread.
 nonisolated final class GitService: Sendable {
+    @concurrent
     func snapshot(workspacePath: String) async throws -> GitSnapshot {
         async let statusData = run(
             arguments: [
@@ -538,6 +543,7 @@ nonisolated final class GitService: Sendable {
     /// Working-tree status only. Filesystem-driven refreshes use this so a burst
     /// of file edits spawns one `git status` instead of the three subprocesses a
     /// full snapshot needs; branch and branch-list refresh stay on git actions.
+    @concurrent
     func status(workspacePath: String) async throws -> GitStatus {
         let data = try await run(
             arguments: [
@@ -552,6 +558,7 @@ nonisolated final class GitService: Sendable {
         return GitStatus.parse(data)
     }
 
+    @concurrent
     func recentCommits(workspacePath: String, limit: Int = 20) async throws -> [GitCommit] {
         let boundedLimit = min(max(limit, 1), 100)
         let data = try await run(
@@ -567,6 +574,7 @@ nonisolated final class GitService: Sendable {
         return GitCommitLogParser.parse(data)
     }
 
+    @concurrent
     func diff(
         path: String,
         originalPath: String?,
@@ -586,6 +594,7 @@ nonisolated final class GitService: Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
+    @concurrent
     func untrackedDiff(path: String, workspacePath: String) async throws -> String {
         // git diff --no-index compares the file against /dev/null, so an
         // untracked file renders as an all-additions unified diff. It exits
@@ -601,6 +610,7 @@ nonisolated final class GitService: Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
+    @concurrent
     func run(
         arguments: [String],
         workspacePath: String,

@@ -28,15 +28,34 @@ nonisolated struct GitDiffLine: Identifiable, Equatable, Sendable {
     }
 }
 
+nonisolated enum GitDiffLinePolicy {
+    /// Rendered-row bound for one diff preview. `git diff` output is capped at
+    /// 4 MB, which can still be hundreds of thousands of rows; each row keeps a
+    /// String copy, so an uncapped parse multiplies the diff's memory.
+    static let maximumLines = 20_000
+}
+
 nonisolated struct GitDiffDocument: Equatable, Sendable {
     let lines: [GitDiffLine]
     let additions: Int
     let deletions: Int
+    /// Rows dropped by the line cap. Zero when the whole diff is present.
+    let hiddenLineCount: Int
 
-    init(text: String) {
+    /// Parses off the caller's actor. `NonisolatedNonsendingByDefault` is on, so
+    /// a plain `nonisolated` initializer called from `@MainActor` would parse on
+    /// the main thread and block interaction on a large diff.
+    @concurrent
+    static func parsed(text: String, limit: Int = GitDiffLinePolicy.maximumLines) async
+        -> GitDiffDocument {
+        GitDiffDocument(text: text, limit: limit)
+    }
+
+    init(text: String, limit: Int = GitDiffLinePolicy.maximumLines) {
         var parsedLines: [GitDiffLine] = []
         var additions = 0
         var deletions = 0
+        var hiddenLineCount = 0
         var oldLineNumber: Int?
         var newLineNumber: Int?
         var isInsideHunk = false
@@ -100,6 +119,14 @@ nonisolated struct GitDiffDocument: Equatable, Sendable {
                 displayedNewLine = nil
             }
 
+            // Metadata rows are never rendered; skipping them here avoids
+            // building and then filtering a second full-size array.
+            guard kind != .metadata else { continue }
+            // Counts stay whole-diff accurate even past the cap.
+            guard parsedLines.count < limit else {
+                hiddenLineCount += 1
+                continue
+            }
             parsedLines.append(GitDiffLine(
                 id: index,
                 kind: kind,
@@ -109,9 +136,10 @@ nonisolated struct GitDiffDocument: Equatable, Sendable {
             ))
         }
 
-        self.lines = parsedLines.filter { $0.kind != .metadata }
+        self.lines = parsedLines
         self.additions = additions
         self.deletions = deletions
+        self.hiddenLineCount = hiddenLineCount
     }
 
     private static func hunkStart(in line: String) -> (old: Int, new: Int)? {
@@ -186,10 +214,11 @@ private nonisolated enum GitImagePreviewLoader {
     }
 }
 
-/// Shared LRU cache of raw `git diff` output, keyed by the diff request plus a
+/// Shared LRU cache of parsed diff documents, keyed by the diff request plus a
 /// revision that bumps whenever the repository changes. Reselecting a file in
-/// the Changes panel then serves from memory instead of respawning `git diff`.
-/// Bounded by entry count and total bytes so large diffs cannot grow unbounded.
+/// the Changes panel then serves from memory instead of respawning `git diff`
+/// and re-parsing its output. Bounded by entry count and total bytes so large
+/// diffs cannot grow unbounded.
 @MainActor
 final class GitDiffCache {
     struct Key: Hashable {
@@ -197,40 +226,46 @@ final class GitDiffCache {
         let originalPath: String?
         let staged: Bool
         let isUntracked: Bool
+        let isFullDiff: Bool
         let revision: Int
     }
 
+    private struct Entry {
+        let document: GitDiffDocument
+        /// Source byte count, recorded at store time for the LRU budget.
+        let byteCount: Int
+    }
+
     private(set) var revision = 0
-    private var entries: [Key: String] = [:]
+    private var entries: [Key: Entry] = [:]
     private var order: [Key] = []
     private var totalBytes = 0
     private let maximumEntries = 24
     private let maximumBytes = 16 * 1024 * 1024
 
-    func value(for key: Key) -> String? {
-        guard let value = entries[key] else { return nil }
+    func value(for key: Key) -> GitDiffDocument? {
+        guard let entry = entries[key] else { return nil }
         if let index = order.firstIndex(of: key) {
             order.remove(at: index)
             order.append(key)
         }
-        return value
+        return entry.document
     }
 
-    func store(_ value: String, for key: Key) {
-        let byteCount = value.utf8.count
+    func store(_ document: GitDiffDocument, byteCount: Int, for key: Key) {
         guard byteCount <= maximumBytes else { return }
         if let existing = entries[key] {
-            totalBytes -= existing.utf8.count
+            totalBytes -= existing.byteCount
             if let index = order.firstIndex(of: key) { order.remove(at: index) }
         }
-        entries[key] = value
+        entries[key] = Entry(document: document, byteCount: byteCount)
         order.append(key)
         totalBytes += byteCount
         while entries.count > maximumEntries || totalBytes > maximumBytes {
             guard let oldest = order.first else { break }
             order.removeFirst()
             if let removed = entries.removeValue(forKey: oldest) {
-                totalBytes -= removed.utf8.count
+                totalBytes -= removed.byteCount
             }
         }
     }
@@ -252,6 +287,9 @@ final class GitDiffSession {
     let workspacePath: String
     private(set) var state: GitDiffLoadState = .loading
     private(set) var needsReload = false
+    /// Set once the reader asks for the rest of a capped diff. Reset on a
+    /// repository change so a reload starts bounded again.
+    private(set) var showsFullDiff = false
 
     private let service: GitService
     private let cache: GitDiffCache
@@ -303,18 +341,19 @@ final class GitDiffSession {
         }
 
         let isUntracked = selection.change.kind == .untracked
+        let limit = showsFullDiff ? Int.max : GitDiffLinePolicy.maximumLines
         let key = GitDiffCache.Key(
             path: selection.change.path,
             originalPath: selection.change.originalPath,
             staged: selection.staged,
             isUntracked: isUntracked,
+            isFullDiff: showsFullDiff,
             revision: cache.revision
         )
 
+        // Cached documents are already parsed, so a reselect costs no parse.
         if let cached = cache.value(for: key) {
-            state = cached.isEmpty
-                ? .message("No diff output for this file.")
-                : .loaded(GitDiffDocument(text: cached))
+            state = .loaded(cached)
             return
         }
 
@@ -337,10 +376,14 @@ final class GitDiffSession {
                     )
                 }
                 guard !Task.isCancelled, loadGeneration == generation else { return }
-                cache.store(output, for: key)
-                state = output.isEmpty
-                    ? .message("No diff output for this file.")
-                    : .loaded(GitDiffDocument(text: output))
+                guard !output.isEmpty else {
+                    state = .message("No diff output for this file.")
+                    return
+                }
+                let document = await GitDiffDocument.parsed(text: output, limit: limit)
+                guard !Task.isCancelled, loadGeneration == generation else { return }
+                cache.store(document, byteCount: output.utf8.count, for: key)
+                state = .loaded(document)
             } catch is CancellationError {
                 return
             } catch {
@@ -351,8 +394,17 @@ final class GitDiffSession {
         }
     }
 
+    /// Reparses without the line cap. The bounded document stays cached under
+    /// its own key, so returning to a capped view costs nothing.
+    func loadRestOfDiff() {
+        guard !showsFullDiff else { return }
+        showsFullDiff = true
+        reload()
+    }
+
     func invalidate() {
         needsReload = true
+        showsFullDiff = false
     }
 
     func close() {
@@ -453,8 +505,13 @@ struct GitDiffTabView: View {
                     .controlSize(.small)
             }
         case .loaded(let document):
-            DiffView(document: document)
-                .environment(\.atelierZoomScale, zoom.contentScale)
+            VStack(spacing: 0) {
+                DiffView(document: document)
+                if document.hiddenLineCount > 0 {
+                    truncationFooter(hiddenLineCount: document.hiddenLineCount)
+                }
+            }
+            .environment(\.atelierZoomScale, zoom.contentScale)
         case .image(let data):
             ImageViewer(data: data, name: session.selection.displayName)
         case .message(let message):
@@ -474,6 +531,36 @@ struct GitDiffTabView: View {
                 }
                 .buttonStyle(AtelierLuminarePrimaryButtonStyle())
             }
+        }
+    }
+
+    private func truncationFooter(hiddenLineCount: Int) -> some View {
+        HStack(spacing: AtelierMetrics.spaceS) {
+            Image(systemName: "arrow.down.to.line")
+                .foregroundStyle(.secondary)
+            Text(
+                "Showing the first \(GitDiffLinePolicy.maximumLines) lines. "
+                    + "\(hiddenLineCount) more hidden."
+            )
+            .atelierFont(size: AtelierTypography.caption)
+            .foregroundStyle(.secondary)
+
+            Spacer(minLength: AtelierMetrics.spaceS)
+
+            Button("Show Rest") {
+                session.loadRestOfDiff()
+            }
+            .buttonStyle(AtelierLuminarePrimaryButtonStyle())
+            .accessibilityLabel("Show the remaining \(hiddenLineCount) diff lines")
+            .help("Load the remaining \(hiddenLineCount) lines of this diff")
+        }
+        .padding(.horizontal, AtelierMetrics.spaceM)
+        .frame(height: AtelierMetrics.panelHeaderHeight)
+        .background(AtelierTheme.chrome)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(AtelierTheme.border)
+                .frame(height: AtelierTheme.strokeHairline)
         }
     }
 

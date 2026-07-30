@@ -1049,6 +1049,115 @@ struct AtelierTests {
         #expect(deletion.newLineNumber == nil)
         #expect(additions.map(\.newLineNumber) == [2, 3])
         #expect(additions.allSatisfy { $0.oldLineNumber == nil })
+        #expect(document.hiddenLineCount == 0)
+    }
+
+    @Test("Diff parser caps rendered rows while keeping whole-diff counts")
+    func gitDiffLineCap() {
+        var text = "diff --git a/big.txt b/big.txt\n@@ -1,0 +1,40 @@\n"
+        for index in 0..<40 {
+            text += "+line \(index)\n"
+        }
+
+        let capped = GitDiffDocument(text: text, limit: 10)
+        // One hunk row plus nine additions fills the cap.
+        #expect(capped.lines.count == 10)
+        #expect(capped.hiddenLineCount == 31)
+        #expect(capped.additions == 40)
+        #expect(capped.lines.first?.kind == .hunk)
+        // Identity must stay unique for ForEach after the cap.
+        #expect(Set(capped.lines.map(\.id)).count == capped.lines.count)
+
+        let full = GitDiffDocument(text: text, limit: .max)
+        #expect(full.lines.count == 41)
+        #expect(full.hiddenLineCount == 0)
+        #expect(full.additions == capped.additions)
+        #expect(full.deletions == capped.deletions)
+    }
+
+    @Test("Parsed diff documents are cached per cap variant and revision")
+    @MainActor
+    func gitDiffCacheStoresParsedDocuments() {
+        let cache = GitDiffCache()
+        let document = GitDiffDocument(text: "@@ -1,1 +1,1 @@\n+one\n")
+        func key(isFullDiff: Bool, revision: Int) -> GitDiffCache.Key {
+            GitDiffCache.Key(
+                path: "a.txt",
+                originalPath: nil,
+                staged: false,
+                isUntracked: false,
+                isFullDiff: isFullDiff,
+                revision: revision
+            )
+        }
+
+        cache.store(document, byteCount: 24, for: key(isFullDiff: false, revision: cache.revision))
+        #expect(cache.value(for: key(isFullDiff: false, revision: cache.revision)) == document)
+        // A capped document must never satisfy a full-diff request.
+        #expect(cache.value(for: key(isFullDiff: true, revision: cache.revision)) == nil)
+
+        cache.invalidateAll()
+        #expect(cache.value(for: key(isFullDiff: false, revision: cache.revision)) == nil)
+    }
+
+    @Test("A large diff loads capped, then loads the rest on request")
+    @MainActor
+    func gitDiffSessionCapAndShowRest() async throws {
+        let repository = temporaryDirectory("git-diff-line-cap")
+        try FileManager.default.createDirectory(
+            at: repository,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: repository) }
+        let command = GitCommand()
+        _ = try command.run(arguments: ["init", "-q"], workspacePath: repository.path)
+
+        let lineCount = GitDiffLinePolicy.maximumLines + 500
+        let fileURL = repository.appendingPathComponent("big.txt")
+        var contents = ""
+        contents.reserveCapacity(lineCount * 12)
+        for index in 0..<lineCount {
+            contents += "line \(index)\n"
+        }
+        try contents.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let change = GitChange(
+            path: "big.txt",
+            originalPath: nil,
+            kind: .untracked,
+            isStaged: false,
+            isUnstaged: true
+        )
+        let session = GitDiffSession(
+            selection: DiffSelection(change: change, staged: false),
+            workspacePath: repository.path
+        )
+        defer { session.close() }
+
+        func settle() async throws -> GitDiffDocument? {
+            for _ in 0..<400 {
+                if case .loaded(let document) = session.state { return document }
+                if session.state != .loading { return nil }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            return nil
+        }
+
+        let capped = try #require(try await settle())
+        #expect(capped.lines.count == GitDiffLinePolicy.maximumLines)
+        #expect(capped.hiddenLineCount == lineCount - GitDiffLinePolicy.maximumLines + 1)
+        #expect(capped.additions == lineCount)
+
+        session.loadRestOfDiff()
+        #expect(session.showsFullDiff)
+        let full = try #require(try await settle())
+        #expect(full.hiddenLineCount == 0)
+        #expect(full.lines.count > GitDiffLinePolicy.maximumLines)
+        #expect(full.additions == capped.additions)
+
+        // A repository change drops back to the bounded view.
+        session.invalidate()
+        #expect(!session.showsFullDiff)
     }
 
     @Test("Git image diff previews staged and untracked versions")
