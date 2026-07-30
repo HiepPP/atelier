@@ -70,7 +70,6 @@ nonisolated enum WorkspaceRailShortcutPolicy {
 
 struct WorkspaceRailView: View {
     @Environment(AppModel.self) private var app
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var expandedWorkspaceIDs: Set<String> = []
@@ -154,10 +153,20 @@ struct WorkspaceRailView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Workspace panel")
-        .task(id: scenePhase) {
-            guard scenePhase == .active else { return }
+        // Gated on real on-screen state, not `scenePhase`: on macOS a covered or
+        // background window stays `.active`, so a scenePhase gate polled every
+        // two seconds forever behind another app's window.
+        .task(id: app.visibility.isOnScreen) {
+            guard app.visibility.isOnScreen else { return }
             while !Task.isCancelled {
-                let snapshots = app.threadsPanel.makeSnapshots(sessions: app.liveSessions)
+                let probes = app.threadsPanel.makeProbes(sessions: app.liveSessions)
+                // Each probe costs two sysctl round trips over a buffer holding
+                // the target's whole argv and environment. Resolve them off the
+                // main actor; only the diff-checked apply comes back.
+                let snapshots = await Task.detached(priority: .utility) {
+                    ThreadsPanelModel.resolveSnapshots(probes: probes)
+                }.value
+                guard !Task.isCancelled else { return }
                 app.threadsPanel.refresh(snapshots: snapshots, now: Date())
                 do {
                     try await Task.sleep(for: .seconds(2))

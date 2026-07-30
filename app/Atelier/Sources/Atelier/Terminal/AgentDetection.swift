@@ -28,7 +28,24 @@ nonisolated enum AgentDetectionPolicy {
     }
 }
 
-enum ForegroundProcessAgentReader {
+/// PTY identity for one terminal, captured on the main actor so the `sysctl`
+/// probe it feeds can run off the main actor.
+nonisolated struct TerminalForegroundAgentProbe: Sendable, Equatable {
+    let ptyFileDescriptor: Int32
+    let shellPID: pid_t
+
+    func resolveAgentName() -> String? {
+        ForegroundProcessAgentReader.agentName(
+            ptyFileDescriptor: ptyFileDescriptor,
+            shellPID: shellPID
+        )
+    }
+}
+
+/// `nonisolated` so the two `sysctl` round trips and the argument-buffer parse
+/// never run on the main actor: the thread poll calls this once per open
+/// terminal on a repeating cadence.
+nonisolated enum ForegroundProcessAgentReader {
     static func agentName(
         ptyFileDescriptor: Int32,
         shellPID: pid_t
@@ -69,12 +86,17 @@ enum ForegroundProcessAgentReader {
             }
         }
         guard readResult == 0 else { return nil }
-        return parseArguments(Array(bytes.prefix(byteCount)))
+        // `byteCount` is the written length, which can be shorter than the
+        // allocation. Pass it as a bound instead of copying the whole buffer
+        // again: KERN_PROCARGS2 returns argv plus the environment block, so a
+        // second copy is kilobytes per call on a repeating cadence.
+        return parseArguments(bytes, count: byteCount)
     }
 
-    private static func parseArguments(_ bytes: [UInt8]) -> [String]? {
+    private static func parseArguments(_ bytes: [UInt8], count: Int) -> [String]? {
         let integerSize = MemoryLayout<Int32>.size
-        guard bytes.count > integerSize else { return nil }
+        let end = min(count, bytes.count)
+        guard end > integerSize else { return nil }
 
         var argumentCount: Int32 = 0
         withUnsafeMutableBytes(of: &argumentCount) { destination in
@@ -85,19 +107,19 @@ enum ForegroundProcessAgentReader {
         guard argumentCount > 0 else { return nil }
 
         var index = integerSize
-        while index < bytes.count, bytes[index] != 0 { index += 1 }
-        while index < bytes.count, bytes[index] == 0 { index += 1 }
+        while index < end, bytes[index] != 0 { index += 1 }
+        while index < end, bytes[index] == 0 { index += 1 }
 
         var arguments: [String] = []
         arguments.reserveCapacity(Int(argumentCount))
-        while index < bytes.count, arguments.count < Int(argumentCount) {
+        while index < end, arguments.count < Int(argumentCount) {
             let start = index
-            while index < bytes.count, bytes[index] != 0 { index += 1 }
+            while index < end, bytes[index] != 0 { index += 1 }
             if index > start,
                let argument = String(bytes: bytes[start..<index], encoding: .utf8) {
                 arguments.append(argument)
             }
-            while index < bytes.count, bytes[index] == 0 { index += 1 }
+            while index < end, bytes[index] == 0 { index += 1 }
         }
         return arguments
     }

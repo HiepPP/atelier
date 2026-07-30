@@ -33,6 +33,17 @@ nonisolated struct TerminalSnapshot: Equatable, Sendable {
     let agentName: String?
 }
 
+/// A snapshot before its agent name is known. Gathering these is pure main-actor
+/// property reading; resolving them costs two `sysctl` calls per terminal and
+/// runs off the main actor.
+nonisolated struct TerminalAgentProbe: Sendable {
+    let terminalID: UUID
+    let title: String
+    let workspaceID: String
+    let workspaceName: String
+    let agentProbe: TerminalForegroundAgentProbe?
+}
+
 @MainActor
 @Observable
 final class ThreadsPanelModel {
@@ -46,26 +57,38 @@ final class ThreadsPanelModel {
     private(set) var groups: [WorkspaceThreadGroup] = []
     private var runStates: [UUID: RunState] = [:]
 
-    func makeSnapshots(sessions: [WorkspaceSession]) -> [TerminalSnapshot] {
+    /// Main-actor phase: read terminal identity and PTY handles only.
+    func makeProbes(sessions: [WorkspaceSession]) -> [TerminalAgentProbe] {
         sessions.flatMap { session in
             let workspaceID = session.state.id
             let workspaceName = WorkspaceRailIdentityPolicy.workspaceName(
                 path: session.state.path
             )
             return session.terminalTabs.openTerminalTabs.map { terminal in
-                TerminalSnapshot(
+                TerminalAgentProbe(
                     terminalID: terminal.id,
                     title: terminal.title,
                     workspaceID: workspaceID,
                     workspaceName: workspaceName,
-                    agentName: terminal.controller.currentForegroundAgentName()
+                    agentProbe: terminal.controller.foregroundAgentProbe
                 )
             }
         }
     }
 
-    func refresh(sessions: [WorkspaceSession], now: Date = Date()) {
-        refresh(snapshots: makeSnapshots(sessions: sessions), now: now)
+    /// Off-main phase: one `tcgetpgrp` plus two `sysctl` calls per terminal.
+    nonisolated static func resolveSnapshots(
+        probes: [TerminalAgentProbe]
+    ) -> [TerminalSnapshot] {
+        probes.map { probe in
+            TerminalSnapshot(
+                terminalID: probe.terminalID,
+                title: probe.title,
+                workspaceID: probe.workspaceID,
+                workspaceName: probe.workspaceName,
+                agentName: probe.agentProbe?.resolveAgentName()
+            )
+        }
     }
 
     func refresh(snapshots: [TerminalSnapshot], now: Date) {

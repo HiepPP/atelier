@@ -173,12 +173,21 @@ final class TerminalController {
         !isClosed && terminal.process.running
     }
 
-    func currentForegroundAgentName() -> String? {
+    /// PTY identity only: two cheap property reads, no syscall. Nil once closed,
+    /// so a recycled file descriptor is never probed.
+    var foregroundAgentProbe: TerminalForegroundAgentProbe? {
         guard !isClosed else { return nil }
-        return ForegroundProcessAgentReader.agentName(
+        return TerminalForegroundAgentProbe(
             ptyFileDescriptor: terminal.process.childfd,
             shellPID: terminal.process.shellPid
         )
+    }
+
+    /// Blocking probe for one-shot main-actor callers such as close
+    /// confirmation. Repeating callers must resolve `foregroundAgentProbe` off
+    /// the main actor instead.
+    func currentForegroundAgentName() -> String? {
+        foregroundAgentProbe?.resolveAgentName()
     }
 
     func requestFocus() {

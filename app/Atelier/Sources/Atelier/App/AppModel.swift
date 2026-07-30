@@ -9,6 +9,7 @@ final class AppModel {
     let windowController: WindowController
     let layoutProfiles: LayoutProfileStore
     let threadsPanel = ThreadsPanelModel()
+    let visibility = WorkspaceVisibilityModel()
 
     private(set) var workspaceStates: [WorkspaceState] = []
     private(set) var selectedWorkspaceID: String? {
@@ -196,6 +197,7 @@ final class AppModel {
         guard !hasStarted else { return }
         hasStarted = true
         isStartupRestorePending = true
+        visibility.start()
         presentLastResourceExitIfNeeded()
         windowController.installGlobalShortcut()
         let startupMutationRevision = catalogMutationRevision
@@ -360,6 +362,7 @@ final class AppModel {
             }
         }
         hasStopped = true
+        visibility.stop()
         startupTask?.cancel()
         startupTask = nil
         layoutProfileApplicationRevision &+= 1
