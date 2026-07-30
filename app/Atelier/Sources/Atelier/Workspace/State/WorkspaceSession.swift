@@ -113,7 +113,8 @@ final class WorkspaceSession {
         guard !isStarted else { return }
         isStarted = true
         gitModel.refresh()
-        watchtower.setRoot(rootURL.path)
+        let watchtowerRoot = rootURL.path
+        Task { [weak self] in await self?.watchtower.setRoot(watchtowerRoot) }
         if agentResponsesActive {
             agentResponses.start()
         }
@@ -125,7 +126,7 @@ final class WorkspaceSession {
                 scheduleFileTreeInvalidation()
             }
             if invalidation.contains(.watchtowerPlan) {
-                watchtower.refresh()
+                Task { [weak self] in await self?.watchtower.refresh() }
             }
             gitModel.invalidate(
                 repositoryMetadataChanged: invalidation.contains(.gitMetadata)
@@ -149,7 +150,7 @@ final class WorkspaceSession {
             fileTreeInvalidationTask?.cancel()
             fileTreeInvalidationTask = nil
             firstPendingFileTreeEvent = nil
-            watchtower.setRoot(nil)
+            watchtower.clear()
             gitModel.stop()
             gemmaAgent.close()
             gemmaSidecar.stop()

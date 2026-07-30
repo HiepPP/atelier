@@ -110,7 +110,7 @@ struct WatchtowerPanelView: View {
     // One short turn acknowledges a refresh that finds no change. Reduce Motion skips it.
     private var refreshButton: some View {
         iconButton("arrow.clockwise", label: "Refresh plan") {
-            model.refresh()
+            Task { await model.refresh() }
             if !reduceMotion {
                 refreshTurns += 1
             }

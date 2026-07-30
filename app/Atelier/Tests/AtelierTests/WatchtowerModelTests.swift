@@ -2,6 +2,20 @@ import Foundation
 import Testing
 @testable import Atelier
 
+/// Loaders run off the main actor, so a loader the test mutates needs real
+/// synchronization rather than a captured `var`.
+private nonisolated final class PlanBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: WatchtowerPlan?
+
+    init(_ plan: WatchtowerPlan?) { storage = plan }
+
+    var current: WatchtowerPlan? {
+        get { lock.withLock { storage } }
+        set { lock.withLock { storage = newValue } }
+    }
+}
+
 @Suite("Watchtower model")
 @MainActor
 struct WatchtowerModelTests {
@@ -39,12 +53,18 @@ struct WatchtowerModelTests {
         return dir.path
     }
 
+
     // MARK: - Derived state
 
     @Test("Loads plan and exposes counts and progress")
-    func loadsPlanExposesCountsAndProgress() {
+    func loadsPlanExposesCountsAndProgress() async {
         let loaded = plan(demoContent())
-        let model = WatchtowerModel(rootDir: "/ws", planLoader: { _ in loaded }, archiveLoader: { _ in [] })
+        let model = WatchtowerModel(
+            rootDir: "/ws",
+            planLoader: { _ in loaded },
+            archiveLoader: { _ in [] }
+        )
+        await model.refresh()
 
         #expect(model.hasPlan)
         #expect(model.title == "Demo")
@@ -57,10 +77,29 @@ struct WatchtowerModelTests {
         #expect(model.hasBlocked)
     }
 
-    @Test("Groups tasks by status")
-    func groupsTasksByStatus() {
+    @Test("Construction never loads; the root has to be set")
+    func constructionDoesNotLoad() async {
         let loaded = plan(demoContent())
-        let model = WatchtowerModel(rootDir: "/ws", planLoader: { _ in loaded }, archiveLoader: { _ in [] })
+        let model = WatchtowerModel(
+            rootDir: "/ws",
+            planLoader: { _ in loaded },
+            archiveLoader: { _ in [] }
+        )
+
+        #expect(!model.hasPlan)
+        await model.refresh()
+        #expect(model.hasPlan)
+    }
+
+    @Test("Groups tasks by status")
+    func groupsTasksByStatus() async {
+        let loaded = plan(demoContent())
+        let model = WatchtowerModel(
+            rootDir: "/ws",
+            planLoader: { _ in loaded },
+            archiveLoader: { _ in [] }
+        )
+        await model.refresh()
 
         #expect(model.tasks(in: .done).map(\.id) == ["TASK-001"])
         #expect(model.tasks(in: .active).map(\.id) == ["TASK-002"])
@@ -71,56 +110,95 @@ struct WatchtowerModelTests {
     // MARK: - Diff behaviour
 
     @Test("Reapplying identical plan reports no change")
-    func reapplyingIdenticalReportsNoChange() {
+    func reapplyingIdenticalReportsNoChange() async {
         let current = plan(demoContent())
-        let model = WatchtowerModel(rootDir: "/ws", planLoader: { _ in current }, archiveLoader: { _ in [] })
-        // init already applied the plan; a second identical load is a no-op.
-        #expect(!model.refresh())
+        let model = WatchtowerModel(
+            rootDir: "/ws",
+            planLoader: { _ in current },
+            archiveLoader: { _ in [] }
+        )
+
+        #expect(await model.refresh())
+        // A second identical load must not fire observers.
+        #expect(!(await model.refresh()))
     }
 
     @Test("Changed plan reports change and updates counts")
-    func changedPlanReportsChange() {
-        var current = plan(demoContent())
-        let model = WatchtowerModel(rootDir: "/ws", planLoader: { _ in current }, archiveLoader: { _ in [] })
+    func changedPlanReportsChange() async {
+        let plans = PlanBox(plan(demoContent()))
+        let model = WatchtowerModel(
+            rootDir: "/ws",
+            planLoader: { _ in plans.current },
+            archiveLoader: { _ in [] }
+        )
+        await model.refresh()
         #expect(model.doneCount == 1)
 
-        current = plan(demoContent(task4: "DONE"))
-        #expect(model.refresh())
+        plans.current = plan(demoContent(task4: "DONE"))
+        #expect(await model.refresh())
         #expect(model.doneCount == 2)
         #expect(model.tasks(in: .todo).isEmpty)
     }
 
-    @Test("setRoot(nil) clears plan and archive")
-    func setRootNilClears() {
+    @Test("clear() drops plan and archive")
+    func clearDropsPlanAndArchive() async {
         let loaded = plan(demoContent())
         let archived = [WatchtowerArchivePlan(slug: "a", manifestPath: "/ws/watchtower/archive/a/NEXT.md")]
-        let model = WatchtowerModel(rootDir: "/ws", planLoader: { _ in loaded }, archiveLoader: { _ in archived })
+        let model = WatchtowerModel(
+            rootDir: "/ws",
+            planLoader: { _ in loaded },
+            archiveLoader: { _ in archived }
+        )
+        await model.refresh()
         #expect(model.hasPlan)
         #expect(!model.archive.isEmpty)
 
-        #expect(model.setRoot(nil))
+        #expect(model.clear())
         #expect(!model.hasPlan)
         #expect(model.archive.isEmpty)
         #expect(model.totalCount == 0)
         #expect(model.progress == 0)
 
-        #expect(!model.setRoot(nil))
+        #expect(!model.clear())
+    }
+
+    /// The walk runs off the main actor, so a root that changes mid-flight must
+    /// not let a stale result overwrite the newer one.
+    @Test("A cleared root discards an in-flight load")
+    func clearedRootDiscardsInFlightLoad() async {
+        let loaded = plan(demoContent())
+        let model = WatchtowerModel(
+            rootDir: "/ws",
+            planLoader: { _ in loaded },
+            archiveLoader: { _ in [] }
+        )
+
+        async let refreshed = model.refresh()
+        model.clear()
+
+        #expect(!(await refreshed))
+        #expect(!model.hasPlan)
     }
 
     @Test("Archive is exposed from the loader")
-    func archiveExposed() {
+    func archiveExposed() async {
         let archived = [
             WatchtowerArchivePlan(slug: "20260202-b", manifestPath: "/ws/watchtower/archive/20260202-b/NEXT.md"),
             WatchtowerArchivePlan(slug: "20260101-a", manifestPath: "/ws/watchtower/archive/20260101-a/NEXT.md"),
         ]
-        let model = WatchtowerModel(rootDir: "/ws", planLoader: { _ in nil }, archiveLoader: { _ in archived })
+        let model = WatchtowerModel(
+            rootDir: "/ws",
+            planLoader: { _ in nil },
+            archiveLoader: { _ in archived }
+        )
+        await model.refresh()
         #expect(model.archive.map(\.slug) == ["20260202-b", "20260101-a"])
     }
 
     // MARK: - Default loader end-to-end
 
     @Test("Default loader reads the plan from disk via the parser")
-    func defaultLoaderReadsFromDisk() throws {
+    func defaultLoaderReadsFromDisk() async throws {
         let root = try makeTempDir()
         defer { try? FileManager.default.removeItem(atPath: root) }
         let tasksDir = ((root as NSString).appendingPathComponent("watchtower") as NSString).appendingPathComponent("tasks")
@@ -131,7 +209,7 @@ struct WatchtowerModelTests {
         let model = WatchtowerModel()
         #expect(!model.hasPlan)
 
-        #expect(model.setRoot(root))
+        #expect(await model.setRoot(root))
         #expect(model.title == "Demo")
         #expect(model.totalCount == 4)
         #expect(model.inProgressId == "TASK-002")

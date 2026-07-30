@@ -20,6 +20,12 @@ nonisolated enum WatchtowerTaskGroup: CaseIterable, Sendable {
     }
 }
 
+nonisolated struct WatchtowerLoad: Sendable {
+    let plan: WatchtowerPlan?
+    let archive: [WatchtowerArchivePlan]
+    let contextPath: String?
+}
+
 // Reads the active Watchtower plan from a workspace root via WatchtowerParser
 // and exposes progress, counts, tasks, and archive. Read-only: it never writes
 // plan files. Diffs by Equatable so observers only update on a real change.
@@ -32,37 +38,69 @@ final class WatchtowerModel {
     private(set) var contextPath: String?
 
     // Loaders are injected for deterministic tests; defaults use the parser.
-    @ObservationIgnored private let planLoader: (String) -> WatchtowerPlan?
-    @ObservationIgnored private let archiveLoader: (String) -> [WatchtowerArchivePlan]
+    // `@Sendable` because loading runs off the main actor.
+    @ObservationIgnored private let planLoader: @Sendable (String) -> WatchtowerPlan?
+    @ObservationIgnored private let archiveLoader: @Sendable (String) -> [WatchtowerArchivePlan]
+    @ObservationIgnored private var loadGeneration: UInt64 = 0
 
+    /// Construction never touches the disk. Callers set a root, which loads.
     init(
         rootDir: String? = nil,
-        planLoader: @escaping (String) -> WatchtowerPlan? = { WatchtowerParser.readPlan(rootDir: $0) },
-        archiveLoader: @escaping (String) -> [WatchtowerArchivePlan] = { WatchtowerParser.listArchive(rootDir: $0) }
+        planLoader: @Sendable @escaping (String) -> WatchtowerPlan? = {
+            WatchtowerParser.readPlan(rootDir: $0)
+        },
+        archiveLoader: @Sendable @escaping (String) -> [WatchtowerArchivePlan] = {
+            WatchtowerParser.listArchive(rootDir: $0)
+        }
     ) {
         self.rootDir = rootDir
         self.planLoader = planLoader
         self.archiveLoader = archiveLoader
-        _ = refresh()
     }
 
     // MARK: - Loading
 
     @discardableResult
-    func setRoot(_ root: String?) -> Bool {
+    func setRoot(_ root: String) async -> Bool {
         if root != rootDir { rootDir = root }
-        return refresh()
+        return await refresh()
     }
 
+    /// Drops the root and every loaded value. Synchronous on purpose: teardown
+    /// must not depend on a task that may never get to run.
     @discardableResult
-    func refresh() -> Bool {
+    func clear() -> Bool {
+        loadGeneration &+= 1
+        rootDir = nil
+        return apply(plan: nil, archive: [], contextPath: nil)
+    }
+
+    /// Reads the plan, archive, and context path off the main actor. The walk
+    /// stats one directory per archive entry and reads every task spec, so on
+    /// the main actor it blocked the UI for the whole traversal.
+    @discardableResult
+    func refresh() async -> Bool {
         guard let root = rootDir else {
             return apply(plan: nil, archive: [], contextPath: nil)
         }
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        let planLoader = planLoader
+        let archiveLoader = archiveLoader
+        let loaded = await Task.detached(priority: .utility) {
+            WatchtowerLoad(
+                plan: planLoader(root),
+                archive: archiveLoader(root),
+                contextPath: Self.existingContextPath(root: root)
+            )
+        }.value
+        // A newer load, a cleared root, or a different root started while this
+        // walk ran: dropping the result keeps the newest value applied.
+        guard generation == loadGeneration, rootDir == root else { return false }
         return apply(
-            plan: planLoader(root),
-            archive: archiveLoader(root),
-            contextPath: Self.existingContextPath(root: root)
+            plan: loaded.plan,
+            archive: loaded.archive,
+            contextPath: loaded.contextPath
         )
     }
 
@@ -90,7 +128,7 @@ final class WatchtowerModel {
 
     // nil when the workspace has no watchtower/CONTEXT.md, so the panel can disable the action
     // instead of opening a path that does not exist.
-    private static func existingContextPath(root: String) -> String? {
+    nonisolated private static func existingContextPath(root: String) -> String? {
         let path = ((root as NSString).appendingPathComponent("watchtower") as NSString)
             .appendingPathComponent("CONTEXT.md")
         return FileManager.default.fileExists(atPath: path) ? path : nil
