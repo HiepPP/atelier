@@ -156,18 +156,25 @@ struct WorkspaceRailView: View {
         // Gated on real on-screen state, not `scenePhase`: on macOS a covered or
         // background window stays `.active`, so a scenePhase gate polled every
         // two seconds forever behind another app's window.
-        .task(id: app.visibility.isOnScreen) {
-            guard app.visibility.isOnScreen else { return }
+        //
+        // The gate is re-read inside the loop rather than driven by `.task(id:)`.
+        // A task id is only re-read when the body re-evaluates, and SwiftUI stops
+        // updating bodies while the app is hidden, so an id-driven gate never got
+        // the chance to stop the very case it was meant to stop. Idling here costs
+        // one sleep per interval and no syscalls.
+        .task {
             while !Task.isCancelled {
-                let probes = app.threadsPanel.makeProbes(sessions: app.liveSessions)
-                // Each probe costs two sysctl round trips over a buffer holding
-                // the target's whole argv and environment. Resolve them off the
-                // main actor; only the diff-checked apply comes back.
-                let snapshots = await Task.detached(priority: .utility) {
-                    ThreadsPanelModel.resolveSnapshots(probes: probes)
-                }.value
-                guard !Task.isCancelled else { return }
-                app.threadsPanel.refresh(snapshots: snapshots, now: Date())
+                if app.visibility.isOnScreen {
+                    let probes = app.threadsPanel.makeProbes(sessions: app.liveSessions)
+                    // Each probe costs two sysctl round trips over a buffer holding
+                    // the target's whole argv and environment. Resolve them off the
+                    // main actor; only the diff-checked apply comes back.
+                    let snapshots = await Task.detached(priority: .utility) {
+                        ThreadsPanelModel.resolveSnapshots(probes: probes)
+                    }.value
+                    guard !Task.isCancelled else { return }
+                    app.threadsPanel.refresh(snapshots: snapshots, now: Date())
+                }
                 do {
                     try await Task.sleep(for: .seconds(2))
                 } catch {
