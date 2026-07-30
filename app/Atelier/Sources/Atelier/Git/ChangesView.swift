@@ -263,12 +263,26 @@ actor GitCommitMessageGenerator {
 nonisolated enum GitRefreshThrottlePolicy {
     static let debounce: Duration = .milliseconds(300)
     static let minimumSpacing: Duration = .seconds(2)
+    /// Upper bound on how long a burst may defer a refresh. A pure trailing
+    /// debounce never fires while events keep arriving faster than `debounce`
+    /// (`npm install`, build watch, `git checkout`), leaving the explorer,
+    /// palette index, and git status stale for the whole burst.
+    static let maximumWait: Duration = .seconds(2)
 
-    static func delay(sinceLastSpawn elapsed: Duration?) -> Duration {
+    /// `.zero` means fire now: the oldest deferred event has waited out
+    /// `maximumWait`, so the caller must stop rescheduling.
+    static func delay(
+        sinceLastSpawn elapsed: Duration?,
+        sinceFirstPendingEvent pending: Duration? = nil
+    ) -> Duration {
+        if let pending, pending >= maximumWait { return .zero }
         guard let elapsed, elapsed >= .zero, elapsed < minimumSpacing else {
             return debounce
         }
-        return max(debounce, minimumSpacing - elapsed)
+        let spacing = max(debounce, minimumSpacing - elapsed)
+        guard let pending, pending >= .zero else { return spacing }
+        // Never schedule past the max-wait deadline.
+        return min(spacing, maximumWait - pending)
     }
 }
 
@@ -300,6 +314,7 @@ final class GitWorkspaceModel {
     private var statusRefreshID = UUID()
     private var pendingRepositoryMetadataRefresh = false
     private var lastFilesystemRefreshSpawn: ContinuousClock.Instant?
+    private var firstPendingFilesystemEvent: ContinuousClock.Instant?
 
     init(
         workspacePath: String,
@@ -408,20 +423,36 @@ final class GitWorkspaceModel {
         pendingRepositoryMetadataRefresh = pendingRepositoryMetadataRefresh
             || repositoryMetadataChanged
         invalidateTask?.cancel()
+        if firstPendingFilesystemEvent == nil {
+            firstPendingFilesystemEvent = .now
+        }
         let delay = GitRefreshThrottlePolicy.delay(
-            sinceLastSpawn: lastFilesystemRefreshSpawn.map { .now - $0 }
+            sinceLastSpawn: lastFilesystemRefreshSpawn.map { .now - $0 },
+            sinceFirstPendingEvent: firstPendingFilesystemEvent.map { .now - $0 }
         )
+        // A sustained burst cancels every scheduled task, so the max-wait case
+        // has to spawn inline instead of scheduling another cancellable sleep.
+        guard delay > .zero else {
+            invalidateTask = nil
+            spawnFilesystemRefresh()
+            return
+        }
         invalidateTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled else { return }
-            lastFilesystemRefreshSpawn = .now
-            let refreshRepositoryMetadata = pendingRepositoryMetadataRefresh
-            pendingRepositoryMetadataRefresh = false
-            if refreshRepositoryMetadata {
-                refresh()
-            } else {
-                refreshStatus()
-            }
+            spawnFilesystemRefresh()
+        }
+    }
+
+    private func spawnFilesystemRefresh() {
+        lastFilesystemRefreshSpawn = .now
+        firstPendingFilesystemEvent = nil
+        let refreshRepositoryMetadata = pendingRepositoryMetadataRefresh
+        pendingRepositoryMetadataRefresh = false
+        if refreshRepositoryMetadata {
+            refresh()
+        } else {
+            refreshStatus()
         }
     }
 
@@ -432,6 +463,7 @@ final class GitWorkspaceModel {
         invalidateTask?.cancel()
         invalidateTask = nil
         pendingRepositoryMetadataRefresh = false
+        firstPendingFilesystemEvent = nil
         cancelCommitMessageGeneration()
         pushPhase = .idle
     }

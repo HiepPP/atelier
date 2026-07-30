@@ -9,6 +9,27 @@ nonisolated struct FileWatcherInvalidation: OptionSet, Sendable {
     static let watchtowerPlan = FileWatcherInvalidation(rawValue: 1 << 2)
 }
 
+/// Trailing debounce with a max-wait bound. FSEvents delivers batches about ten
+/// times a second during a write burst, so a pure trailing debounce that cancels
+/// and reschedules never fires until the burst ends; consumers stay stale for
+/// the whole `npm install` or `git checkout`.
+nonisolated enum FileWatcherDebouncePolicy {
+    static let debounce: Duration = .milliseconds(200)
+    static let maximumWait: Duration = .seconds(1)
+
+    /// `.zero` means deliver now.
+    static func delay(sinceFirstPendingEvent pending: Duration?) -> Duration {
+        guard let pending, pending >= .zero else { return debounce }
+        guard pending < maximumWait else { return .zero }
+        return min(debounce, maximumWait - pending)
+    }
+
+    static func seconds(_ duration: Duration) -> Double {
+        Double(duration.components.seconds)
+            + Double(duration.components.attoseconds) / 1e18
+    }
+}
+
 nonisolated enum FileWatcherEventPolicy {
     static func invalidation(
         paths: [String],
@@ -70,6 +91,7 @@ nonisolated final class FileWatcher: @unchecked Sendable {
     private var stream: FSEventStreamRef?
     private var pendingWork: DispatchWorkItem?
     private var pendingInvalidation: FileWatcherInvalidation = []
+    private var firstPendingEventAt: ContinuousClock.Instant?
     private var generation = 0
 
     init(
@@ -125,6 +147,7 @@ nonisolated final class FileWatcher: @unchecked Sendable {
         let work = pendingWork
         pendingWork = nil
         pendingInvalidation = []
+        firstPendingEventAt = nil
         stateLock.unlock()
         work?.cancel()
         guard let stream else { return }
@@ -156,6 +179,12 @@ nonisolated final class FileWatcher: @unchecked Sendable {
         stateLock.lock()
         pendingWork?.cancel()
         pendingInvalidation.formUnion(invalidation)
+        if firstPendingEventAt == nil {
+            firstPendingEventAt = .now
+        }
+        let delay = FileWatcherDebouncePolicy.delay(
+            sinceFirstPendingEvent: firstPendingEventAt.map { ContinuousClock.now - $0 }
+        )
         let expectedGeneration = generation
         let work = DispatchWorkItem { [weak self] in
             guard let self,
@@ -167,7 +196,10 @@ nonisolated final class FileWatcher: @unchecked Sendable {
         }
         pendingWork = work
         stateLock.unlock()
-        queue.asyncAfter(deadline: .now() + 0.2, execute: work)
+        queue.asyncAfter(
+            deadline: .now() + FileWatcherDebouncePolicy.seconds(delay),
+            execute: work
+        )
     }
 
     private func takePendingInvalidation(
@@ -181,6 +213,7 @@ nonisolated final class FileWatcher: @unchecked Sendable {
         let invalidation = pendingInvalidation
         pendingInvalidation = []
         pendingWork = nil
+        firstPendingEventAt = nil
         return invalidation
     }
 }
