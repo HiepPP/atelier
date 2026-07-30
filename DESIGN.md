@@ -737,6 +737,10 @@ Persistence boundaries:
 - Open file diffs as center tabs, not inside the Git sidebar.
 - Omit raw Git file metadata such as `diff --git`, `index`, `---`, and `+++` from text
   diff previews. Keep hunk dividers, line numbers, context, additions, deletions, and file notes.
+- Parse diff, status, and history output off the main actor. A diff tab must never block
+  interaction while its output is turned into rows.
+- Bound a text diff preview at 20,000 rendered lines. State how many lines are hidden and offer
+  one explicit control to load the rest. Keep addition and deletion counts for the whole diff.
 - Render image changes as fitted native image previews in their center diff tabs instead of
   showing binary diff metadata. Use index bytes for staged rows and working-tree bytes for
   unstaged or untracked rows.
