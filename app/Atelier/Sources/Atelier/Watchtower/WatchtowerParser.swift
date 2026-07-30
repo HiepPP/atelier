@@ -145,7 +145,22 @@ nonisolated enum WatchtowerParser {
 
     // MARK: - Tracker rows
 
+    /// One listing per directory per parse. `resolveOutcome` used to list the
+    /// tasks directory again for every row whose exact outcome file was missing,
+    /// so an N-task plan cost N directory listings on one refresh.
+    private struct DirectoryListingCache {
+        private var entriesByDirectory: [String: [String]] = [:]
+
+        mutating func entries(of directory: String) -> [String] {
+            if let cached = entriesByDirectory[directory] { return cached }
+            let entries = (try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? []
+            entriesByDirectory[directory] = entries
+            return entries
+        }
+    }
+
     private static func parseTracker(_ content: String, tasksDir dir: String) -> [WatchtowerTask] {
+        var listings = DirectoryListingCache()
         let lines = splitLines(trackerBlock(content))
         guard let headerIdx = lines.firstIndex(where: { line in
             guard line.contains("|") else { return false }
@@ -201,7 +216,12 @@ nonisolated enum WatchtowerParser {
                 group: groupCell,
                 status: WatchtowerTaskStatus(label: statusCell),
                 specPath: specPath,
-                outcomePath: resolveOutcome(dir, taskId: id, specPath: specPath),
+                outcomePath: resolveOutcome(
+                    dir,
+                    taskId: id,
+                    specPath: specPath,
+                    listings: &listings
+                ),
                 deps: depsCell,
                 notes: notesCell
             ))
@@ -230,15 +250,18 @@ nonisolated enum WatchtowerParser {
         return (tasksDir as NSString).appendingPathComponent(base)
     }
 
-    private static func resolveOutcome(_ tasksDir: String, taskId: String, specPath: String?) -> String? {
+    private static func resolveOutcome(
+        _ tasksDir: String,
+        taskId: String,
+        specPath: String?,
+        listings: inout DirectoryListingCache
+    ) -> String? {
         if taskId.isEmpty { return nil }
         let dir = specPath.map { ($0 as NSString).deletingLastPathComponent } ?? tasksDir
-        let fm = FileManager.default
         let exact = (dir as NSString).appendingPathComponent("\(taskId)-outcome.md")
-        if fm.fileExists(atPath: exact) { return exact }
+        if FileManager.default.fileExists(atPath: exact) { return exact }
 
-        guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { return nil }
-        let match = entries
+        let match = listings.entries(of: dir)
             .filter { $0.hasPrefix("\(taskId)-") && $0.hasSuffix("-outcome.md") }
             .sorted()
             .first
