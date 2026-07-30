@@ -63,7 +63,7 @@ struct AtelierActionRegistryTests {
         )
         #expect(
             AtelierActionRegistry.descriptor(for: .toggleAgentResponses).shortcutLabel
-                == "Command-D"
+                == "Command-R"
         )
         #expect(
             AtelierActionRegistry.descriptor(for: .toggleWatchtower).shortcutLabel

@@ -48,7 +48,7 @@ Atelier targets macOS 26 and uses Swift 6.2 with strict concurrency. SwiftUI own
 ### Markdown and HTML Preview
 
 - Open Markdown and HTML files in Preview mode by default.
-- Toggle Source and Preview with `Command-R`.
+- Toggle Source and Preview with `Command-D`.
 - Keep preview scroll, selection, outline, and page state across tab switches.
 - Render Markdown as one selectable native document with normal `Command-C` behavior.
 - Render headings, lists, tasks, quotes, callouts, code, tables, links, images, and footnotes.
@@ -182,10 +182,10 @@ Terminal tabs restore as fresh shells. Missing files and unavailable workspaces 
 | `Command-Shift-G` | Previous search result |
 | `Command-B` | Reveal the active file in Explorer |
 | `Command-E` | Toggle between Explorer and Git |
-| `Command-R` | Toggle Source and Preview |
+| `Command-D` | Toggle Source and Preview |
 | `Command-Q` | Close active closable tab |
 | `Command-W` | Toggle Watchtower panel |
-| `Command-D` | Toggle Agent Responses |
+| `Command-R` | Toggle Agent Responses |
 | `Command-Shift-R` | Toggle left panel |
 | `Command-Shift-T` | Toggle right panel |
 | `Command-Shift-C` | Send selected line reference to terminal |

@@ -993,7 +993,7 @@ Persistence boundaries:
   removes a view during a layout pass and the bar never contributes to the measured column width.
 - Put the Source/Preview toggle in the trailing editor action group. Keep find and word-wrap
   commands scoped to Source mode.
-- Use `Cmd-R` to toggle Source and Preview for the active `.md` or `.html` file. Disable it for
+- Use `Cmd-D` to toggle Source and Preview for the active `.md` or `.html` file. Disable it for
   other file types.
 - With a non-empty editor selection, `Cmd-Shift-C` inserts
   `@<workspace-relative-path>:<first-line>~<last-line> ` into the most recently selected terminal
@@ -1078,7 +1078,7 @@ The five background features, all read-only and cancellable:
   overlay never becomes a split peer or consumes terminal, editor, diff, or Gemma layout space.
 - Open the response overlay at a trailing half-width below the tab strip.
 - Provide one header control that toggles between full width and a trailing half-width mode.
-- Opening the overlay from the Response action or `Cmd-D` always restores half-width mode.
+- Opening the overlay from the Response action or `Cmd-R` always restores half-width mode.
 - Restore at most 100 newest final responses for the current workspace at startup, and only from the
   last three days. A transcript older than that window is never opened, and a response older than
   that window never reaches the panel. Older history stays on disk for other tools to read.
@@ -1145,10 +1145,10 @@ The five background features, all read-only and cancellable:
 | `Cmd-Shift-G` | Previous file-search match |
 | `Cmd-B` | Reveal the active file in Explorer |
 | `Cmd-E` | Toggle between the Explorer and Git sidebar tabs |
-| `Cmd-R` | Toggle Source and Preview for the active Markdown or HTML file |
+| `Cmd-D` | Toggle Source and Preview for the active Markdown or HTML file |
 | `Cmd-Q` | Close active closable center tab |
 | `Cmd-W` | Toggle Watchtower Panel |
-| `Cmd-D` | Toggle Agent Responses at the default half width |
+| `Cmd-R` | Toggle Agent Responses at the default half width |
 | `Cmd-Shift-R` | Toggle Left Panel |
 | `Cmd-Shift-T` | Toggle Right Panel |
 | `Cmd-Shift-C` | Insert selected editor line reference into terminal |

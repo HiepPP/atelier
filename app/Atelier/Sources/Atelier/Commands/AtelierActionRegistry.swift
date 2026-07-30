@@ -289,7 +289,7 @@ nonisolated enum AtelierActionRegistry {
             title: "Toggle Agent Responses",
             category: "View",
             systemImage: "text.bubble",
-            shortcutLabel: "Command-D"
+            shortcutLabel: "Command-R"
         ),
         AtelierActionDescriptor(
             id: .toggleWatchtower,
