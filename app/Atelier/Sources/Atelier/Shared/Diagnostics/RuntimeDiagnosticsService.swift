@@ -34,6 +34,9 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
     private var lastWriteError: String?
     private var lastWriteLogAt = 0.0
     private var lastMainHeartbeatWarning = false
+    private var isApplicationVisible = true
+    private var isHeartbeatPaused = false
+    private var lastHeartbeatRequestAt = 0.0
     private var sampleInternally = true
     private var previousWorkspace = RuntimeWorkspaceSnapshot()
     private var mainSnapshotCaptureRequested = true
@@ -102,6 +105,24 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
         }
     }
 
+    /// Suspends main-thread pings while the window is inactive or occluded. The
+    /// reported `heartbeatPaused` flag stays true until the main thread answers
+    /// the first ping after resume, so a paused age is never read as a stall.
+    func setApplicationVisible(_ isVisible: Bool) {
+        queue.async { [self] in
+            guard isApplicationVisible != isVisible else { return }
+            isApplicationVisible = isVisible
+            isHeartbeatPaused = true
+            recorder.append(RuntimeEvent(
+                monotonicTimeSeconds: clock.now(),
+                category: "heartbeat",
+                name: isVisible ? "heartbeatResumeRequested" : "heartbeatPaused"
+            ))
+            // Resume on the next tick instead of waiting out the cadence.
+            if isVisible { lastHeartbeatRequestAt = 0 }
+        }
+    }
+
     func consumeProcessSample(_ sample: ProcessSample, at time: Double? = nil) {
         queue.async { [self] in
             updateProcess(sample, at: time ?? clock.now())
@@ -164,7 +185,14 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
         let now = clock.now()
         let shouldFlush = now - lastFlushAt >= 1
         if shouldFlush { mainSnapshotCaptureRequested = true }
-        requestHeartbeatIfNeeded()
+        if RuntimeHeartbeatCadencePolicy.shouldRequest(
+            isApplicationVisible: isApplicationVisible,
+            needsSnapshotCapture: mainSnapshotCaptureRequested,
+            sinceLastRequest: now - lastHeartbeatRequestAt
+        ) {
+            lastHeartbeatRequestAt = now
+            requestHeartbeatIfNeeded()
+        }
         // The mailbox is kqueue-driven. Re-arm a watcher that could not attach
         // yet, and keep a bounded fallback check for a missed directory event.
         if mailboxSource == nil {
@@ -191,6 +219,8 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
             let acknowledgedAt = self.clock.now()
             self.queue.async { [self] in
                 heartbeat.acknowledge(at: acknowledgedAt)
+                // The main thread answered, so the measurement is live again.
+                if isApplicationVisible { isHeartbeatPaused = false }
                 if let snapshot {
                     mainSnapshotCaptureRequested = false
                     acceptMainSnapshot(snapshot, at: acknowledgedAt)
@@ -260,7 +290,7 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
     private func flush(at now: Double) {
         let flushStartedAt = clock.now()
         let heartbeatAge = heartbeat.ageMilliseconds(at: now)
-        let heartbeatWarning = heartbeatAge >= policy.heartbeatStallMs
+        let heartbeatWarning = heartbeatAge >= policy.heartbeatStallMs && !isHeartbeatPaused
         if heartbeatWarning && !lastMainHeartbeatWarning {
             recorder.append(RuntimeEvent(
                 monotonicTimeSeconds: now,
@@ -282,7 +312,8 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
         let mainThread = RuntimeMainThreadSnapshot(
             lastHeartbeatAt: heartbeat.lastAcknowledgedAt,
             heartbeatAgeMs: heartbeatAge,
-            pendingHeartbeat: heartbeat.pending
+            pendingHeartbeat: heartbeat.pending,
+            heartbeatPaused: isHeartbeatPaused
         )
         let verdicts = policy.evaluate(
             process: processSnapshot,

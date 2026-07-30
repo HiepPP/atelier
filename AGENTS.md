@@ -218,8 +218,9 @@ Stop normal interpretation when status is `degraded`. Report the degraded reason
 | `cpuPercent` | Compare several fresh snapshots and `ps`. Look for sustained values | Process-level load, never root cause alone |
 | `cpuTimeSeconds` | Confirm it keeps rising while CPU remains high | Real CPU consumption instead of one noisy percentage |
 | `physicalFootprintBytes` | Compare trend before and after the trigger | Memory pressure or retention suspicion |
-| `heartbeatAgeMs` | Compare with the 250-500 ms cadence | Main-thread responsiveness |
+| `heartbeatAgeMs` | Compare with the 500 ms ping cadence, and read `heartbeatPaused` first | Main-thread responsiveness |
 | `pendingHeartbeat` | Read with age, never alone | `true` is normal while one ping is in flight |
+| `heartbeatPaused` | Read before age. `true` means pings are suspended because the app is inactive or occluded, or the first ping after resume has not been answered | Whether the age measures health at all |
 | `lastHeartbeatAt` | Compare across fresh snapshots | Whether the main actor still acknowledges work |
 
 Use these combinations:
@@ -230,8 +231,9 @@ Use these combinations:
 | Healthy | Sustained high | Background CPU loop or main work between acknowledgements |
 | Stale above 1,000 ms | Sustained high | Main-thread CPU-bound suspected |
 | Stale above 1,000 ms | Low | Main-thread blocked or waiting suspected |
+| Paused | Any | No main-thread claim. Bring the window to the front and re-measure |
 
-Do not call low CPU healthy when the heartbeat is stale. Do not call high CPU a loop without a repeating sample stack.
+Do not call low CPU healthy when the heartbeat is stale. Do not call high CPU a loop without a repeating sample stack. Do not read a paused heartbeat as a stall: the app pauses pings while inactive or occluded, so measure main-thread health only with the window active and visible. `heartbeatPaused` and `heartbeatResumeRequested` events in the flight recorder mark each transition.
 
 ### Read Workspace Context Before Editor Metrics
 

@@ -179,6 +179,63 @@ struct RuntimeDiagnosticsTests {
         #expect(requestAfterAck)
     }
 
+    @Test("Heartbeat cadence halves idle pings and pauses when hidden")
+    func heartbeatCadence() {
+        let interval = RuntimeHeartbeatCadencePolicy.interval
+        #expect(interval == 0.5)
+        // Visible and past the interval: ping.
+        #expect(RuntimeHeartbeatCadencePolicy.shouldRequest(
+            isApplicationVisible: true,
+            needsSnapshotCapture: false,
+            sinceLastRequest: interval
+        ))
+        // Visible but inside the interval: skip, so a 250ms tick pings 2/s.
+        #expect(!RuntimeHeartbeatCadencePolicy.shouldRequest(
+            isApplicationVisible: true,
+            needsSnapshotCapture: false,
+            sinceLastRequest: 0.25
+        ))
+        // A pending snapshot capture still forces a ping so published state
+        // stays as fresh as the flush.
+        #expect(RuntimeHeartbeatCadencePolicy.shouldRequest(
+            isApplicationVisible: true,
+            needsSnapshotCapture: true,
+            sinceLastRequest: 0
+        ))
+        // Hidden: never ping, not even for a capture.
+        #expect(!RuntimeHeartbeatCadencePolicy.shouldRequest(
+            isApplicationVisible: false,
+            needsSnapshotCapture: true,
+            sinceLastRequest: 60
+        ))
+    }
+
+    @Test("A paused heartbeat raises no main-thread verdict")
+    func pausedHeartbeatSuppressesVerdicts() {
+        let policy = RuntimeVerdictPolicy.default
+        let stale = RuntimeMainThreadSnapshot(heartbeatAgeMs: 60_000, pendingHeartbeat: false)
+        var paused = stale
+        paused.heartbeatPaused = true
+
+        let liveVerdicts = policy.evaluate(
+            process: RuntimeProcessSnapshot(cpuPercent: 5),
+            mainThread: stale,
+            editor: RuntimeEditorSnapshot(),
+            controllerLeakAgeSeconds: nil,
+            writerError: nil
+        )
+        let pausedVerdicts = policy.evaluate(
+            process: RuntimeProcessSnapshot(cpuPercent: 5),
+            mainThread: paused,
+            editor: RuntimeEditorSnapshot(),
+            controllerLeakAgeSeconds: nil,
+            writerError: nil
+        )
+
+        #expect(liveVerdicts.contains { $0.code == "mainThreadBlockedSuspected" })
+        #expect(pausedVerdicts.isEmpty)
+    }
+
     @Test("CPU delta uses monotonic elapsed time")
     func cpuDeltaCalculation() {
         var delta = RuntimeCPUDelta()

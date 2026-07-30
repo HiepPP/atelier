@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var watchdog: ResourceWatchdog?
     private var terminationTask: Task<Void, Never>?
     private var hasPreparedForTermination = false
+    private var visibilityObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let diagnosticsEnabled = RuntimeDiagnosticsService.shouldRun()
@@ -41,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return await model.handleRuntimeProbe(request)
                 }
             )
+            observeApplicationVisibility()
         }
         guard watchdogEnabled else { return }
         DefaultWatchdogResponder.requestNotificationAuthorization()
@@ -59,6 +61,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         watchdog.start()
     }
 
+    /// Diagnostics run off the main thread and cannot read AppKit state, so the
+    /// delegate pushes window visibility changes into the service.
+    private func observeApplicationVisibility() {
+        let center = NotificationCenter.default
+        let applicationNames: [Notification.Name] = [
+            NSApplication.didHideNotification,
+            NSApplication.didUnhideNotification,
+            NSApplication.didChangeOcclusionStateNotification
+        ]
+        let windowNames: [Notification.Name] = [
+            NSWindow.didMiniaturizeNotification,
+            NSWindow.didDeminiaturizeNotification,
+            NSWindow.willCloseNotification,
+            NSWindow.didBecomeKeyNotification
+        ]
+        visibilityObservers =
+            applicationNames.map { name in
+                center.addObserver(forName: name, object: NSApp, queue: .main) { _ in
+                    MainActor.assumeIsolated { Self.publishApplicationVisibility() }
+                }
+            }
+            + windowNames.map { name in
+                center.addObserver(forName: name, object: nil, queue: .main) { _ in
+                    MainActor.assumeIsolated { Self.publishApplicationVisibility() }
+                }
+            }
+        // Never pause from a launch-time probe. SwiftUI creates the window after
+        // this callback, and a window that never becomes key would leave pings
+        // paused for the whole session. Publishing only a positive result keeps
+        // the safe default (pinging) until a real hide or minimize arrives.
+        Self.publishApplicationVisibility(publishesHiddenState: false)
+        DispatchQueue.main.async {
+            Self.publishApplicationVisibility(publishesHiddenState: false)
+        }
+    }
+
+    /// Pings pause only when no window is on screen: the app is hidden, or every
+    /// window is minimized or closed. A covered or inactive window still renders,
+    /// and the heartbeat is the primary freeze signal while an agent or the user
+    /// drives Atelier from a terminal, so pausing there would erase the evidence
+    /// exactly when it is needed.
+    private static func publishApplicationVisibility(publishesHiddenState: Bool = true) {
+        let isVisible = !NSApp.isHidden && NSApp.windows.contains { $0.isVisible }
+        guard isVisible || publishesHiddenState else { return }
+        RuntimeDiagnosticsService.shared.setApplicationVisible(isVisible)
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if hasPreparedForTermination { return .terminateNow }
         guard terminationTask == nil, let model else { return .terminateNow }
@@ -73,6 +122,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        for observer in visibilityObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        visibilityObservers.removeAll(keepingCapacity: false)
         RuntimeDiagnosticsService.shared.stop()
         watchdog?.stop()
         if terminationTask == nil, !hasPreparedForTermination {

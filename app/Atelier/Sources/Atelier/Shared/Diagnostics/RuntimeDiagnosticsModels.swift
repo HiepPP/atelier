@@ -116,6 +116,26 @@ nonisolated struct RuntimeMainThreadSnapshot: Codable, Sendable, Equatable {
     var lastHeartbeatAt = 0.0
     var heartbeatAgeMs = 0.0
     var pendingHeartbeat = false
+    /// True while pings are suspended because the application is inactive or
+    /// occluded, and until the main thread answers the first ping after resume.
+    /// A paused age measures the pause, not main-thread health.
+    var heartbeatPaused = false
+}
+
+/// Ping cadence for the main-thread heartbeat. Halving the old 250 ms tick
+/// cadence halves idle main-thread wakeups; a snapshot capture still forces a
+/// ping so published workspace and editor state stays as fresh as the flush.
+nonisolated enum RuntimeHeartbeatCadencePolicy {
+    static let interval = 0.5
+
+    static func shouldRequest(
+        isApplicationVisible: Bool,
+        needsSnapshotCapture: Bool,
+        sinceLastRequest: Double
+    ) -> Bool {
+        guard isApplicationVisible else { return false }
+        return needsSnapshotCapture || sinceLastRequest >= interval
+    }
 }
 
 nonisolated struct RuntimeFileTabMetric: Codable, Sendable, Equatable {
@@ -467,7 +487,8 @@ nonisolated struct RuntimeVerdictPolicy: Sendable {
         writerError: String?
     ) -> [RuntimeVerdict] {
         var verdicts: [RuntimeVerdict] = []
-        if mainThread.heartbeatAgeMs >= heartbeatStallMs {
+        // A paused heartbeat is expected staleness, not a stalled main thread.
+        if mainThread.heartbeatAgeMs >= heartbeatStallMs, !mainThread.heartbeatPaused {
             if process.cpuPercent >= cpuBoundPercent {
                 verdicts.append(RuntimeVerdict(
                     code: "mainThreadCpuBoundSuspected",
