@@ -1217,6 +1217,8 @@ Atelier exposes a terminal-first Runtime Probe for causal runtime evidence. Diag
 - Keep terminal controller metrics bounded. Report diagnostic ownership, active and attached state, process state, selected controller, and first-responder identity without terminal output.
 - A terminal may become first responder only when its tab is selected in the active workspace. Hidden workspaces must keep native terminals mounted but inactive and release terminal focus.
 - Allow one outstanding main-thread heartbeat. Never queue heartbeat work while an earlier ping remains pending.
+- Ping the main thread twice per second while the application is active and visible. Pause pings while it is inactive or fully occluded, and resume with an immediate ping.
+- Report whether heartbeats are paused. Never raise a main-thread verdict from a paused heartbeat, and never fake an acknowledgement to hide the pause. Keep reporting paused until the main thread answers again.
 - Reuse `ProcessMetrics` and the watchdog sample cadence. Never run two process samplers concurrently.
 - Keep the flight recorder at 512 events. Aggregate scroll counters into one-second windows instead of recording each frame.
 - Record only scalar metrics, diagnostic identifiers, and workspace-relative paths. Never record file content, selections, terminal output, prompts, responses, diffs, environment values, or credentials.
