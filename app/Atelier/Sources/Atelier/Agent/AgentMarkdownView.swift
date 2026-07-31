@@ -59,21 +59,6 @@ enum AgentMarkdownInlinePolicy {
     private static var cache: [CacheKey: AttributedString] = [:]
     private static var cacheOrder: [CacheKey] = []
 
-    /// Whole-cell / whole-span inline code only. Used to draw one continuous accent
-    /// chip so soft-wrapped paths do not zebra per line fragment.
-    static func pureCodeContent(_ markdown: String) -> String? {
-        let trimmed = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 2,
-              trimmed.first == "`",
-              trimmed.last == "`" else {
-            return nil
-        }
-        let inner = String(trimmed.dropFirst().dropLast())
-        // Reject multi-span or empty payloads; nested fences belong to block parsing.
-        guard !inner.isEmpty, !inner.contains("`") else { return nil }
-        return inner
-    }
-
     static func attributedString(
         _ content: String,
         showsColorSwatches: Bool = false,
@@ -156,10 +141,9 @@ enum AgentMarkdownInlinePolicy {
                 run.inlinePresentationIntent?.contains(.code) == true ? run.range : nil
             }
             for range in codeRanges {
-                attributed[range].foregroundColor = AtelierTheme.accent
-                // Short mixed-prose chips stay filled. Pure soft-wrapped code in tables
-                // uses `pureCodeContent` + a View-level chip so fills do not zebra.
-                attributed[range].backgroundColor = AtelierTheme.accent.opacity(0.12)
+                // Mono face only, matching the native builder. Any fill turns a
+                // code-heavy paragraph into a mosaic of blocks.
+                attributed[range].foregroundColor = Color.primary
             }
         case .plain:
             attributed = AttributedString(content)
@@ -750,12 +734,20 @@ struct ParsedMarkdownDocument: Equatable {
     }
 }
 
+/// One rendered heading and its vertical offset inside the transcript surface.
+/// The response panel maps a scroll position to a section title with these.
+nonisolated struct MarkdownTranscriptHeading: Equatable, Sendable {
+    let title: String
+    let y: CGFloat
+}
+
 struct AgentMarkdownView: View, Equatable {
     let source: String
     let bodyFontSize: CGFloat
     let presentation: AgentMarkdownPresentation
     let blocks: [AgentMarkdownBlock]?
     let inlineRuns: [AttributedString?]?
+    let onHeadingLayout: ([MarkdownTranscriptHeading]) -> Void
 
     /// Bumped when an async figure changes the rendered height, so SwiftUI
     /// measures the native surface again.
@@ -766,13 +758,15 @@ struct AgentMarkdownView: View, Equatable {
         bodyFontSize: CGFloat = AtelierTypography.body,
         presentation: AgentMarkdownPresentation = .transcript,
         blocks: [AgentMarkdownBlock]? = nil,
-        inlineRuns: [AttributedString?]? = nil
+        inlineRuns: [AttributedString?]? = nil,
+        onHeadingLayout: @escaping ([MarkdownTranscriptHeading]) -> Void = { _ in }
     ) {
         self.source = source
         self.bodyFontSize = bodyFontSize
         self.presentation = presentation
         self.blocks = blocks
         self.inlineRuns = inlineRuns
+        self.onHeadingLayout = onHeadingLayout
     }
 
     static func == (lhs: AgentMarkdownView, rhs: AgentMarkdownView) -> Bool {
@@ -804,7 +798,8 @@ struct AgentMarkdownView: View, Equatable {
             presentation: presentation,
             fontScale: fontScale,
             contentRevision: contentRevision,
-            onContentHeightChange: { contentRevision &+= 1 }
+            onContentHeightChange: { contentRevision &+= 1 },
+            onHeadingLayout: onHeadingLayout
         )
         .frame(maxWidth: proseMaxWidth, alignment: .leading)
     }
@@ -826,6 +821,7 @@ private struct MarkdownTranscriptTextView: NSViewRepresentable {
     /// Read only to re-run layout after an async figure changed the height.
     let contentRevision: Int
     let onContentHeightChange: () -> Void
+    let onHeadingLayout: ([MarkdownTranscriptHeading]) -> Void
 
     func makeCoordinator() -> MarkdownTranscriptCoordinator {
         MarkdownTranscriptCoordinator()
@@ -847,7 +843,8 @@ private struct MarkdownTranscriptTextView: NSViewRepresentable {
             displayScale: displayScale,
             usesDarkAppearance: colorScheme == .dark,
             openURL: openURL,
-            onContentHeightChange: onContentHeightChange
+            onContentHeightChange: onContentHeightChange,
+            onHeadingLayout: onHeadingLayout
         )
     }
 
@@ -900,6 +897,9 @@ final class MarkdownTranscriptCoordinator: NSObject, NSTextViewDelegate {
     private var renderedDarkAppearance: Bool?
     private var openURL: OpenURLAction?
     private var onContentHeightChange: () -> Void = {}
+    private var onHeadingLayout: ([MarkdownTranscriptHeading]) -> Void = { _ in }
+    private var headings: [MarkdownAttributedHeading] = []
+    private var reportedHeadings: [MarkdownTranscriptHeading] = []
     private var contentGeneration = 0
     private var measuredGeneration = -1
     private var measuredWidth: CGFloat = 0
@@ -968,10 +968,12 @@ final class MarkdownTranscriptCoordinator: NSObject, NSTextViewDelegate {
         displayScale: CGFloat,
         usesDarkAppearance: Bool,
         openURL: OpenURLAction?,
-        onContentHeightChange: @escaping () -> Void
+        onContentHeightChange: @escaping () -> Void,
+        onHeadingLayout: @escaping ([MarkdownTranscriptHeading]) -> Void
     ) {
         self.openURL = openURL
         self.onContentHeightChange = onContentHeightChange
+        self.onHeadingLayout = onHeadingLayout
         let needsRender = renderedSource != source
             || renderedPresentation != presentation
             || renderedScale != scale
@@ -1021,9 +1023,12 @@ final class MarkdownTranscriptCoordinator: NSObject, NSTextViewDelegate {
         imageFigures = []
         mermaidFigures = []
         mermaidExpansion.reset()
+        headings = []
+        reportedHeadings = []
         textView = nil
         openURL = nil
         onContentHeightChange = {}
+        onHeadingLayout = { _ in }
     }
 
     /// Content height for a proposed width, measured from the used rect.
@@ -1054,7 +1059,41 @@ final class MarkdownTranscriptCoordinator: NSObject, NSTextViewDelegate {
         // Overlay frames need finished layout, and this runs inside one. Place
         // them on the next runloop instead of during the measurement pass.
         scheduleOverlaySync()
+        publishHeadingLayout(layoutManager: layoutManager, textContainer: textContainer)
         return height
+    }
+
+    /// Heading offsets are only valid after layout, so they are read here and
+    /// published on the next runloop. Writing view state inside this measurement
+    /// pass would mutate during AppKit layout.
+    private func publishHeadingLayout(
+        layoutManager: NSLayoutManager,
+        textContainer: NSTextContainer
+    ) {
+        guard let textStorage = textView?.textStorage else { return }
+        let rows = headings.compactMap { heading -> MarkdownTranscriptHeading? in
+            guard NSMaxRange(heading.range) <= textStorage.length,
+                  heading.range.length > 0 else { return nil }
+            let title = textStorage.attributedSubstring(from: heading.range)
+                .string
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return nil }
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: heading.range,
+                actualCharacterRange: nil
+            )
+            let rect = layoutManager.boundingRect(
+                forGlyphRange: glyphRange,
+                in: textContainer
+            )
+            return MarkdownTranscriptHeading(title: title, y: rect.minY)
+        }
+        guard rows != reportedHeadings else { return }
+        reportedHeadings = rows
+        let publish = onHeadingLayout
+        Task { @MainActor in
+            publish(rows)
+        }
     }
 
     func textView(
@@ -1092,6 +1131,8 @@ final class MarkdownTranscriptCoordinator: NSObject, NSTextViewDelegate {
         codeBlocks = document.codeBlocks
         imageFigures = document.imageFigures
         mermaidFigures = document.mermaidFigures
+        headings = document.headings
+        reportedHeadings = []
         mermaidExpansion.reset()
         let validIDs = Set(codeBlocks.map(\.id)).union(mermaidFigures.map(\.id))
         for id in codeCopyControls.keys.filter({ !validIDs.contains($0) }) {

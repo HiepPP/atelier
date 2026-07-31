@@ -1405,6 +1405,416 @@ struct AgentResponsesTests {
         )
     }
 
+    @Test("The front matter key column is sized from the widest key it holds")
+    func frontMatterKeyColumnWidth() {
+        let measure = AtelierMetrics.documentMaxWidth
+        let padding = AtelierMetrics.spaceM + AtelierMetrics.spaceS
+
+        // A short-key document keeps the narrow column and does not waste measure.
+        #expect(
+            MarkdownFrontMatterLayout.keyColumnPercentage(
+                longestKeyWidth: 40,
+                horizontalPadding: padding,
+                measure: measure
+            ) == MarkdownFrontMatterLayout.minimumKeyPercentage
+        )
+
+        // A deep dotted path widens the column instead of wrapping mid-word.
+        let deepKeyWidth = ("colors.text.sidebar-primary-foreground" as NSString)
+            .size(withAttributes: [.font: AtelierTypography.codeFont(size: 11)])
+            .width
+        let widened = MarkdownFrontMatterLayout.keyColumnPercentage(
+            longestKeyWidth: deepKeyWidth,
+            horizontalPadding: padding,
+            measure: measure
+        )
+        #expect(widened > MarkdownFrontMatterLayout.minimumKeyPercentage)
+        #expect(widened * measure / 100 >= deepKeyWidth + padding)
+
+        // A pathological key cannot starve the value column.
+        #expect(
+            MarkdownFrontMatterLayout.keyColumnPercentage(
+                longestKeyWidth: measure * 4,
+                horizontalPadding: padding,
+                measure: measure
+            ) == MarkdownFrontMatterLayout.maximumKeyPercentage
+        )
+        #expect(
+            MarkdownFrontMatterLayout.keyColumnPercentage(
+                longestKeyWidth: 100,
+                horizontalPadding: padding,
+                measure: 0
+            ) == MarkdownFrontMatterLayout.minimumKeyPercentage
+        )
+    }
+
+    @Test("Long front matter with quoted keys parses as one metadata block")
+    func longFrontMatterWithQuotedKeys() {
+        // A real design-system catalog runs to 186 lines and uses quoted numeric
+        // keys. Both used to fail: the 64-line bound gave up, and `"2"` failed the
+        // key charset check. The document then fell back to block parsing, where
+        // `---` became a divider and every field joined into one run-on paragraph.
+        var lines = ["---", "name: \"Proto Cube\""]
+        for index in 0..<180 {
+            lines.append("token-\(index): \"value-\(index)\"")
+        }
+        lines.append("radius:")
+        lines.append("  \"2\": \"border-2\"")
+        lines.append("  \"4\": \"border-4\"")
+        lines.append("---")
+        lines.append("")
+        lines.append("# Title")
+
+        let parsed = MarkdownFrontMatterPolicy.parse(lines)
+        #expect(parsed != nil)
+        // 1 name + 180 tokens + 2 quoted keys. `radius:` itself has no value.
+        #expect(parsed?.entries.count == 183)
+        #expect(parsed?.endIndex == lines.count - 2)
+        #expect(parsed?.entries.first?.key == "name")
+        #expect(parsed?.entries.contains { $0.key == "radius.2" } == true)
+        #expect(parsed?.entries.contains { $0.value == "border-4" } == true)
+
+        // The document must build as a front-matter card, never as a divider
+        // followed by one giant paragraph.
+        let blocks = AgentMarkdownBlock.parse(lines.joined(separator: "\n"))
+        guard case .frontMatter(let entries)? = blocks.first else {
+            Issue.record("Expected the first block to be front matter")
+            return
+        }
+        #expect(entries.count == 183)
+        #expect(!blocks.contains { $0 == .divider })
+    }
+
+    @Test("A stray divider still ends front matter scanning")
+    func strayDividerIsNotFrontMatter() {
+        // No closing marker anywhere, so this stays a divider plus normal blocks.
+        let lines = ["---", "Just prose, not a field.", "", "# Title"]
+        #expect(MarkdownFrontMatterPolicy.parse(lines) == nil)
+    }
+
+    @Test("The transcript outline rail follows panel width and swaps with the bar")
+    func transcriptOutlineVisibility() {
+        let wide = AtelierMetrics.transcriptMaxWidth
+            + AtelierMetrics.markdownOutlineWidth
+            + AtelierMetrics.space2XL * 2
+        #expect(
+            AgentResponseSectionBarPolicy.showsOutline(
+                headingCount: 3,
+                containerWidth: wide
+            )
+        )
+        #expect(
+            !AgentResponseSectionBarPolicy.showsOutline(
+                headingCount: 3,
+                containerWidth: wide - 1
+            )
+        )
+        // One heading never earns the rail, however wide the panel is.
+        #expect(
+            !AgentResponseSectionBarPolicy.showsOutline(
+                headingCount: 1,
+                containerWidth: wide * 2
+            )
+        )
+
+        // The bar and the rail are never both visible: the bar covers exactly the
+        // widths the rail cannot.
+        for width in [CGFloat(0), 400, wide - 1, wide, wide * 2] {
+            let rail = AgentResponseSectionBarPolicy.showsOutline(
+                headingCount: 3,
+                containerWidth: width
+            )
+            let bar = AgentResponseSectionBarPolicy.showsBar(headingCount: 3) && !rail
+            #expect(!(rail && bar))
+        }
+    }
+
+    @Test("The transcript outline row tracks the same heading as the section bar")
+    func transcriptOutlineSelection() {
+        let headings = [
+            MarkdownTranscriptHeading(title: "First", y: 0),
+            MarkdownTranscriptHeading(title: "Second", y: 400)
+        ]
+        #expect(
+            AgentResponseSectionBarPolicy.activeIndex(
+                headings: headings,
+                answerTop: 200
+            ) == 0
+        )
+        #expect(
+            AgentResponseSectionBarPolicy.activeIndex(
+                headings: headings,
+                answerTop: -400
+            ) == 1
+        )
+        // The index and the title must never disagree; they share one rule.
+        for top in [CGFloat(200), -100, -400, -900] {
+            let index = AgentResponseSectionBarPolicy.activeIndex(
+                headings: headings,
+                answerTop: top
+            )
+            let title = AgentResponseSectionBarPolicy.activeTitle(
+                headings: headings,
+                answerTop: top
+            )
+            #expect(index.map { headings[$0].title } == title)
+        }
+    }
+
+    @Test("The transcript section bar mounts at two headings and tracks scroll")
+    func transcriptSectionBarVisibility() {
+        let one = [MarkdownTranscriptHeading(title: "Only", y: 0)]
+        let two = [
+            MarkdownTranscriptHeading(title: "First", y: 0),
+            MarkdownTranscriptHeading(title: "Second", y: 400)
+        ]
+        #expect(!AgentResponseSectionBarPolicy.showsBar(headingCount: one.count))
+        #expect(AgentResponseSectionBarPolicy.showsBar(headingCount: two.count))
+
+        // One heading never mounts the bar, however far the reader scrolls.
+        #expect(
+            AgentResponseSectionBarPolicy.activeTitle(
+                headings: one,
+                answerTop: -500
+            ) == nil
+        )
+
+        // Unscrolled: the answer sits below the lead, so the first heading holds.
+        #expect(
+            AgentResponseSectionBarPolicy.activeTitle(
+                headings: two,
+                answerTop: 200
+            ) == "First"
+        )
+        // Scrolled past the first heading but not the second.
+        #expect(
+            AgentResponseSectionBarPolicy.activeTitle(
+                headings: two,
+                answerTop: -100
+            ) == "First"
+        )
+        // Scrolled past the second heading.
+        #expect(
+            AgentResponseSectionBarPolicy.activeTitle(
+                headings: two,
+                answerTop: -400
+            ) == "Second"
+        )
+    }
+
+    @Test("The response question outranks the answer body at every text scale")
+    func agentResponseQuestionScale() {
+        // Both the question and the answer scale by the same `atelierZoomScale`
+        // factor, so the base sizes decide the ratio at every text scale.
+        #expect(AtelierTypography.headline > AtelierTypography.body)
+        for scale in [
+            AgentResponseTextSizePolicy.minimumScale,
+            AgentResponseTextSizePolicy.defaultScale,
+            AgentResponseTextSizePolicy.maximumScale
+        ] {
+            #expect(
+                AtelierTypography.headline * scale > AtelierTypography.body * scale
+            )
+        }
+    }
+
+    @Test("Native Markdown renders inline code with no fill and no reservation")
+    func markdownInlineCodeHasNoFill() {
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(
+                source: "Call `render()` now.\n\n- Bullet\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n"
+            ),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false,
+            presentation: .transcript
+        )
+        let text = rendered.attributedString
+        let full = NSRange(location: 0, length: text.length)
+        let codeRange = (text.string as NSString).range(of: "render()")
+        #expect(codeRange.location != NSNotFound)
+
+        let attributes = text.attributes(at: codeRange.location, effectiveRange: nil)
+        #expect(attributes[.foregroundColor] as? NSColor == AppKitThemeAdapter.foreground)
+        #expect(attributes[.backgroundColor] == nil)
+        #expect(
+            (attributes[.font] as? NSFont)?
+                .fontDescriptor
+                .symbolicTraits
+                .contains(.monoSpace) == true
+        )
+
+        // The run carries no kern, so a following full stop sits tight against it.
+        let lastIndex = NSMaxRange(codeRange) - 1
+        #expect(text.attribute(.kern, at: lastIndex, effectiveRange: nil) == nil)
+        if codeRange.location > 0 {
+            #expect(
+                text.attribute(
+                    .kern,
+                    at: codeRange.location - 1,
+                    effectiveRange: nil
+                ) == nil
+            )
+        }
+
+        // No block background in the whole document may be the accent wash.
+        var blockFills: [NSColor] = []
+        text.enumerateAttribute(.paragraphStyle, in: full) { value, _, _ in
+            guard let style = value as? NSParagraphStyle else { return }
+            blockFills.append(contentsOf: style.textBlocks.compactMap(\.backgroundColor))
+        }
+        #expect(!blockFills.isEmpty)
+        for fill in blockFills {
+            #expect(
+                fill.usingColorSpace(.deviceRGB)
+                    != AppKitThemeAdapter.accent
+                        .withAlphaComponent(0.10)
+                        .usingColorSpace(.deviceRGB)
+            )
+        }
+    }
+
+    @Test("Native Markdown sorts blocks into three weight tiers")
+    func markdownBlockSpacingTiers() {
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(
+                source: "Lead paragraph.\n\n> Pulled quote.\n\nTail paragraph.\n\n---\n"
+            ),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false,
+            presentation: .document
+        )
+        let text = rendered.attributedString
+        var before: [CGFloat] = []
+        text.enumerateAttribute(
+            .paragraphStyle,
+            in: NSRange(location: 0, length: text.length)
+        ) { value, _, _ in
+            guard let style = value as? NSParagraphStyle else { return }
+            if before.last != style.paragraphSpacingBefore {
+                before.append(style.paragraphSpacingBefore)
+            }
+        }
+        let unit = MarkdownRhythm(
+            bodyFont: NSFont.systemFont(
+                ofSize: AtelierFontScaling.snapped(
+                    AtelierTypography.editorSize,
+                    displayScale: 2
+                )
+            ),
+            displayScale: 2
+        ).unit
+
+        // Lead paragraph opens the document at zero, then quote, tail, divider.
+        #expect(before.count == 4)
+        #expect(before.first == 0)
+        #expect(abs(before[1] - unit * 1.25) < 0.01)
+        #expect(abs(before[2] - unit * 0.5) < 0.01)
+        #expect(abs(before[3] - unit * 1.75) < 0.01)
+    }
+
+    @Test("Native Markdown heading hierarchy keeps its shape at every text size")
+    func markdownHeadingScale() {
+        func fonts(scale: CGFloat) -> [NSFont] {
+            let rendered = MarkdownAttributedDocumentBuilder.build(
+                document: ParsedMarkdownDocument(
+                    source: "# One\n\n## Two\n\n### Three\n\n#### Four\n\n##### Five\n\nBody."
+                ),
+                scale: scale,
+                displayScale: 2,
+                usesDarkAppearance: false,
+                presentation: .document
+            )
+            var collected: [NSFont] = []
+            rendered.attributedString.enumerateAttribute(
+                .font,
+                in: NSRange(location: 0, length: rendered.attributedString.length)
+            ) { value, _, _ in
+                if let font = value as? NSFont, collected.last?.pointSize != font.pointSize {
+                    collected.append(font)
+                }
+            }
+            return collected
+        }
+
+        // The body paragraph is the last distinct size in the document.
+        func ratios(scale: CGFloat) -> [CGFloat] {
+            let collected = fonts(scale: scale)
+            guard let body = collected.last, body.pointSize > 0 else { return [] }
+            return collected.map { $0.pointSize / body.pointSize }
+        }
+
+        let small = ratios(scale: 0.8)
+        let large = ratios(scale: 1.6)
+        #expect(small.count == large.count)
+        #expect(small.count >= 5)
+        for (a, b) in zip(small, large) {
+            #expect(abs(a - b) < 0.001)
+        }
+        // H1 stays 1.85 times body in document mode, with no clamp raising it.
+        #expect(abs((small.first ?? 0) - 1.85) < 0.001)
+
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: "#### Four\n\nBody."),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false,
+            presentation: .document
+        )
+        let headingAttributes = rendered.attributedString.attributes(
+            at: 0,
+            effectiveRange: nil
+        )
+        #expect(
+            headingAttributes[.foregroundColor] as? NSColor
+                == AppKitThemeAdapter.foreground
+        )
+        #expect(
+            (headingAttributes[.font] as? NSFont)?
+                .fontDescriptor
+                .symbolicTraits
+                .contains(.bold) == true
+        )
+    }
+
+    @Test("Native Markdown holds one prose line-height ratio across the scale range")
+    func markdownTypeScaleRatio() {
+        // (lineHeight + lineSpacing) / pointSize must stay at the prose ratio at
+        // every text scale. An absolute lineSpacing drifts instead.
+        func proseRatio(
+            scale: CGFloat,
+            presentation: AgentMarkdownPresentation
+        ) -> CGFloat {
+            let rendered = MarkdownAttributedDocumentBuilder.build(
+                document: ParsedMarkdownDocument(source: "Body paragraph text."),
+                scale: scale,
+                displayScale: 2,
+                usesDarkAppearance: false,
+                presentation: presentation
+            )
+            let attributes = rendered.attributedString.attributes(
+                at: 0,
+                effectiveRange: nil
+            )
+            guard let font = attributes[.font] as? NSFont,
+                  let style = attributes[.paragraphStyle] as? NSParagraphStyle else {
+                return 0
+            }
+            let lineHeight = MarkdownTypeScale.lineHeight(of: font)
+            return (lineHeight + style.lineSpacing) / font.pointSize
+        }
+
+        let samples: [CGFloat] = [
+            proseRatio(scale: 0.8, presentation: .transcript),
+            proseRatio(scale: 1.3, presentation: .transcript),
+            proseRatio(scale: 2.0, presentation: .document)
+        ]
+        for ratio in samples {
+            #expect(abs(ratio - MarkdownTypeScale.prose) < 0.05)
+        }
+    }
+
     @Test("Native Markdown draws an H1 accent lead plus hairline across the measure")
     func nativeMarkdownHeadingRule() {
         let rendered = MarkdownAttributedDocumentBuilder.build(
@@ -2000,7 +2410,7 @@ struct AgentResponsesTests {
         #expect(coloredRangeCount > 1)
     }
 
-    @Test("Markdown inline code receives accent block styling")
+    @Test("Markdown inline code carries ink but no background")
     func inlineCodeStyling() {
         let attributed = AgentMarkdownInlinePolicy.attributedString("Run `claim()` now")
         let codeRun = attributed.runs.first { run in
@@ -2008,227 +2418,7 @@ struct AgentResponsesTests {
         }
 
         #expect(codeRun?.foregroundColor != nil)
-        #expect(codeRun?.backgroundColor != nil)
-    }
-
-    @Test("Native Markdown inline code draws one fill with outside margin")
-    func nativeMarkdownInlineCodePadding() {
-        let rendered = MarkdownAttributedDocumentBuilder.build(
-            document: ParsedMarkdownDocument(
-                source: "A`dpq`B"
-            ),
-            scale: 1,
-            displayScale: 2,
-            usesDarkAppearance: false
-        )
-        let renderedText = rendered.attributedString.string as NSString
-        let codeRange = renderedText.range(of: "dpq")
-        #expect(codeRange.location != NSNotFound)
-        guard codeRange.location != NSNotFound else { return }
-
-        #expect(rendered.attributedString.string == "AdpqB\n")
-        #expect(
-            rendered.attributedString.attribute(
-                .backgroundColor,
-                at: codeRange.location,
-                effectiveRange: nil
-            ) == nil
-        )
-        #expect(
-            rendered.attributedString.attribute(
-                .atelierInlineCode,
-                at: codeRange.location,
-                effectiveRange: nil
-            ) != nil
-        )
-
-        let mutable = NSMutableAttributedString(
-            attributedString: rendered.attributedString
-        )
-        mutable.addAttribute(
-            .atelierInlineCode,
-            value: NSColor(
-                srgbRed: 1,
-                green: 0,
-                blue: 0,
-                alpha: 1
-            ),
-            range: codeRange
-        )
-        mutable.addAttribute(
-            .foregroundColor,
-            value: NSColor.black,
-            range: codeRange
-        )
-        mutable.addAttribute(
-            .foregroundColor,
-            value: NSColor.blue,
-            range: NSRange(location: 0, length: 1)
-        )
-        mutable.addAttribute(
-            .foregroundColor,
-            value: NSColor.blue,
-            range: NSRange(location: NSMaxRange(codeRange), length: 1)
-        )
-        let storage = NSTextStorage(attributedString: mutable)
-        let layoutManager = MarkdownPreviewLayoutManager(
-            metrics: MarkdownPreviewDecorationMetrics(
-                inlineCodePadding: NSSize(width: 8, height: 4),
-                inlineCodeHorizontalReservation: 12,
-                headingRuleThickness: 1.5,
-                headingRulePrimaryLead: 32,
-                headingRuleSecondaryLead: 16,
-                hairline: 0.5,
-                quoteGlyphFontSize: 38,
-                quoteGlyphAlpha: 0.18,
-                codeLineNumberGap: 8
-            )
-        )
-        storage.addLayoutManager(layoutManager)
-        let textContainer = NSTextContainer(
-            containerSize: NSSize(width: 160, height: 60)
-        )
-        textContainer.lineFragmentPadding = 0
-        layoutManager.addTextContainer(textContainer)
-        layoutManager.ensureLayout(for: textContainer)
-
-        let codeGlyphRange = layoutManager.glyphRange(
-            forCharacterRange: codeRange,
-            actualCharacterRange: nil
-        )
-        let fullGlyphRange = layoutManager.glyphRange(for: textContainer)
-        let codeLayoutBounds = layoutManager.boundingRect(
-            forGlyphRange: codeGlyphRange,
-            in: textContainer
-        )
-        #expect(
-            (storage.attribute(.kern, at: 0, effectiveRange: nil) as? NSNumber)?
-                .doubleValue == 12
-        )
-        #expect(
-            (
-                storage.attribute(
-                    .kern,
-                    at: NSMaxRange(codeRange) - 1,
-                    effectiveRange: nil
-                ) as? NSNumber
-            )?.doubleValue == 12
-        )
-
-        guard let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: 200,
-            pixelsHigh: 100,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ), let graphics = NSGraphicsContext(bitmapImageRep: bitmap) else {
-            Issue.record("Expected a bitmap context for inline-code rendering")
-            return
-        }
-        let drawOrigin = NSPoint(x: 24, y: 24)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = graphics
-        NSColor.clear.setFill()
-        NSRect(x: 0, y: 0, width: 200, height: 100).fill()
-        // TextKit lays out in a flipped space like NSTextView. Flip the CTM and
-        // hand TextKit a context that reports `flipped`, so glyphs and
-        // decorations land in the same vertical space as the app.
-        graphics.cgContext.translateBy(x: 0, y: 100)
-        graphics.cgContext.scaleBy(x: 1, y: -1)
-        let flippedContext = NSGraphicsContext(
-            cgContext: graphics.cgContext,
-            flipped: true
-        )
-        NSGraphicsContext.current = flippedContext
-        layoutManager.drawBackground(
-            forGlyphRange: fullGlyphRange,
-            at: drawOrigin
-        )
-        layoutManager.drawGlyphs(
-            forGlyphRange: fullGlyphRange,
-            at: drawOrigin
-        )
-        flippedContext.flushGraphics()
-        NSGraphicsContext.restoreGraphicsState()
-
-        var redBounds = NSRect.null
-        var codeInk = NSRect.null
-        for y in 0..<bitmap.pixelsHigh {
-            for x in 0..<bitmap.pixelsWide {
-                guard let color = bitmap.colorAt(x: x, y: y)?
-                    .usingColorSpace(.sRGB) else {
-                    continue
-                }
-                if color.redComponent > 0.8,
-                   color.greenComponent < 0.2,
-                   color.blueComponent < 0.2,
-                   color.alphaComponent > 0.8 {
-                    redBounds = redBounds.union(
-                        NSRect(x: x, y: y, width: 1, height: 1)
-                    )
-                } else if color.redComponent < 0.25,
-                          color.greenComponent < 0.25,
-                          color.blueComponent < 0.25,
-                          color.alphaComponent > 0.8 {
-                    codeInk = codeInk.union(
-                        NSRect(x: x, y: y, width: 1, height: 1)
-                    )
-                }
-            }
-        }
-        guard !redBounds.isNull, !codeInk.isNull else {
-            Issue.record("Expected a rendered inline-code background and ink")
-            return
-        }
-        var leftTextMaxX: CGFloat?
-        var rightTextMinX: CGFloat?
-        for y in 0..<bitmap.pixelsHigh {
-            for x in 0..<bitmap.pixelsWide {
-                guard let color = bitmap.colorAt(x: x, y: y)?
-                    .usingColorSpace(.sRGB) else {
-                    continue
-                }
-                if color.blueComponent > 0.7,
-                   color.redComponent < 0.3,
-                   color.greenComponent < 0.5,
-                   color.alphaComponent > 0.5 {
-                    let pixelX = CGFloat(x)
-                    if pixelX < redBounds.minX {
-                        leftTextMaxX = max(leftTextMaxX ?? pixelX, pixelX)
-                    } else if pixelX > redBounds.maxX {
-                        rightTextMinX = min(rightTextMinX ?? pixelX, pixelX)
-                    }
-                }
-            }
-        }
-        // Inner padding must read as equal on both sides regardless of how the
-        // code font reports the last glyph's kerned advance.
-        let leftPad = codeInk.minX - redBounds.minX
-        let rightPad = redBounds.maxX - codeInk.maxX
-        #expect(abs(leftPad - rightPad) <= 2)
-        #expect(leftPad >= 4)
-        #expect(rightPad >= 4)
-        // Vertical padding must read the same above and below the text. The line
-        // fragment carries the paragraph's lineSpacing below the glyphs, so a
-        // fragment-derived fill would sit high with a fat bottom gap.
-        let topPad = codeInk.minY - redBounds.minY
-        let bottomPad = redBounds.maxY - codeInk.maxY
-        #expect(topPad >= 3)
-        #expect(bottomPad >= 3)
-        // Slack differs only by the font box: ascender sits above cap height.
-        #expect(abs(topPad - bottomPad) <= 3)
-        #expect(redBounds.height < codeLayoutBounds.height + 2 * 4)
-        #expect(leftTextMaxX != nil)
-        #expect(rightTextMinX != nil)
-        if let leftTextMaxX, let rightTextMinX {
-            #expect(redBounds.minX - leftTextMaxX >= 3)
-            #expect(rightTextMinX - redBounds.maxX >= 3)
-        }
+        #expect(codeRun?.backgroundColor == nil)
     }
 
     @Test("Markdown file previews decorate CSS hex colors with matching swatches")
@@ -2293,19 +2483,6 @@ struct AgentResponsesTests {
         #expect(abs(resolved.greenComponent - (227.0 / 255.0)) < 0.001)
         #expect(abs(resolved.blueComponent - (221.0 / 255.0)) < 0.001)
         #expect(abs(resolved.alphaComponent - 1.0) < 0.001)
-    }
-
-    @Test("Pure inline code cells extract continuous chip content")
-    func pureInlineCodeContent() {
-        #expect(
-            AgentMarkdownInlinePolicy.pureCodeContent(
-                "`.claude/skills/gitnexus/gitnexus-exploring/SKILL.md`"
-            ) == ".claude/skills/gitnexus/gitnexus-exploring/SKILL.md"
-        )
-        #expect(AgentMarkdownInlinePolicy.pureCodeContent("plain path") == nil)
-        #expect(AgentMarkdownInlinePolicy.pureCodeContent("see `mixed` text") == nil)
-        #expect(AgentMarkdownInlinePolicy.pureCodeContent("``") == nil)
-        #expect(AgentMarkdownInlinePolicy.pureCodeContent("`a` and `b`") == nil)
     }
 
     @Test("Markdown GitHub callouts parse and build as native cards")
@@ -3569,7 +3746,8 @@ struct AgentResponsesTests {
                 displayScale: 2,
                 usesDarkAppearance: false,
                 openURL: nil,
-                onContentHeightChange: {}
+                onContentHeightChange: {},
+                onHeadingLayout: { _ in }
             )
             return coordinator.height(forWidth: width)
         }

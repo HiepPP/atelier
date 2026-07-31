@@ -396,8 +396,9 @@ enum MarkdownStickySectionPolicy {
 }
 
 /// Passive chrome: mirrors the values the native surface already reports, so it
-/// never parses, measures, or animates during document scroll.
-private struct MarkdownStickySectionBar: View {
+/// never parses, measures, or animates during document scroll. Shared by file
+/// Preview and the agent response panel; there is only one definition.
+struct MarkdownStickySectionBar: View {
     let title: String
     let readingProgress: CGFloat
 
@@ -448,7 +449,9 @@ enum MarkdownFileDocumentPolicy {
     }
 }
 
-private struct MarkdownDocumentOutline: View {
+/// Shared by Markdown file Preview and the agent response panel; there is one
+/// definition for the whole application.
+struct MarkdownDocumentOutline: View {
     let entries: [MarkdownOutlineEntry]
     let selectedID: String?
     let readingProgress: CGFloat
