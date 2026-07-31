@@ -122,7 +122,6 @@ Rules:
 | `projectMenuWidth` | 420 | Principal project menu command-center width |
 | `transcriptMaxWidth` | 680 | Agent Markdown prose measure |
 | `documentMaxWidth` | 720 | Markdown file-preview prose measure |
-| `documentBleedMaxWidth` | 1180 | Markdown file-preview wide-block measure |
 | `markdownOutlineWidth` | 200 | Trailing "On This Page" outline rail |
 
 ## Color Tokens
@@ -887,19 +886,8 @@ Persistence boundaries:
 - Transcript mode renders body text at `body` size and keeps prose on the `transcriptMaxWidth`
   measure. It skips the three document-only treatments and keeps every other block treatment.
 - Render Markdown file-preview body text at `editorSize` so Source and Preview share the same
-  base text size. Render H1/H2 with the editorial serif face.
-- Give document mode two measures. Center a text container up to `documentBleedMaxWidth`, then hold
-  prose on the narrower `documentMaxWidth` by insetting it inside that container. A reading measure
-  and a data measure are not the same thing: prose past about 90 characters per line costs the
-  reader the return sweep, while a wide table or a code line gains nothing from being wrapped.
-- Card blocks bleed to the full container: tables, fenced code cards, front-matter cards, callouts,
-  and the footnotes section. They already draw as a bounded surface, so a wider one reads as a wider
-  card rather than as looser prose. Everything else holds the prose measure, including image and
-  Mermaid figures: an oversized figure reads worse, not better.
-- Resolve the prose inset during document build from the container measure, and rebuild the document
-  when that measure changes bucket. Quantize the bucket so a live resize cannot rebuild per frame.
-- Transcript mode keeps one measure. An agent answer is prose-first, so it holds
-  `transcriptMaxWidth` for every block.
+  base text size. Center a `documentMaxWidth` text container and render H1/H2 with the editorial
+  serif face.
 - Size every heading as a pure ratio of body size. Use no minimum clamp: a floor changes the
   hierarchy's shape when the reader resizes text or zooms. Document ratios are H1 `1.85`, H2 `1.45`,
   H3 `1.18`, H4 `1.00`, H5 and H6 `0.92`. Transcript ratios are H1 `1.45`, H2 `1.28`, H3 `1.12`,
@@ -927,9 +915,9 @@ Persistence boundaries:
 - Size the front-matter key column from the widest key the document actually holds, resolved during
   document build. A fixed share fits the median key and wraps a deep dotted path such as
   `colors.text.sidebar-primary-foreground` mid-word. Bound the share at both ends so a short-key
-  document does not waste the measure and a pathological key cannot starve the value column. The surface
-  reports its real container width to the builder, so the share is computed against the width the
-  table actually resolves against.
+  document does not waste the measure and a pathological key cannot starve the value column. The
+  table resolves percentages against the real text container, which is narrower than the nominal
+  measure when the window cannot grant it, so reserve headroom for that gap.
 - When front matter is followed by H1, render H1 first. Then show up to three short, scalar,
   non-title values in source order as one accent micro masthead row with hairline gaps. Keep the
   first paragraph as the lede and place remaining metadata in the existing quiet card below it.
@@ -954,8 +942,7 @@ Persistence boundaries:
   continuation), and merge consecutive quote lines into one pull-quote. A blank line, heading, table,
   fence, divider, or new list item ends the continuation. A wrapped bullet must never render as a
   bullet plus a detached paragraph.
-- Keep Markdown scroll hot paths cheap: cache the attributed document until source, scale, measure
-  bucket, or
+- Keep Markdown scroll hot paths cheap: cache the attributed document until source, scale, or
   appearance changes; map headings to TextKit character ranges; update outline selection only when
   the active section ID changes; and never animate the outline rail during passive document scroll.
 - Outline jumps use source line locations or native TextKit character ranges. They must not rebuild
