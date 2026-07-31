@@ -2170,7 +2170,8 @@ enum MarkdownAttributedDocumentBuilder {
                 output.removeAttribute(.backgroundColor, range: range)
                 output.addAttributes([
                     .font: AtelierTypography.codeFont(
-                        size: font.pointSize * MarkdownInlineCodePolicy.fontScale
+                        size: font.pointSize * MarkdownInlineCodePolicy.fontScale,
+                        ligatures: false
                     ),
                     .foregroundColor: AppKitThemeAdapter.foreground
                 ], range: range)

@@ -235,7 +235,11 @@ Type rules:
 - Use serif only for editorial headers and empty-state titles.
 - Use monospaced text for paths, code, shortcuts, counts, and technical metadata.
 - Use JetBrains Mono Regular (400) for code. Fall back to the system monospaced font.
-- Keep contextual code ligatures enabled in the editor and terminal.
+- Keep contextual code ligatures enabled in the editor, the terminal, and fenced code cards. Turn
+  them off for an inline code run inside prose. A ligature helps when a reader scans a block of code
+  and knows the face. Inside a sentence it changes what the quoted source says: `<!--` draws as a
+  left arrow and `-->` as a right arrow, so an HTML comment quoted in a line of prose no longer reads
+  as the characters the author wrote.
 - Use semibold for hierarchy. Avoid broad use of bold text.
 - Snap scaled sizes to device pixels to keep text crisp.
 

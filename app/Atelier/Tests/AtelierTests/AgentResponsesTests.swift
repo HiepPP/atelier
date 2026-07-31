@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import Foundation
 import SwiftUI
 import Testing
@@ -1403,6 +1404,79 @@ struct AgentResponsesTests {
                 "many small words stay word wrapped in the column"
             )
         )
+    }
+
+    @Test("Inline code drops contextual ligatures, fenced code keeps them")
+    func inlineCodeDropsLigatures() {
+        // `<!--` draws as a left arrow under JetBrains Mono contextual alternates.
+        // That is right in a block of code and wrong inside a sentence.
+        // NSFont equality ignores feature settings, so compare the drawn glyphs.
+        func glyphs(_ font: NSFont, _ text: String) -> [CGGlyph] {
+            let line = CTLineCreateWithAttributedString(
+                NSAttributedString(string: text, attributes: [.font: font])
+            )
+            var collected: [CGGlyph] = []
+            for run in (CTLineGetGlyphRuns(line) as? [CTRun] ?? []) {
+                let count = CTRunGetGlyphCount(run)
+                var buffer = [CGGlyph](repeating: 0, count: count)
+                CTRunGetGlyphs(run, CFRangeMake(0, count), &buffer)
+                collected += buffer
+            }
+            return collected
+        }
+
+        let sample = "<!-- -->"
+        let withLigatures = AtelierTypography.codeFont(size: 13)
+        let withoutLigatures = AtelierTypography.codeFont(size: 13, ligatures: false)
+        #expect(glyphs(withLigatures, sample) != glyphs(withoutLigatures, sample))
+        #expect(withLigatures.pointSize == withoutLigatures.pointSize)
+        #expect(withLigatures.familyName == withoutLigatures.familyName)
+        // Same advance width, so turning them off cannot reflow a code card.
+        #expect(
+            abs(
+                NSAttributedString(string: sample, attributes: [.font: withLigatures])
+                    .size().width
+                    - NSAttributedString(string: sample, attributes: [.font: withoutLigatures])
+                        .size().width
+            ) < 0.01
+        )
+
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(
+                source: "Write `<!-- @dsCard -->` first.\n\n```html\n<!-- @dsCard -->\n```\n"
+            ),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false,
+            presentation: .transcript
+        )
+        let text = rendered.attributedString
+        let inlineRange = (text.string as NSString).range(of: "<!-- @dsCard -->")
+        #expect(inlineRange.location != NSNotFound)
+        let inlineFont = text.attribute(
+            .font,
+            at: inlineRange.location,
+            effectiveRange: nil
+        ) as? NSFont
+        #expect(inlineFont != nil)
+        if let inlineFont {
+            #expect(glyphs(inlineFont, sample) == glyphs(withoutLigatures, sample))
+        }
+
+        // The fenced card keeps its ligatures.
+        let fencedRange = (text.string as NSString).range(
+            of: "<!-- @dsCard -->",
+            options: .backwards
+        )
+        #expect(fencedRange.location != inlineRange.location)
+        let fencedFont = text.attribute(
+            .font,
+            at: fencedRange.location,
+            effectiveRange: nil
+        ) as? NSFont
+        if let fencedFont {
+            #expect(glyphs(fencedFont, sample) == glyphs(withLigatures, sample))
+        }
     }
 
     @Test("The front matter key column is sized from the widest key it holds")
