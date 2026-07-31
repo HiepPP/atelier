@@ -60,6 +60,10 @@ struct MarkdownAttributedDocument {
 }
 
 extension NSAttributedString.Key {
+    /// Marks a block that fills the whole container instead of the prose measure.
+    nonisolated static let atelierBleedBlock = NSAttributedString.Key(
+        "app.atelier.markdown.bleed-block"
+    )
     nonisolated static let atelierBlockquoteBar = NSAttributedString.Key(
         "app.atelier.markdown.blockquote-bar"
     )
@@ -476,9 +480,18 @@ final class MarkdownPreviewLayoutManager: NSLayoutManager {
                 maxY = max(maxY, lineRect.maxY)
             }
             guard maxY > minY else { return }
+            let quoteStyle = textStorage.attribute(
+                .paragraphStyle,
+                at: range.location,
+                effectiveRange: nil
+            ) as? NSParagraphStyle
+            let quoteInset = max(
+                0,
+                (quoteStyle?.headIndent ?? 0) - MarkdownQuoteLayout.indent
+            )
             color.setFill()
             NSRect(
-                x: origin.x + MarkdownQuoteLayout.leadingInset,
+                x: origin.x + quoteInset + MarkdownQuoteLayout.leadingInset,
                 y: minY + origin.y,
                 width: MarkdownQuoteLayout.barWidth,
                 height: maxY - minY
@@ -490,7 +503,7 @@ final class MarkdownPreviewLayoutManager: NSLayoutManager {
             }
             var glyph = self.quoteGlyph
             var position = CGPoint(
-                x: origin.x + MarkdownQuoteLayout.leadingInset
+                x: origin.x + quoteInset + MarkdownQuoteLayout.leadingInset
                     + MarkdownQuoteLayout.barWidth
                     + 4,
                 y: minY + origin.y + self.metrics.quoteGlyphFontSize * 0.78
@@ -581,23 +594,34 @@ final class MarkdownPreviewLayoutManager: NSLayoutManager {
             measureWidth = textContainer.size.width - textContainer.lineFragmentPadding * 2
         }
         guard let lastRect, measureWidth > 0 else { return }
+        // The container can be wider than the prose it holds, so follow the
+        // paragraph's own indents. Reading an attribute allocates nothing.
+        let style = textStorage?.attribute(
+            .paragraphStyle,
+            at: characterRange.location,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        let leading = max(0, style?.headIndent ?? 0)
+        let trailing = max(0, -(style?.tailIndent ?? 0))
+        let ruleWidth = measureWidth - leading - trailing
+        guard ruleWidth > 0 else { return }
         let thickness = metrics.headingRuleThickness
         let leadWidth = min(
-            measureWidth,
+            ruleWidth,
             level == 1
                 ? metrics.headingRulePrimaryLead
                 : metrics.headingRuleSecondaryLead
         )
         let y = (lastRect.maxY + origin.y - thickness).rounded(.down)
-        let x = origin.x + lastRect.minX
+        let x = origin.x + lastRect.minX + leading
         AppKitThemeAdapter.accent.setFill()
         NSRect(x: x, y: y, width: leadWidth, height: thickness).fill()
-        guard measureWidth > leadWidth else { return }
+        guard ruleWidth > leadWidth else { return }
         AppKitThemeAdapter.border.setFill()
         NSRect(
             x: x + leadWidth,
             y: y + (thickness - metrics.hairline) / 2,
-            width: measureWidth - leadWidth,
+            width: ruleWidth - leadWidth,
             height: metrics.hairline
         ).fill()
     }
@@ -614,7 +638,8 @@ enum MarkdownAttributedDocumentBuilder {
         scale: CGFloat,
         displayScale: CGFloat,
         usesDarkAppearance: Bool,
-        presentation: AgentMarkdownPresentation = .document
+        presentation: AgentMarkdownPresentation = .document,
+        containerMeasure: CGFloat? = nil
     ) -> MarkdownAttributedDocument {
         let output = NSMutableAttributedString()
         var headings: [MarkdownAttributedHeading] = []
@@ -634,9 +659,20 @@ enum MarkdownAttributedDocumentBuilder {
             displayScale: displayScale,
             presentation: presentation
         )
-        let measure = isDocument
-            ? AtelierMetrics.documentMaxWidth
-            : AtelierMetrics.transcriptMaxWidth
+        // Two measures in document mode: wide blocks fill the container, prose is
+        // held narrower by an inset applied after the document is built.
+        let measure = MarkdownBleedPolicy.containerMeasure(
+            requested: containerMeasure,
+            presentation: presentation
+        )
+        let proseMeasure = MarkdownBleedPolicy.proseMeasure(
+            containerMeasure: measure,
+            presentation: presentation
+        )
+        let proseInset = MarkdownBleedPolicy.proseInset(
+            containerMeasure: measure,
+            proseMeasure: proseMeasure
+        )
         let rhythm = MarkdownRhythm(
             bodyFont: bodyFont,
             displayScale: displayScale
@@ -660,6 +696,7 @@ enum MarkdownAttributedDocumentBuilder {
                 if mastheadPlan != nil, index == 0 {
                     continue
                 }
+                let bleedStart = output.length
                 appendFrontMatter(
                     entries,
                     to: output,
@@ -668,6 +705,7 @@ enum MarkdownAttributedDocumentBuilder {
                     rhythm: rhythm,
                     measure: measure
                 )
+                markBleed(from: bleedStart, in: output)
 
             case .heading(let level, let content):
                 let start = output.length
@@ -863,6 +901,7 @@ enum MarkdownAttributedDocumentBuilder {
                 )
 
             case .callout(let kind, let content):
+                let bleedStart = output.length
                 appendCallout(
                     kind: kind,
                     content: content,
@@ -872,8 +911,10 @@ enum MarkdownAttributedDocumentBuilder {
                     rhythm: rhythm,
                     footnoteNumbers: footnoteNumbers
                 )
+                markBleed(from: bleedStart, in: output)
 
             case .code(let language, let content):
+                let bleedStart = output.length
                 appendCode(
                     id: AgentMarkdownBlock.blockAnchorID(index),
                     language: language,
@@ -885,6 +926,7 @@ enum MarkdownAttributedDocumentBuilder {
                     codeHighlights: &codeHighlights,
                     codeBlocks: &codeBlocks
                 )
+                markBleed(from: bleedStart, in: output)
 
             case .mermaid(let source):
                 appendMermaidFigure(
@@ -908,6 +950,7 @@ enum MarkdownAttributedDocumentBuilder {
                 )
 
             case .table(let headers, let alignments, let rows):
+                let bleedStart = output.length
                 appendTable(
                     headers: headers,
                     alignments: alignments,
@@ -919,6 +962,7 @@ enum MarkdownAttributedDocumentBuilder {
                     rhythm: rhythm,
                     footnoteNumbers: footnoteNumbers
                 )
+                markBleed(from: bleedStart, in: output)
 
             case .image(let altText, let urlText):
                 appendImageFigure(
@@ -934,6 +978,7 @@ enum MarkdownAttributedDocumentBuilder {
                 )
 
             case .footnotes(let notes):
+                let bleedStart = output.length
                 appendFootnotes(
                     notes,
                     to: output,
@@ -941,6 +986,7 @@ enum MarkdownAttributedDocumentBuilder {
                     codeFont: codeFont,
                     rhythm: rhythm
                 )
+                markBleed(from: bleedStart, in: output)
 
             case .divider:
                 let paragraph = paragraphStyle(
@@ -968,6 +1014,8 @@ enum MarkdownAttributedDocumentBuilder {
                 output.append(ornament)
             }
         }
+
+        applyProseInset(proseInset, to: output)
 
         return MarkdownAttributedDocument(
             attributedString: NSAttributedString(attributedString: output),
@@ -2248,6 +2296,47 @@ enum MarkdownAttributedDocumentBuilder {
         }
     }
 
+    private static func markBleed(from start: Int, in output: NSMutableAttributedString) {
+        guard output.length > start else { return }
+        output.addAttribute(
+            .atelierBleedBlock,
+            value: true,
+            range: NSRange(location: start, length: output.length - start)
+        )
+    }
+
+    /// Hold prose on its own measure inside a wider container. Runs once per build,
+    /// after every block is emitted, so the block appenders stay unaware of it.
+    private static func applyProseInset(
+        _ inset: CGFloat,
+        to output: NSMutableAttributedString
+    ) {
+        guard inset > 0, output.length > 0 else { return }
+        let full = NSRange(location: 0, length: output.length)
+        output.enumerateAttribute(.atelierBleedBlock, in: full) { bleed, range, _ in
+            guard bleed == nil else { return }
+            output.enumerateAttribute(.paragraphStyle, in: range) { value, styleRange, _ in
+                guard let style = value as? NSParagraphStyle,
+                      let inset_style = style.mutableCopy() as? NSMutableParagraphStyle else {
+                    return
+                }
+                inset_style.firstLineHeadIndent += inset
+                inset_style.headIndent += inset
+                // tailIndent is measured from the trailing edge when negative, and
+                // from the leading edge when positive. Only the negative form needs
+                // to move; zero means "the container edge", which becomes the inset.
+                inset_style.tailIndent = inset_style.tailIndent < 0
+                    ? inset_style.tailIndent - inset
+                    : -inset
+                output.addAttribute(
+                    .paragraphStyle,
+                    value: inset_style,
+                    range: styleRange
+                )
+            }
+        }
+    }
+
     private static func paragraphStyle(
         lineSpacing: CGFloat,
         before: CGFloat,
@@ -3020,6 +3109,8 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
         private var mermaidTask: Task<Void, Never>?
         private var lastReportedProgressPixel = -1
         private var lastViewportWidth: CGFloat = 0
+        private var containerMeasure: CGFloat = 0
+        private var renderedMeasureBucket: CGFloat = -1
         private var isActive = false
 
         func attach(scrollView: NSScrollView, textView: NSTextView) {
@@ -3060,17 +3151,20 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                 || renderedScale != scale
                 || renderedDisplayScale != displayScale
                 || renderedDarkAppearance != usesDarkAppearance
+                || renderedMeasureBucket != MarkdownBleedPolicy.bucketed(containerMeasure)
             if needsRender {
                 renderedSource = document.source
                 renderedDirectoryURL = document.sourceDirectoryURL
                 renderedScale = scale
                 renderedDisplayScale = displayScale
                 renderedDarkAppearance = usesDarkAppearance
+                renderedMeasureBucket = MarkdownBleedPolicy.bucketed(containerMeasure)
                 let rendered = MarkdownAttributedDocumentBuilder.build(
                     document: document,
                     scale: scale,
                     displayScale: displayScale,
-                    usesDarkAppearance: usesDarkAppearance
+                    usesDarkAppearance: usesDarkAppearance,
+                    containerMeasure: containerMeasure > 0 ? containerMeasure : nil
                 )
                 apply(rendered)
                 scheduleHighlights(
@@ -3140,14 +3234,17 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             let width = scrollView.contentView.bounds.width
             guard width > 0, width != lastViewportWidth else { return }
             lastViewportWidth = width
+            // Centre the container on the bleed measure, not the prose measure.
+            // Prose is held narrower by its own inset inside that container.
             let horizontal = max(
                 AtelierMetrics.spaceXL,
-                (width - AtelierMetrics.documentMaxWidth) / 2
+                (width - AtelierMetrics.documentBleedMaxWidth) / 2
             )
             textView.textContainerInset = NSSize(
                 width: horizontal,
                 height: AtelierMetrics.space2XL
             )
+            containerMeasure = max(0, width - horizontal * 2)
         }
 
         private func apply(_ document: MarkdownAttributedDocument) {
