@@ -882,9 +882,17 @@ Persistence boundaries:
 - Transcript mode renders body text at `body` size and keeps prose on the `transcriptMaxWidth`
   measure. It skips the three document-only treatments and keeps every other block treatment.
 - Render Markdown file-preview body text at `editorSize` so Source and Preview share the same
-  base text size. Center a `documentMaxWidth` text container, use roomier line and section spacing,
-  and render H1/H2 with the editorial serif face. Give H1 and H2 tighter display tracking; render
-  H3 as a system semibold accent eyebrow with light tracking and H4+ in secondary label color.
+  base text size. Center a `documentMaxWidth` text container and render H1/H2 with the editorial
+  serif face.
+- Size every heading as a pure ratio of body size. Use no minimum clamp: a floor changes the
+  hierarchy's shape when the reader resizes text or zooms. Document ratios are H1 `1.85`, H2 `1.45`,
+  H3 `1.18`, H4 `1.00`, H5 and H6 `0.92`. Transcript ratios are H1 `1.45`, H2 `1.28`, H3 `1.12`,
+  H4 `1.00`, H5 and H6 `0.92`.
+- Keep the serif face on H1 and H2 in both modes and the system face from H3 down. Give H1 and H2
+  tighter display tracking. Render H3 as a system semibold accent eyebrow with light tracking in
+  document mode and in foreground ink in transcript mode. Render H4 semibold in foreground ink, and
+  H5 and H6 semibold in secondary label color with `+0.6` tracking. A heading must never read
+  quieter than the body text under it.
 - Draw the H1 and H2 rule in the layout pass, not as a glyph underline: one accent lead segment
   followed by a hairline in the border color across the remaining measure, aligned to the bottom of
   the heading's last line fragment. Give H1 the longer lead segment and H2 the shorter one.
@@ -895,8 +903,17 @@ Persistence boundaries:
 - Show a quiet empty state over the preview surface when the parsed document has no blocks. Keep the
   native text view mounted behind it.
 - Render leading YAML front matter as one quiet metadata card of key and value rows instead of a
-  divider plus stray paragraphs. Keys use the accent micro face, values stay secondary. Fall back to
-  normal block parsing when the front matter has no closing marker or holds non-metadata lines.
+  divider plus stray paragraphs. Keys use the accent micro face, values stay secondary. Accept a
+  quoted key, because YAML requires quotes on a numeric one such as `"2": "border-2"`. Scan up to
+  512 lines for the closing marker: real front matter is routinely long, and a bound short enough to
+  reject a genuine catalog turns the whole block into a divider plus one run-on paragraph. Fall back
+  to normal block parsing when the front matter has no closing marker or holds non-metadata lines.
+- Size the front-matter key column from the widest key the document actually holds, resolved during
+  document build. A fixed share fits the median key and wraps a deep dotted path such as
+  `colors.text.sidebar-primary-foreground` mid-word. Bound the share at both ends so a short-key
+  document does not waste the measure and a pathological key cannot starve the value column. The
+  table resolves percentages against the real text container, which is narrower than the nominal
+  measure when the window cannot grant it, so reserve headroom for that gap.
 - When front matter is followed by H1, render H1 first. Then show up to three short, scalar,
   non-title values in source order as one accent micro masthead row with hairline gaps. Keep the
   first paragraph as the lede and place remaining metadata in the existing quiet card below it.
@@ -928,7 +945,7 @@ Persistence boundaries:
   the document or replace the mounted text view.
 - Render unordered, ordered, and task lists, block quotes, code blocks, tables, and dividers as
   distinct attributed regions inside the single native document. Keep the palette quiet and
-  reserve terracotta for semantic accents. Mark unordered items with an accent bullet glyph, ordered
+  reserve terracotta for semantic accents. Mark unordered items with a secondary bullet glyph, ordered
   items with their number, and task items with an unchecked or checked box glyph. Render a divider as
   a centered three-dot ornament, border color on the outer dots and accent on the middle dot, not a
   full row of dashes.
@@ -938,7 +955,8 @@ Persistence boundaries:
 - Preserve up to three list depths from leading spaces for unordered, ordered, and task items.
   Use filled bullet, ring, then dash markers for unordered depths zero through two. Increase the
   marker gutter and explicit tab stop by depth, keep wrapped lines on the text indent, and fade
-  markers from accent toward border. Resolve all depth values during parsing and document build.
+  markers from the secondary label color toward border. Resolve all depth values during parsing and
+  document build.
 - Render a block quote as an editorial pull-quote: an accent left rule drawn once as a single fill
   spanning the quote's full height in the leading gutter, serif italic text in secondary label color,
   and a readable indent. Do not prefix the quote with a literal `>` marker or paint a per-line
@@ -967,36 +985,56 @@ Persistence boundaries:
   accessibility label, and use the link pointer cursor.
 - Materialize code-card controls only for visible code blocks. Diff their stable IDs before updating
   the overlay, and never parse Markdown or rebuild the attributed document during scrolling.
-- Render inline code as a compact monospaced accent block within prose. Expand the existing accent
-  fill around the text for clear inner spacing on every side. Draw that fill once, do not add an
-  outline, and reserve outside spacing so it never overlaps surrounding prose. Keep surrounding
-  text wrapping naturally.
-- Size the inline-code fill from the run's own font box around its baseline, never from the line
-  fragment rect: the fragment carries the paragraph's line spacing below the glyphs, which would
-  push the chip up and leave a heavier gap under the text. Top and bottom padding must read equal.
+- Render inline code as JetBrains Mono at `0.92` of the surrounding body size, in primary ink, with
+  no fill, no outline, and no underline. The face carries the distinction, the way a printed book
+  sets code apart. Inline code is the most frequent span in a technical answer, so any background
+  turns a code-heavy paragraph into a mosaic of blocks: a terracotta chip stripes the prose, and a
+  neutral chip only makes the stripes grey.
+- Add no horizontal reservation around an inline code run. There is no fill to clear, so a full stop
+  or a comma after a run sits tight against it, and a short word between two runs reads as a word
+  rather than as its own box.
 - Use JetBrains Mono Regular for fenced code, inline code, code-card language labels, and code-only
   table cells. Ship the font and its license inside the application bundle so installed-app rendering
   does not depend on user fonts. Retain the system monospaced fallback.
 - In Markdown file Preview mode, render valid CSS hex color tokens (`#RGB`, `#RGBA`, `#RRGGBB`,
   and `#RRGGBBAA`) with an `editorSize` inline square filled by that sRGB color. Apply the swatch in
   prose, inline code, tables, and fenced code without changing Source mode or code-block copy content.
-- Pure inline-code table cells (`path` only) use one continuous monospaced accent chip so
-  soft-wrapped paths fill as a single shape. Do not paint per-line fragment backgrounds that
-  zebra-stripe multi-line skill paths in Markdown preview tables.
+- An inline code run inside a table cell needs no special treatment. With no fill there is nothing to
+  break across a soft wrap, so a long path wraps by character like any other unbroken token.
+- Keep the Markdown accent budget small. Terracotta marks only the block-quote rule and its opening
+  glyph, callout rules and glyphs, links and link underlines, footnote numbers, the document-mode H3
+  eyebrow, and the H1 and H2 rule lead segment. Everything else uses ink and `raised` surfaces. An
+  accent that marks nine different things marks nothing.
 - Keep wrapped table rows self-sizing inside the native text container. Wide tables wrap their
   cells without overlapping content or splitting selection into another scroll surface.
 - Size Markdown table columns from bounded, deterministic content weights computed during document
-  construction. Keep the header visually distinct through an accent wash, semibold weight, and light
-  tracking; use quiet horizontal rules and subtle zebra rows, avoid heavy vertical boxing, and never
-  recalculate column weights from the scroll or draw paths.
+  construction. Keep the header visually distinct through a stronger `raised` fill, semibold weight,
+  and light tracking, with no accent wash. The header fill must stay clearly separate from the
+  quieter `raised` zebra-row fill. Use quiet horizontal rules and subtle zebra rows, avoid heavy
+  vertical boxing, and never recalculate column weights from the scroll or draw paths.
 - Preserve delimiter-row table alignment per column. Apply left, center, or right paragraph alignment
   to every cell. Force numeric-majority data columns right and use tabular numeric figures. Keep
   column weights, wrapping, and alignment deterministic during document construction.
 - Wrap unbroken cell tokens such as long paths by character so a narrow column never overflows its
   neighbor. Decide that per cell during document construction, never during layout or draw.
-- Base native Markdown vertical spacing on one `bodyFont.lineHeight` unit snapped to display scale.
-  Use `0.5u` paragraph spacing, H3 `1u` before and `0.5u` after, H1 and H2 `2u` before and `0.75u`
-  after, divider `1.5u`, code card `1u`, and lede `0.75u`. Resolve rhythm during document build.
+- Set Markdown line spacing from a target line-height ratio, never from an absolute point value.
+  `NSParagraphStyle.lineSpacing` adds space on top of the font's own line height, so a fixed value is
+  a large share of the total at small sizes and a small share at large ones. Back-solve it as
+  `max(0, snapped(fontSize * ratio - font.lineHeight))` using the font that block renders with.
+  Ratios are prose `1.62`, list items `1.55`, table cells `1.45`, code lines `1.35`, H1 and H2
+  `1.16`, and H3 and deeper `1.30`. Resolve the scale once during document build.
+- Base native Markdown vertical spacing on one `bodyFont.lineHeight` unit snapped to display scale,
+  and sort every block into one of three weight tiers. Flow blocks take `0.5u` before and after:
+  paragraph and lede. Items inside one list share that flow gap, so each list item edge carries
+  `0.25u` and two neighbouring items still sit `0.5u` apart. Structure blocks take `1.25u` before
+  and after: code card, table,
+  image figure, Mermaid figure, callout, block quote, front-matter card, and the footnotes section.
+  Break blocks take `1.75u` before and `0.6u` after: divider, H1, and H2. H3 keeps `1u` before and
+  `0.5u` after, because it starts a section instead of breaking one. Keep zero spacing between rows
+  inside a table and between lines inside a code card: a tier applies to a block's outer edges only.
+  A table's cells carry no trailing gap, so close a table with its own hidden spacer paragraph at the
+  structure tier instead of letting the next block's flow gap stand in for it. Resolve rhythm during
+  document build.
 - Render an image-only Markdown line as one stable native figure when it resolves to a local file.
   Resolve relative paths from the Markdown file directory. Never load remote images. Reserve a
   `16:9` placeholder at `documentMaxWidth` before off-main decoding, then adopt the decoded image's
@@ -1199,6 +1237,35 @@ The five background features, all read-only and cancellable:
   restyle the card. Clamp it to 3 lines and expand or collapse it with a disclosure control that
   carries the pointer cursor. Store at most 4000 characters and end a cut question with a trailing
   `...`. Render nothing at all, no container, no label, and no empty row, when the question is unknown.
+- Cap the question container at the same `transcriptMaxWidth` measure the answer uses, so the card
+  presents one right edge at every overlay width. Keep both leading-aligned; the card header sets the
+  left edge, so never center the measure.
+- Scale the question with the transcript text scale, the same factor the answer body uses. The
+  question is content, not panel chrome. Because both scale together, the `headline` question stays
+  above the `body` answer at every scale step. The container padding keeps its own metrics.
+- Use the quiet ghost style for response header controls. At most one control may carry a filled
+  accent, and only when it is the primary action for the panel's current state. A row of filled
+  accent buttons sits directly above a body kept deliberately quiet, so it spends the whole accent
+  budget on chrome and becomes the loudest thing on screen.
+- When the response panel is wide enough to hold `transcriptMaxWidth` plus `markdownOutlineWidth`,
+  show the same trailing "On This Page" outline rail that Markdown Preview uses. Build its entries
+  from the answer's parsed blocks and mark the active row from the same active-heading value the
+  section bar uses; never add a second active-heading rule. Clicking a row moves the answer to that
+  heading without rebuilding the attributed document. Keep outline state session-only.
+- When the selected answer has two or more headings and the outline rail is hidden, pin one section
+  bar to the top of the response transcript. The bar and the rail are never both visible, matching
+  how Markdown Preview already relates them. The panel shows one answer at a time, so the bar always describes that answer. Show its
+  active heading title in secondary micro type over a translucent material with a hairline bottom
+  edge, and draw the same reading-progress accent line along that edge. Reuse the Markdown Preview
+  section bar; there is one definition of it for the whole application.
+- Derive the active heading from the answer's own top edge inside the transcript scroll space plus
+  each heading's offset inside the rendered surface. The native surface reports those offsets once
+  after layout, never during scroll. Quantize reading progress so a passive scroll writes state only
+  when the drawn progress pixel moves.
+- Keep the response section bar passive: never hit-test it, never animate it during passive scroll,
+  never let it contribute to the measured column width, and never rebuild the attributed document for
+  it. Crossing the two-heading condition changes only its opacity, so a scroll never inserts or
+  removes a view during a layout pass.
 - Pair each answer with the newest preceding user message in the same transcript. Carry that pending
   question inside the resumable parser state so a question read in one pass still pairs with an answer
   that arrives in a later appended read. Two answers in one turn share one question. A question line
