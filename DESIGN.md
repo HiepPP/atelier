@@ -873,6 +873,14 @@ Persistence boundaries:
   Keep every rendered block in that single native document so selection can cross headings,
   paragraphs, lists, quotes, code, tables, Mermaid figures, and Mermaid source fallback content.
   Preserve native `Cmd-C`.
+- Ship one Markdown renderer for the whole application. It builds one native attributed document
+  from the parsed blocks and offers two presentation modes. Document mode serves file Preview.
+  Transcript mode serves agent responses. Every block treatment below is shared by both modes.
+- Document mode renders body text at `editorSize` and centers a `documentMaxWidth` measure. It also
+  adds the three document-only treatments: the lede paragraph scale, the front-matter masthead, and
+  the H3 accent eyebrow color.
+- Transcript mode renders body text at `body` size and keeps prose on the `transcriptMaxWidth`
+  measure. It skips the three document-only treatments and keeps every other block treatment.
 - Render Markdown file-preview body text at `editorSize` so Source and Preview share the same
   base text size. Center a `documentMaxWidth` text container, use roomier line and section spacing,
   and render H1/H2 with the editorial serif face. Give H1 and H2 tighter display tracking; render
@@ -1008,6 +1016,13 @@ Persistence boundaries:
 - Show a quiet bordered card with a centered secondary status label while a diagram renders and when
   a render fails. A Mermaid block whose source fails to parse keeps the labelled source fallback
   with its parser message so the author can still read and fix the diagram.
+- Show one source toggle over each rendered Mermaid figure in both modes. Toggling it reveals the
+  Mermaid source below the figure inside the same text storage, and toggling again hides it. Anchor
+  the control to the figure's TextKit range, never rebuild the attributed document for it, and use
+  the link pointer cursor.
+- Reserve trailing room for that toggle in the figure paragraph and in the figure width, so the
+  control never sits on the diagram. Fit a figure to the host text container when the host is
+  narrower than the mode measure, so a sidecar panel shrinks the diagram instead of clipping it.
 - Collect one-line Markdown footnote definitions without rendering their source syntax. Number
   resolved references by first-reference order, render accent superscript numbers, preserve unresolved
   references literally, and append one quiet Notes section after content. Keep Notes out of outline.
@@ -1201,10 +1216,21 @@ The five background features, all read-only and cancellable:
 - Build a response id from its answer alone. The question never changes an id, so read state and
   unread counts survive a relaunch.
 - Keep status, navigation, refresh, copy, and close actions keyboard accessible.
-- Keep the transcript Markdown treatment consistent with the file-preview surface: pull-quote block
+- Render an agent answer through the same native attributed document as file Preview, in transcript
+  mode. One read-only, selectable `NSTextView` holds the whole answer, so one drag can select across
+  headings, paragraphs, lists, quotes, code, tables, and Mermaid figures.
+- Keep the transcript text view non-scrolling. It sizes itself to its full content height, and the
+  response panel scroll view owns scrolling. A response card never shows an inner scroll bar.
+- Transcript mode inherits every block treatment it shares with document mode: pull-quote block
   quotes with an accent left rule and serif italic secondary text, completed task items in secondary
-  with a strikethrough, accent-washed table headers with light tracking, front matter as a quiet
-  key and value card, and the same icon-only Copy control with checkmark confirmation.
+  with a strikethrough, accent-washed table headers with light tracking, and front matter as a quiet
+  key and value card.
+- Keep two overlay controls in transcript mode: the icon-only Copy control with checkmark
+  confirmation on each code card, and the Mermaid source toggle on each rendered diagram figure.
+  Both carry the pointer cursor.
+- Cap a transcript code card at the shared code-block display limit and mark the cut with an
+  ellipsis line, so one large tool dump never forces full text layout on every measurement pass.
+  The card's Copy action still returns the whole original source. File Preview keeps the full file.
 
 ### Settings
 

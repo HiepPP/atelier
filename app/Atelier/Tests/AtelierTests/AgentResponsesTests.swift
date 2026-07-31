@@ -2411,56 +2411,71 @@ struct AgentResponsesTests {
     @Test("Transcript ordered and task markers fade with nested depth")
     @MainActor
     func markdownTranscriptListMarkerDepth() {
-        func markerStrength(source: String, xOffset: CGFloat) -> Double {
-            let renderer = ImageRenderer(
-                content: AgentMarkdownView(source: source)
-                    .frame(width: 220, height: 52, alignment: .topLeading)
-                    .background(Color.white)
-                    .environment(\.colorScheme, .light)
-            )
-            renderer.scale = 2
-            guard let image = renderer.cgImage else {
-                Issue.record("Expected transcript marker image")
-                return 0
+        let source = """
+        1. Root
+          2. Child
+            3. Grandchild
+
+        - [ ] Open root
+          - [x] Done child
+        """
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: source),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false,
+            presentation: .transcript
+        )
+        let text = rendered.attributedString.string as NSString
+
+        func components(_ color: NSColor?) -> (CGFloat, CGFloat, CGFloat)? {
+            guard let converted = color?.usingColorSpace(.sRGB) else {
+                return nil
             }
-            let bitmap = NSBitmapImageRep(cgImage: image)
-            let xStart = max(0, Int((xOffset * renderer.scale).rounded(.down)))
-            let xEnd = min(
-                bitmap.pixelsWide,
-                Int(((xOffset + 18) * renderer.scale).rounded(.up))
+            return (
+                converted.redComponent,
+                converted.greenComponent,
+                converted.blueComponent
             )
-            var maximum = 0.0
-            for y in 0..<bitmap.pixelsHigh {
-                for x in xStart..<xEnd {
-                    guard let color = bitmap.colorAt(x: x, y: y)?
-                        .usingColorSpace(.sRGB) else {
-                        continue
-                    }
-                    let strength = (1 - color.redComponent)
-                        + (1 - color.greenComponent)
-                        + (1 - color.blueComponent)
-                    maximum = max(maximum, strength)
-                }
+        }
+        func distance(
+            _ first: (CGFloat, CGFloat, CGFloat),
+            _ second: (CGFloat, CGFloat, CGFloat)
+        ) -> CGFloat {
+            abs(first.0 - second.0)
+                + abs(first.1 - second.1)
+                + abs(first.2 - second.2)
+        }
+        func markerDistanceToBorder(_ marker: String) -> CGFloat? {
+            let range = text.range(of: marker)
+            guard range.location != NSNotFound,
+                  let border = components(AppKitThemeAdapter.border),
+                  let color = components(
+                      rendered.attributedString.attribute(
+                          .foregroundColor,
+                          at: range.location,
+                          effectiveRange: nil
+                      ) as? NSColor
+                  ) else {
+                return nil
             }
-            return maximum
+            return distance(color, border)
         }
 
-        let nestedOffset = AtelierMetrics.spaceXL * 3
-        let orderedRoot = markerStrength(source: "1. Root", xOffset: 0)
-        let orderedNested = markerStrength(
-            source: "      1. Nested",
-            xOffset: nestedOffset
-        )
-        let taskRoot = markerStrength(source: "- [ ] Root", xOffset: 0)
-        let taskNested = markerStrength(
-            source: "      - [ ] Nested",
-            xOffset: nestedOffset
-        )
+        guard let orderedRoot = markerDistanceToBorder("1.\t"),
+              let orderedChild = markerDistanceToBorder("2.\t"),
+              let orderedGrandchild = markerDistanceToBorder("3.\t"),
+              let taskRoot = markerDistanceToBorder("\u{2610}\t"),
+              let taskChild = markerDistanceToBorder("\u{2611}\t") else {
+            Issue.record("Expected every list marker to carry a color")
+            return
+        }
 
-        #expect(orderedRoot > 0)
-        #expect(orderedNested < orderedRoot * 0.75)
-        #expect(taskRoot > 0)
-        #expect(taskNested < taskRoot * 0.75)
+        // Deeper markers blend from accent toward border, so their distance to
+        // the border color shrinks with depth.
+        #expect(orderedChild < orderedRoot)
+        #expect(orderedGrandchild < orderedChild)
+        #expect(taskChild < taskRoot)
     }
 
     @Test("Markdown tables honor delimiter and numeric-majority alignment")
@@ -3239,6 +3254,378 @@ struct AgentResponsesTests {
             hasImage: true,
             error: nil
         ) == .rendered)
+    }
+
+    @Test("Transcript mode builds smaller body text than document mode")
+    func markdownTranscriptModeBodySize() {
+        func bodyPointSize(
+            _ presentation: AgentMarkdownPresentation
+        ) -> CGFloat {
+            let rendered = MarkdownAttributedDocumentBuilder.build(
+                document: ParsedMarkdownDocument(source: "Answer paragraph."),
+                scale: 1,
+                displayScale: 2,
+                usesDarkAppearance: false,
+                presentation: presentation
+            )
+            return (
+                rendered.attributedString.attribute(
+                    .font,
+                    at: 0,
+                    effectiveRange: nil
+                ) as? NSFont
+            )?.pointSize ?? 0
+        }
+
+        let defaulted = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: "Answer paragraph."),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+
+        #expect(bodyPointSize(.document) == AtelierTypography.editorSize)
+        #expect(bodyPointSize(.transcript) == AtelierTypography.body)
+        #expect(bodyPointSize(.transcript) < bodyPointSize(.document))
+        // The preview call site keeps document behavior without passing a mode.
+        #expect(
+            (
+                defaulted.attributedString.attribute(
+                    .font,
+                    at: 0,
+                    effectiveRange: nil
+                ) as? NSFont
+            )?.pointSize == AtelierTypography.editorSize
+        )
+    }
+
+    @Test("Transcript mode skips the masthead and the lede scale")
+    func markdownTranscriptModeSkipsDocumentTreatments() {
+        let source = """
+        ---
+        title: Doc
+        status: draft
+        ---
+        # Heading
+
+        First paragraph.
+        """
+        func rendered(
+            _ presentation: AgentMarkdownPresentation
+        ) -> MarkdownAttributedDocument {
+            MarkdownAttributedDocumentBuilder.build(
+                document: ParsedMarkdownDocument(source: source),
+                scale: 1,
+                displayScale: 2,
+                usesDarkAppearance: false,
+                presentation: presentation
+            )
+        }
+        func paragraphPointSize(
+            _ document: MarkdownAttributedDocument
+        ) -> CGFloat {
+            let text = document.attributedString.string as NSString
+            let range = text.range(of: "First paragraph.")
+            guard range.location != NSNotFound else { return 0 }
+            return (
+                document.attributedString.attribute(
+                    .font,
+                    at: range.location,
+                    effectiveRange: nil
+                ) as? NSFont
+            )?.pointSize ?? 0
+        }
+
+        let transcript = rendered(.transcript)
+        let transcriptText = transcript.attributedString.string
+        // No masthead: every front-matter key stays in the quiet card, and the
+        // card still leads the document instead of the H1.
+        #expect(transcriptText.hasPrefix("title"))
+        #expect(transcriptText.contains("status"))
+        #expect(paragraphPointSize(transcript) == AtelierTypography.body)
+
+        let document = rendered(.document)
+        let documentText = document.attributedString.string
+        #expect(documentText.hasPrefix("Heading"))
+        #expect(!documentText.contains("status"))
+        #expect(paragraphPointSize(document) > AtelierTypography.editorSize)
+    }
+
+    @Test("Toggling a Mermaid figure adds then removes its source range")
+    func markdownMermaidSourceToggle() {
+        let source = """
+        ```mermaid
+        graph TD
+        A --> B
+        ```
+        """
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: source),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false,
+            presentation: .transcript
+        )
+        guard let figure = rendered.mermaidFigures.first else {
+            Issue.record("Expected one Mermaid figure")
+            return
+        }
+        let storage = NSTextStorage(
+            attributedString: rendered.attributedString
+        )
+        let expansion = MarkdownMermaidSourceExpansion()
+        let originalLength = storage.length
+
+        #expect(!expansion.isExpanded(figure.id))
+        #expect(!storage.string.contains("MERMAID SOURCE"))
+
+        let insertion = expansion.toggle(
+            figure: figure,
+            in: storage,
+            scale: 1,
+            displayScale: 2,
+            presentation: .transcript
+        )
+        #expect(insertion?.delta ?? 0 > 0)
+        #expect(expansion.isExpanded(figure.id))
+        #expect(storage.length > originalLength)
+        #expect(storage.string.contains("MERMAID SOURCE"))
+        #expect(storage.string.contains("graph TD"))
+
+        let removal = expansion.toggle(
+            figure: figure,
+            in: storage,
+            scale: 1,
+            displayScale: 2,
+            presentation: .transcript
+        )
+        #expect(removal?.delta ?? 0 < 0)
+        #expect(!expansion.isExpanded(figure.id))
+        #expect(storage.length == originalLength)
+        #expect(!storage.string.contains("MERMAID SOURCE"))
+        #expect(!storage.string.contains("graph TD"))
+    }
+
+    @Test("An in-place edit shifts only the ranges after it")
+    func markdownRegionShiftFollowsEdits() {
+        let early = NSRange(location: 4, length: 10)
+        let boundary = NSRange(location: 20, length: 10)
+        let late = NSRange(location: 40, length: 10)
+
+        #expect(
+            MarkdownRegionShift.shifted(early, after: 20, by: 12) == early
+        )
+        // The source lands on the first index of the next block, so a region
+        // starting exactly at the edit location has to move with it.
+        #expect(
+            MarkdownRegionShift.shifted(boundary, after: 20, by: 12)
+                == NSRange(location: 32, length: 10)
+        )
+        #expect(
+            MarkdownRegionShift.shifted(late, after: 20, by: 12)
+                == NSRange(location: 52, length: 10)
+        )
+        #expect(
+            MarkdownRegionShift.shifted(late, after: 20, by: -12)
+                == NSRange(location: 28, length: 10)
+        )
+    }
+
+    @Test("Expanding a Mermaid figure moves the block that follows it")
+    func markdownMermaidToggleShiftsNextBlock() {
+        let source = """
+        ```mermaid
+        graph TD
+        A --> B
+        ```
+
+        ```swift
+        let value = 1
+        ```
+        """
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: source),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false,
+            presentation: .transcript
+        )
+        guard let figure = rendered.mermaidFigures.first,
+              let block = rendered.codeBlocks.first else {
+            Issue.record("Expected one Mermaid figure and one code block")
+            return
+        }
+        let storage = NSTextStorage(attributedString: rendered.attributedString)
+        let expansion = MarkdownMermaidSourceExpansion()
+        guard let insertion = expansion.toggle(
+            figure: figure,
+            in: storage,
+            scale: 1,
+            displayScale: 2,
+            presentation: .transcript
+        ) else {
+            Issue.record("Expected the toggle to insert the source")
+            return
+        }
+        // The code header starts where the source was inserted, so its stored
+        // range must follow the edit instead of pointing at the new text.
+        #expect(block.headerRange.location == insertion.location)
+        let shifted = MarkdownRegionShift.shifted(
+            block.headerRange,
+            after: insertion.location,
+            by: insertion.delta
+        )
+        #expect(
+            (storage.string as NSString).substring(with: shifted)
+                .hasPrefix("SWIFT")
+        )
+    }
+
+    @Test("A transcript code block renders capped while copy keeps it whole")
+    func markdownTranscriptCodeBlockCap() {
+        let content = String(
+            repeating: "a", count: AgentCodeBlockPolicy.displayLimit + 500
+        )
+        let source = "```text\n\(content)\n```"
+        let document = ParsedMarkdownDocument(source: source)
+
+        let transcript = MarkdownAttributedDocumentBuilder.build(
+            document: document,
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false,
+            presentation: .transcript
+        )
+        #expect(
+            transcript.codeBlocks.first?.sourceRange.length
+                == (AgentCodeBlockPolicy.displayedContent(content) as NSString)
+                    .length
+        )
+        // The copy control reads the region source, so it stays complete.
+        #expect(transcript.codeBlocks.first?.source == content)
+        #expect(
+            transcript.codeHighlights.first?.source
+                == AgentCodeBlockPolicy.displayedContent(content)
+        )
+
+        let preview = MarkdownAttributedDocumentBuilder.build(
+            document: document,
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false
+        )
+        #expect(
+            preview.codeBlocks.first?.sourceRange.length
+                == (content as NSString).length
+        )
+    }
+
+    @Test("A Mermaid figure leaves trailing room for its source toggle")
+    func markdownMermaidFigureReservesControlRoom() {
+        let source = """
+        ```mermaid
+        graph TD
+        A --> B
+        ```
+        """
+        let rendered = MarkdownAttributedDocumentBuilder.build(
+            document: ParsedMarkdownDocument(source: source),
+            scale: 1,
+            displayScale: 2,
+            usesDarkAppearance: false,
+            presentation: .transcript
+        )
+        guard let figure = rendered.mermaidFigures.first else {
+            Issue.record("Expected one Mermaid figure")
+            return
+        }
+        let measure = AtelierMetrics.transcriptMaxWidth
+        #expect(
+            figure.attachment.bounds.width
+                <= measure - MarkdownCodeCardLayout.copyControlReservation
+        )
+        let style = rendered.attributedString.attribute(
+            .paragraphStyle,
+            at: figure.range.location,
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        #expect(
+            style?.tailIndent == -MarkdownCodeCardLayout.copyControlReservation
+        )
+    }
+
+    @Test("The transcript surface sizes itself to its full content height")
+    func markdownTranscriptSurfaceSelfSizes() {
+        func height(source: String, width: CGFloat) -> CGFloat {
+            let coordinator = MarkdownTranscriptCoordinator()
+            coordinator.attach(
+                textView: MarkdownTranscriptCoordinator.makeTextView()
+            )
+            coordinator.update(
+                source: source,
+                blocks: nil,
+                presentation: .transcript,
+                scale: 1,
+                displayScale: 2,
+                usesDarkAppearance: false,
+                openURL: nil,
+                onContentHeightChange: {}
+            )
+            return coordinator.height(forWidth: width)
+        }
+
+        let single = height(source: "One line.", width: 320)
+        let long = height(
+            source: """
+            # Heading
+
+            First paragraph of a long answer that has to wrap more than once at
+            this narrow measure, so the surface cannot report a single-line box.
+
+            - First item
+            - Second item
+
+            > A quoted line.
+
+            ```swift
+            let value = 1
+            ```
+
+            | Name | Value |
+            | --- | --- |
+            | Alpha | Beta |
+
+            Closing paragraph.
+            """,
+            width: 320
+        )
+
+        #expect(single > 0)
+        #expect(long > single)
+        #expect(long > AtelierTypography.body * 10)
+    }
+
+    @Test("Transcript mode drops the H3 accent eyebrow color")
+    func markdownTranscriptModeHeadingColor() {
+        func headingColor(
+            _ presentation: AgentMarkdownPresentation
+        ) -> NSColor? {
+            let rendered = MarkdownAttributedDocumentBuilder.build(
+                document: ParsedMarkdownDocument(source: "### Section"),
+                scale: 1,
+                displayScale: 2,
+                usesDarkAppearance: false,
+                presentation: presentation
+            )
+            return rendered.attributedString.attribute(
+                .foregroundColor,
+                at: 0,
+                effectiveRange: nil
+            ) as? NSColor
+        }
+
+        #expect(headingColor(.document) == AppKitThemeAdapter.accent)
+        #expect(headingColor(.transcript) == AppKitThemeAdapter.foreground)
     }
 
     private func response(

@@ -167,8 +167,10 @@ nonisolated enum MarkdownImageFigureLayout {
     static let maximumHeightScale: CGFloat = 1.2
 
     @MainActor
-    static func reservedBounds() -> NSRect {
-        let width = AtelierMetrics.documentMaxWidth
+    static func reservedBounds(
+        measure: CGFloat = AtelierMetrics.documentMaxWidth
+    ) -> NSRect {
+        let width = max(1, measure)
         return NSRect(
             x: 0,
             y: 0,
@@ -178,8 +180,12 @@ nonisolated enum MarkdownImageFigureLayout {
     }
 
     @MainActor
-    static func fittedBounds(pixelWidth: Int, pixelHeight: Int) -> NSRect {
-        let measure = AtelierMetrics.documentMaxWidth
+    static func fittedBounds(
+        pixelWidth: Int,
+        pixelHeight: Int,
+        measure: CGFloat = AtelierMetrics.documentMaxWidth
+    ) -> NSRect {
+        let measure = max(1, measure)
         let size = MarkdownFigureFitPolicy.fittedSize(
             contentWidth: CGFloat(pixelWidth),
             contentHeight: CGFloat(pixelHeight),
@@ -196,16 +202,26 @@ nonisolated enum MarkdownMermaidFigureLayout {
     static let loadingMessage = "Rendering Mermaid diagram..."
     static let failureMessage = "Mermaid diagram could not be rendered."
 
+    /// Trailing room for the source toggle, so the control never sits on the
+    /// diagram. The figure paragraph reserves the same width as a tail indent.
+    static func contentMeasure(_ measure: CGFloat) -> CGFloat {
+        max(1, measure - MarkdownCodeCardLayout.copyControlReservation)
+    }
+
     @MainActor
-    static var renderWidth: CGFloat {
+    static func renderWidth(
+        measure: CGFloat = AtelierMetrics.documentMaxWidth
+    ) -> CGFloat {
         MermaidRenderingPolicy.widthBucket(
-            containerWidth: AtelierMetrics.documentMaxWidth
+            containerWidth: contentMeasure(measure)
         )
     }
 
     @MainActor
-    static func reservedBounds() -> NSRect {
-        let width = AtelierMetrics.documentMaxWidth
+    static func reservedBounds(
+        measure: CGFloat = AtelierMetrics.documentMaxWidth
+    ) -> NSRect {
+        let width = contentMeasure(measure)
         return NSRect(
             x: 0,
             y: 0,
@@ -215,8 +231,11 @@ nonisolated enum MarkdownMermaidFigureLayout {
     }
 
     @MainActor
-    static func fittedBounds(imageSize: NSSize) -> NSRect {
-        let measure = AtelierMetrics.documentMaxWidth
+    static func fittedBounds(
+        imageSize: NSSize,
+        measure: CGFloat = AtelierMetrics.documentMaxWidth
+    ) -> NSRect {
+        let measure = contentMeasure(measure)
         let size = MarkdownFigureFitPolicy.fittedSize(
             contentWidth: imageSize.width,
             contentHeight: imageSize.height,
@@ -640,7 +659,8 @@ enum MarkdownAttributedDocumentBuilder {
         document: ParsedMarkdownDocument,
         scale: CGFloat,
         displayScale: CGFloat,
-        usesDarkAppearance: Bool
+        usesDarkAppearance: Bool,
+        presentation: AgentMarkdownPresentation = .document
     ) -> MarkdownAttributedDocument {
         let output = NSMutableAttributedString()
         var headings: [MarkdownAttributedHeading] = []
@@ -648,28 +668,34 @@ enum MarkdownAttributedDocumentBuilder {
         var codeBlocks: [MarkdownCodeBlockRegion] = []
         var imageFigures: [MarkdownImageFigureRegion] = []
         var mermaidFigures: [MarkdownMermaidFigureRegion] = []
+        let isDocument = presentation == .document
         let bodySize = AtelierFontScaling.snapped(
-            AtelierTypography.editorSize * scale,
+            (isDocument ? AtelierTypography.editorSize : AtelierTypography.body)
+                * scale,
             displayScale: displayScale
         )
         let bodyFont = NSFont.systemFont(ofSize: bodySize)
-        let codeFont = AtelierTypography.codeFont(
-            size: AtelierFontScaling.snapped(
-                AtelierTypography.uiSize * scale,
-                displayScale: displayScale
-            )
+        let codeFont = codeFont(
+            scale: scale,
+            displayScale: displayScale,
+            presentation: presentation
         )
+        let measure = isDocument
+            ? AtelierMetrics.documentMaxWidth
+            : AtelierMetrics.transcriptMaxWidth
         let rhythm = MarkdownRhythm(
             bodyFont: bodyFont,
             displayScale: displayScale
         )
 
-        let hasLede = MarkdownDocumentTypePolicy.hasLedeParagraph(
+        // Lede scale, front-matter masthead, and the H3 accent eyebrow are
+        // document-only treatments. Transcript mode keeps every other one.
+        let hasLede = isDocument && MarkdownDocumentTypePolicy.hasLedeParagraph(
             blocks: document.blocks
         )
-        let mastheadPlan = MarkdownFrontMatterMastheadPolicy.plan(
-            blocks: document.blocks
-        )
+        let mastheadPlan = isDocument
+            ? MarkdownFrontMatterMastheadPolicy.plan(blocks: document.blocks)
+            : nil
         let footnoteNumbers = MarkdownFootnotePolicy.numberMap(
             in: document.blocks
         )
@@ -706,7 +732,10 @@ enum MarkdownAttributedDocumentBuilder {
                 let text = inlineText(
                     content,
                     font: font,
-                    foregroundColor: headingColor(level: level),
+                    foregroundColor: headingColor(
+                        level: level,
+                        presentation: presentation
+                    ),
                     paragraphStyle: paragraph,
                     codeFont: codeFont,
                     footnoteNumbers: footnoteNumbers
@@ -878,6 +907,7 @@ enum MarkdownAttributedDocumentBuilder {
                     id: AgentMarkdownBlock.blockAnchorID(index),
                     language: language,
                     content: content,
+                    presentation: presentation,
                     to: output,
                     codeFont: codeFont,
                     rhythm: rhythm,
@@ -892,6 +922,7 @@ enum MarkdownAttributedDocumentBuilder {
                     to: output,
                     bodyFont: bodyFont,
                     rhythm: rhythm,
+                    measure: measure,
                     mermaidFigures: &mermaidFigures
                 )
 
@@ -926,6 +957,7 @@ enum MarkdownAttributedDocumentBuilder {
                     to: output,
                     bodyFont: bodyFont,
                     rhythm: rhythm,
+                    measure: measure,
                     imageFigures: &imageFigures
                 )
 
@@ -973,6 +1005,75 @@ enum MarkdownAttributedDocumentBuilder {
             imageFigures: imageFigures,
             mermaidFigures: mermaidFigures
         )
+    }
+
+    /// Code must stay just under the mode's prose size; one fixed size would
+    /// read larger than transcript body text.
+    static func codeFont(
+        scale: CGFloat,
+        displayScale: CGFloat,
+        presentation: AgentMarkdownPresentation
+    ) -> NSFont {
+        AtelierTypography.codeFont(
+            size: AtelierFontScaling.snapped(
+                (
+                    presentation == .document
+                        ? AtelierTypography.uiSize
+                        : AtelierTypography.label
+                ) * scale,
+                displayScale: displayScale
+            )
+        )
+    }
+
+    /// Labelled Mermaid source revealed under a rendered figure. It lives in the
+    /// same text storage, so selection and `Cmd-C` still cross it.
+    static func mermaidSourceBlock(
+        source: String,
+        scale: CGFloat,
+        displayScale: CGFloat,
+        presentation: AgentMarkdownPresentation
+    ) -> NSAttributedString {
+        let code = codeFont(
+            scale: scale,
+            displayScale: displayScale,
+            presentation: presentation
+        )
+        let headerStyle = paragraphStyle(
+            lineSpacing: 0,
+            before: AtelierMetrics.spaceXS,
+            after: AtelierMetrics.spaceXS,
+            firstLineHeadIndent: AtelierMetrics.spaceM,
+            headIndent: AtelierMetrics.spaceM,
+            tailIndent: -AtelierMetrics.spaceM
+        )
+        let output = NSMutableAttributedString(
+            string: "MERMAID SOURCE\n",
+            attributes: [
+                .font: AtelierTypography.codeFont(
+                    size: max(9, code.pointSize * 0.8)
+                ),
+                .foregroundColor: AppKitThemeAdapter.secondary,
+                .backgroundColor: AppKitThemeAdapter.raised,
+                .kern: 1.5,
+                .paragraphStyle: headerStyle
+            ]
+        )
+        let sourceStyle = paragraphStyle(
+            lineSpacing: AtelierMetrics.spaceXS,
+            before: 0,
+            after: AtelierMetrics.spaceL,
+            firstLineHeadIndent: AtelierMetrics.spaceM,
+            headIndent: AtelierMetrics.spaceM,
+            tailIndent: -AtelierMetrics.spaceM
+        )
+        output.append(NSAttributedString(string: source + "\n", attributes: [
+            .font: code,
+            .foregroundColor: AppKitThemeAdapter.foreground,
+            .backgroundColor: AppKitThemeAdapter.code,
+            .paragraphStyle: sourceStyle
+        ]))
+        return output
     }
 
     private static func appendInlineParagraph(
@@ -1061,12 +1162,20 @@ enum MarkdownAttributedDocumentBuilder {
         id: String,
         language: String?,
         content: String,
+        presentation: AgentMarkdownPresentation,
         to output: NSMutableAttributedString,
         codeFont: NSFont,
         rhythm: MarkdownRhythm,
         codeHighlights: inout [MarkdownCodeHighlightRequest],
         codeBlocks: inout [MarkdownCodeBlockRegion]
     ) {
+        // A transcript answer can carry a large tool dump. Laying the whole dump
+        // out on the main thread costs a measurement pass per response, so the
+        // card shows a capped body while the copy control still yields it all.
+        // File Preview must show the whole file, so document mode keeps it.
+        let displayed = presentation == .document
+            ? content
+            : AgentCodeBlockPolicy.displayedContent(content)
         let table = NSTextTable()
         table.numberOfColumns = 1
         table.collapsesBorders = true
@@ -1159,7 +1268,7 @@ enum MarkdownAttributedDocumentBuilder {
         trailingCodeStyle.tabStops = codeStyle.tabStops
         trailingCodeStyle.defaultTabInterval = AtelierMetrics.space2XL
         trailingCodeStyle.textBlocks = [bodyBlock]
-        let source = content.isEmpty ? " " : content
+        let source = displayed.isEmpty ? " " : displayed
         let range = NSRange(location: output.length, length: (source as NSString).length)
         let code = NSMutableAttributedString(string: source + "\n", attributes: [
             .font: codeFont,
@@ -1200,15 +1309,15 @@ enum MarkdownAttributedDocumentBuilder {
                     length: range.location - headerStart
                 ),
                 sourceRange: range,
-                source: content,
+                source: AgentCodeBlockPolicy.copiedContent(content),
                 usesGeneratedLineNumbers: true
             )
         )
-        if !content.isEmpty {
+        if !displayed.isEmpty {
             codeHighlights.append(
                 MarkdownCodeHighlightRequest(
                     range: range,
-                    source: content,
+                    source: displayed,
                     languageName: AgentCodeHighlightPolicy.languageName(for: language)
                 )
             )
@@ -1515,10 +1624,11 @@ enum MarkdownAttributedDocumentBuilder {
         to output: NSMutableAttributedString,
         bodyFont: NSFont,
         rhythm: MarkdownRhythm,
+        measure: CGFloat,
         imageFigures: inout [MarkdownImageFigureRegion]
     ) {
         // Reserve a stable placeholder box; the decoded image adopts its own aspect.
-        let bounds = MarkdownImageFigureLayout.reservedBounds()
+        let bounds = MarkdownImageFigureLayout.reservedBounds(measure: measure)
         let attachment = NSTextAttachment()
         attachment.bounds = bounds
         attachment.image = MarkdownImageFigureRenderer.image(
@@ -1585,9 +1695,10 @@ enum MarkdownAttributedDocumentBuilder {
         to output: NSMutableAttributedString,
         bodyFont: NSFont,
         rhythm: MarkdownRhythm,
+        measure: CGFloat,
         mermaidFigures: inout [MarkdownMermaidFigureRegion]
     ) {
-        let bounds = MarkdownMermaidFigureLayout.reservedBounds()
+        let bounds = MarkdownMermaidFigureLayout.reservedBounds(measure: measure)
         let attachment = NSTextAttachment()
         attachment.bounds = bounds
         attachment.image = MarkdownImageFigureRenderer.image(
@@ -1595,10 +1706,13 @@ enum MarkdownAttributedDocumentBuilder {
             content: nil,
             message: MarkdownMermaidFigureLayout.loadingMessage
         )
+        // The source toggle is pinned to the trailing edge of this range, so the
+        // paragraph reserves the same width the reserved bounds already drop.
         let paragraph = paragraphStyle(
             lineSpacing: 0,
             before: rhythm.paragraph,
-            after: rhythm.paragraph
+            after: rhythm.paragraph,
+            tailIndent: -MarkdownCodeCardLayout.copyControlReservation
         )
         paragraph.alignment = .center
         let figureLocation = output.length
@@ -2165,11 +2279,20 @@ enum MarkdownAttributedDocumentBuilder {
             ?? base
     }
 
-    private static func headingColor(level: Int) -> NSColor {
+    private static func headingColor(
+        level: Int,
+        presentation: AgentMarkdownPresentation
+    ) -> NSColor {
         switch level {
-        case 1, 2: AppKitThemeAdapter.foreground
-        case 3: AppKitThemeAdapter.accent
-        default: AppKitThemeAdapter.secondary
+        case 1, 2:
+            AppKitThemeAdapter.foreground
+        case 3:
+            // The accent eyebrow is a document-only treatment.
+            presentation == .document
+                ? AppKitThemeAdapter.accent
+                : AppKitThemeAdapter.foreground
+        default:
+            AppKitThemeAdapter.secondary
         }
     }
 
@@ -2210,11 +2333,208 @@ enum MarkdownAttributedDocumentBuilder {
     }
 }
 
-private struct MarkdownCodeCopyControl: View {
+struct MarkdownCodeCopyControl: View {
     let source: String
 
+    /// `MarkdownCopyButton` uses `AtelierGhostButtonStyle`, which already ends in
+    /// `.atelierPointerCursor()`. Do not apply the pointer cursor a second time.
     var body: some View {
         MarkdownCopyButton(source: source, label: "Copy code")
+    }
+}
+
+/// Reveals and hides the Mermaid source under a rendered figure.
+/// `AtelierGhostButtonStyle` already ends in `.atelierPointerCursor()`, so the
+/// pointer cursor is not applied a second time here.
+struct MarkdownMermaidSourceControl: View {
+    let isExpanded: Bool
+    let toggle: () -> Void
+
+    private var label: String {
+        isExpanded ? "Hide Mermaid source" : "View Mermaid source"
+    }
+
+    var body: some View {
+        Button(action: toggle) {
+            Image(
+                systemName: isExpanded
+                    ? "chevron.up"
+                    : "chevron.left.forwardslash.chevron.right"
+            )
+            .frame(width: AtelierMetrics.regularIconSize)
+        }
+        .buttonStyle(
+            AtelierGhostButtonStyle(
+                tint: isExpanded ? AtelierTheme.accent : .primary
+            )
+        )
+        .accessibilityLabel(label)
+        .help(label)
+    }
+}
+
+nonisolated enum MarkdownOverlayAnchor: Equatable, Sendable {
+    /// Centered on the anchored range, for a code-card header row.
+    case centered
+    /// Pinned to the top of the anchored range, for a figure.
+    case top
+}
+
+/// Trailing overlay geometry shared by the file-preview and transcript surfaces.
+/// Controls are pinned to a TextKit range, never inserted into the document.
+@MainActor
+enum MarkdownOverlayControlLayout {
+    static let inset = AtelierMetrics.spaceS
+
+    static func visibleCharacterRange(
+        in textView: NSTextView,
+        visibleRect: NSRect
+    ) -> NSRange? {
+        guard let textContainer = textView.textContainer,
+              let layoutManager = textView.layoutManager else { return nil }
+        let origin = textView.textContainerOrigin
+        let containerRect = visibleRect.offsetBy(dx: -origin.x, dy: -origin.y)
+        let glyphRange = layoutManager.glyphRange(
+            forBoundingRect: containerRect,
+            in: textContainer
+        )
+        return layoutManager.characterRange(
+            forGlyphRange: glyphRange,
+            actualGlyphRange: nil
+        )
+    }
+
+    static func frame(
+        for range: NSRange,
+        size: NSSize,
+        anchor: MarkdownOverlayAnchor,
+        in textView: NSTextView,
+        host: NSView
+    ) -> NSRect? {
+        guard let textContainer = textView.textContainer,
+              let layoutManager = textView.layoutManager,
+              let textStorage = textView.textStorage,
+              range.length > 0,
+              NSMaxRange(range) <= textStorage.length else {
+            return nil
+        }
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: range,
+            actualCharacterRange: nil
+        )
+        let rect = layoutManager.boundingRect(
+            forGlyphRange: glyphRange,
+            in: textContainer
+        )
+        let textOrigin = textView.textContainerOrigin
+        let y = switch anchor {
+        case .centered: textOrigin.y + rect.midY - size.height / 2
+        case .top: textOrigin.y + rect.minY + inset
+        }
+        let origin = textView.convert(
+            NSPoint(
+                x: textView.bounds.maxX
+                    - textView.textContainerInset.width
+                    - inset
+                    - size.width,
+                y: y
+            ),
+            to: host
+        )
+        return NSRect(
+            x: origin.x,
+            y: origin.y,
+            width: size.width,
+            height: size.height
+        ).integral
+    }
+}
+
+/// Owns the revealed Mermaid source ranges inside one text storage. A toggle
+/// edits the storage in place; it never rebuilds the attributed document.
+@MainActor
+final class MarkdownMermaidSourceExpansion {
+    private var insertedRanges: [String: NSRange] = [:]
+
+    func isExpanded(_ id: String) -> Bool {
+        insertedRanges[id] != nil
+    }
+
+    func reset() {
+        insertedRanges.removeAll(keepingCapacity: true)
+    }
+
+    /// Inserts or removes the source block. Returns the edit so the caller can
+    /// shift the document regions it owns.
+    @discardableResult
+    func toggle(
+        figure: MarkdownMermaidFigureRegion,
+        in textStorage: NSTextStorage,
+        scale: CGFloat,
+        displayScale: CGFloat,
+        presentation: AgentMarkdownPresentation
+    ) -> (location: Int, delta: Int)? {
+        if let existing = insertedRanges[figure.id] {
+            guard NSMaxRange(existing) <= textStorage.length else {
+                insertedRanges[figure.id] = nil
+                return nil
+            }
+            textStorage.beginEditing()
+            textStorage.deleteCharacters(in: existing)
+            textStorage.endEditing()
+            insertedRanges[figure.id] = nil
+            shift(after: existing.location, by: -existing.length)
+            return (existing.location, -existing.length)
+        }
+        guard NSMaxRange(figure.range) <= textStorage.length else { return nil }
+        // Land after the figure's own paragraph break.
+        let location = min(textStorage.length, NSMaxRange(figure.range) + 1)
+        let block = MarkdownAttributedDocumentBuilder.mermaidSourceBlock(
+            source: figure.source,
+            scale: scale,
+            displayScale: displayScale,
+            presentation: presentation
+        )
+        guard block.length > 0 else { return nil }
+        textStorage.beginEditing()
+        textStorage.insert(block, at: location)
+        textStorage.endEditing()
+        // Shift the other expansions first: the new range starts at the edit
+        // location and must not shift itself.
+        shift(after: location, by: block.length)
+        insertedRanges[figure.id] = NSRange(
+            location: location,
+            length: block.length
+        )
+        return (location, block.length)
+    }
+
+    private func shift(after location: Int, by delta: Int) {
+        // An insert lands exactly where the next block starts, so a range at the
+        // edit location moves too. Use the same rule as `MarkdownRegionShift`.
+        for (id, range) in insertedRanges where range.location >= location {
+            insertedRanges[id] = NSRange(
+                location: range.location + delta,
+                length: range.length
+            )
+        }
+    }
+}
+
+/// Keeps stored TextKit ranges valid after an in-place storage edit.
+nonisolated enum MarkdownRegionShift {
+    /// A region that starts exactly at the edit location moves too: the Mermaid
+    /// source lands on the first index of the block that follows the figure.
+    static func shifted(
+        _ range: NSRange,
+        after location: Int,
+        by delta: Int
+    ) -> NSRange {
+        guard range.location >= location else { return range }
+        return NSRange(
+            location: max(0, range.location + delta),
+            length: range.length
+        )
     }
 }
 
@@ -2251,7 +2571,7 @@ nonisolated struct MarkdownDecodedImage: Sendable {
 }
 
 @MainActor
-private enum MarkdownImageFigureRenderer {
+enum MarkdownImageFigureRenderer {
     static func image(
         size: NSSize,
         content: CGImage?,
@@ -2650,7 +2970,11 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
         private var renderedDarkAppearance: Bool?
         private var headings: [MarkdownAttributedHeading] = []
         private var codeBlocks: [MarkdownCodeBlockRegion] = []
+        private var imageFigures: [MarkdownImageFigureRegion] = []
+        private var mermaidFigures: [MarkdownMermaidFigureRegion] = []
         private var codeCopyControls: [String: NSHostingView<MarkdownCodeCopyControl>] = [:]
+        private var mermaidControls: [String: NSHostingView<MarkdownMermaidSourceControl>] = [:]
+        private let mermaidExpansion = MarkdownMermaidSourceExpansion()
         private var appliedJumpRequest: MarkdownPreviewJumpRequest?
         private var lastReportedOutlineID: String?
         private var onSelectedOutlineChange: (String?) -> Void = { _ in }
@@ -2677,7 +3001,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                     self?.updateTextInsets()
                     self?.syncActiveHeading()
                     self?.syncReadingProgress()
-                    self?.syncVisibleCodeCopyControls()
+                    self?.syncVisibleOverlayControls()
                 }
             }
         }
@@ -2746,7 +3070,14 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                 control.removeFromSuperview()
             }
             codeCopyControls.removeAll(keepingCapacity: false)
+            for control in mermaidControls.values {
+                control.removeFromSuperview()
+            }
+            mermaidControls.removeAll(keepingCapacity: false)
+            mermaidExpansion.reset()
             codeBlocks = []
+            imageFigures = []
+            mermaidFigures = []
             if let boundsObserver {
                 NotificationCenter.default.removeObserver(boundsObserver)
             }
@@ -2794,6 +3125,9 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             let selection = textView.selectedRange()
             headings = document.headings
             codeBlocks = document.codeBlocks
+            imageFigures = document.imageFigures
+            mermaidFigures = document.mermaidFigures
+            mermaidExpansion.reset()
             let validCodeBlockIDs = Set(codeBlocks.map(\.id))
             let staleCodeBlockIDs = codeCopyControls.keys.filter {
                 !validCodeBlockIDs.contains($0)
@@ -2806,6 +3140,14 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                 codeCopyControls[block.id]?.rootView = MarkdownCodeCopyControl(
                     source: block.source
                 )
+            }
+            let validMermaidIDs = Set(mermaidFigures.map(\.id))
+            let staleMermaidIDs = mermaidControls.keys.filter {
+                !validMermaidIDs.contains($0)
+            }
+            for id in staleMermaidIDs {
+                mermaidControls[id]?.removeFromSuperview()
+                mermaidControls[id] = nil
             }
             textStorage.setAttributedString(document.attributedString)
             (textView as? MarkdownPreviewTextView)?.resetHoveredLink()
@@ -2831,7 +3173,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             scrollView.reflectScrolledClipView(scrollView.contentView)
             syncActiveHeading()
             syncReadingProgress()
-            syncVisibleCodeCopyControls()
+            syncVisibleOverlayControls()
         }
 
         private func scheduleImageLoads(
@@ -2877,7 +3219,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                 ),
                 bounds: bounds,
                 attachment: figure.attachment,
-                range: figure.range
+                range: currentRange(for: figure)
             )
         }
 
@@ -2889,7 +3231,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             mermaidTask?.cancel()
             mermaidTask = nil
             guard !figures.isEmpty else { return }
-            let width = MarkdownMermaidFigureLayout.renderWidth
+            let width = MarkdownMermaidFigureLayout.renderWidth()
             mermaidTask = Task { @MainActor [weak self] in
                 for figure in figures {
                     guard !Task.isCancelled else { return }
@@ -2939,7 +3281,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                 ),
                 bounds: bounds,
                 attachment: figure.attachment,
-                range: figure.range
+                range: currentRange(for: figure)
             )
         }
 
@@ -2957,7 +3299,7 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                 ),
                 bounds: bounds,
                 attachment: figure.attachment,
-                range: figure.range
+                range: currentRange(for: figure)
             )
         }
 
@@ -2989,43 +3331,26 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
-        private func syncVisibleCodeCopyControls() {
+        private func syncVisibleOverlayControls() {
             guard let scrollView,
                   let textView,
-                  let textContainer = textView.textContainer,
-                  let layoutManager = textView.layoutManager,
-                  !codeBlocks.isEmpty else {
-                for control in codeCopyControls.values {
-                    control.removeFromSuperview()
-                }
-                codeCopyControls.removeAll(keepingCapacity: true)
+                  !(codeBlocks.isEmpty && mermaidFigures.isEmpty),
+                  let visibleCharacterRange = MarkdownOverlayControlLayout
+                      .visibleCharacterRange(
+                          in: textView,
+                          visibleRect: scrollView.contentView.bounds
+                      ) else {
+                removeOverlayControls()
                 return
             }
-            let textOrigin = textView.textContainerOrigin
-            let visibleRect = scrollView.contentView.bounds.offsetBy(
-                dx: -textOrigin.x,
-                dy: -textOrigin.y
-            )
-            let visibleGlyphRange = layoutManager.glyphRange(
-                forBoundingRect: visibleRect,
-                in: textContainer
-            )
-            let visibleCharacterRange = layoutManager.characterRange(
-                forGlyphRange: visibleGlyphRange,
-                actualGlyphRange: nil
-            )
             let visibleBlocks = codeBlocks.filter {
                 NSIntersectionRange($0.headerRange, visibleCharacterRange).length > 0
             }
-            let visibleIDs = Set(visibleBlocks.map(\.id))
-            let hiddenCodeBlockIDs = codeCopyControls.keys.filter {
-                !visibleIDs.contains($0)
-            }
-            for id in hiddenCodeBlockIDs {
+            let visibleBlockIDs = Set(visibleBlocks.map(\.id))
+            for id in codeCopyControls.keys.filter({ !visibleBlockIDs.contains($0) }) {
                 codeCopyControls[id]?.removeFromSuperview()
                 codeCopyControls[id] = nil
             }
-
             for block in visibleBlocks {
                 let control: NSHostingView<MarkdownCodeCopyControl>
                 if let existing = codeCopyControls[block.id] {
@@ -3042,34 +3367,175 @@ struct MarkdownSelectableDocumentView: NSViewRepresentable {
                     codeCopyControls[block.id] = created
                     control = created
                 }
-                let glyphRange = layoutManager.glyphRange(
-                    forCharacterRange: block.headerRange,
-                    actualCharacterRange: nil
-                )
-                let headerRect = layoutManager.boundingRect(
-                    forGlyphRange: glyphRange,
-                    in: textContainer
-                )
-                let size = control.fittingSize
-                let origin = textView.convert(
-                    NSPoint(
-                        x: textView.bounds.maxX
-                            - textView.textContainerInset.width
-                            - AtelierMetrics.spaceS
-                            - size.width,
-                        y: textOrigin.y
-                            + headerRect.midY
-                            - size.height / 2
-                    ),
-                    to: scrollView
-                )
-                control.frame = NSRect(
-                    x: max(scrollView.contentView.frame.minX, origin.x),
-                    y: origin.y,
-                    width: size.width,
-                    height: size.height
-                ).integral
+                place(control, over: block.headerRange, anchor: .centered)
             }
+
+            let visibleFigures = mermaidFigures.filter {
+                NSIntersectionRange($0.range, visibleCharacterRange).length > 0
+            }
+            let visibleFigureIDs = Set(visibleFigures.map(\.id))
+            for id in mermaidControls.keys.filter({ !visibleFigureIDs.contains($0) }) {
+                mermaidControls[id]?.removeFromSuperview()
+                mermaidControls[id] = nil
+            }
+            for figure in visibleFigures {
+                let control: NSHostingView<MarkdownMermaidSourceControl>
+                if let existing = mermaidControls[figure.id] {
+                    control = existing
+                } else {
+                    let created = NSHostingView(
+                        rootView: mermaidSourceControl(for: figure)
+                    )
+                    scrollView.addSubview(
+                        created,
+                        positioned: .above,
+                        relativeTo: scrollView.contentView
+                    )
+                    mermaidControls[figure.id] = created
+                    control = created
+                }
+                place(control, over: figure.range, anchor: .top)
+            }
+        }
+
+        private func mermaidSourceControl(
+            for figure: MarkdownMermaidFigureRegion
+        ) -> MarkdownMermaidSourceControl {
+            MarkdownMermaidSourceControl(
+                isExpanded: mermaidExpansion.isExpanded(figure.id)
+            ) { [weak self] in
+                self?.toggleMermaidSource(id: figure.id)
+            }
+        }
+
+        private func place(
+            _ control: NSView,
+            over range: NSRange,
+            anchor: MarkdownOverlayAnchor
+        ) {
+            guard let scrollView, let textView else { return }
+            let size = control.fittingSize
+            guard let frame = MarkdownOverlayControlLayout.frame(
+                for: range,
+                size: size,
+                anchor: anchor,
+                in: textView,
+                host: scrollView
+            ) else {
+                return
+            }
+            control.frame = NSRect(
+                x: max(scrollView.contentView.frame.minX, frame.minX),
+                y: frame.minY,
+                width: frame.width,
+                height: frame.height
+            ).integral
+        }
+
+        private func removeOverlayControls() {
+            for control in codeCopyControls.values {
+                control.removeFromSuperview()
+            }
+            codeCopyControls.removeAll(keepingCapacity: true)
+            for control in mermaidControls.values {
+                control.removeFromSuperview()
+            }
+            mermaidControls.removeAll(keepingCapacity: true)
+        }
+
+        private func toggleMermaidSource(id: String) {
+            guard let textView,
+                  let textStorage = textView.textStorage,
+                  let figure = mermaidFigures.first(where: { $0.id == id }) else {
+                return
+            }
+            guard let edit = mermaidExpansion.toggle(
+                figure: figure,
+                in: textStorage,
+                scale: renderedScale,
+                displayScale: renderedDisplayScale,
+                presentation: .document
+            ) else {
+                return
+            }
+            shiftRegions(after: edit.location, by: edit.delta)
+            for figure in mermaidFigures {
+                mermaidControls[figure.id]?.rootView = mermaidSourceControl(
+                    for: figure
+                )
+            }
+            syncVisibleOverlayControls()
+        }
+
+        /// An in-place storage edit moves every later range, so the stored
+        /// regions have to follow it instead of being rebuilt.
+        private func shiftRegions(after location: Int, by delta: Int) {
+            guard delta != 0 else { return }
+            headings = headings.map {
+                MarkdownAttributedHeading(
+                    id: $0.id,
+                    range: MarkdownRegionShift.shifted(
+                        $0.range,
+                        after: location,
+                        by: delta
+                    )
+                )
+            }
+            codeBlocks = codeBlocks.map {
+                MarkdownCodeBlockRegion(
+                    id: $0.id,
+                    headerRange: MarkdownRegionShift.shifted(
+                        $0.headerRange,
+                        after: location,
+                        by: delta
+                    ),
+                    sourceRange: MarkdownRegionShift.shifted(
+                        $0.sourceRange,
+                        after: location,
+                        by: delta
+                    ),
+                    source: $0.source,
+                    usesGeneratedLineNumbers: $0.usesGeneratedLineNumbers
+                )
+            }
+            imageFigures = imageFigures.map {
+                MarkdownImageFigureRegion(
+                    id: $0.id,
+                    url: $0.url,
+                    attachment: $0.attachment,
+                    range: MarkdownRegionShift.shifted(
+                        $0.range,
+                        after: location,
+                        by: delta
+                    )
+                )
+            }
+            mermaidFigures = mermaidFigures.map {
+                MarkdownMermaidFigureRegion(
+                    id: $0.id,
+                    source: $0.source,
+                    attachment: $0.attachment,
+                    range: MarkdownRegionShift.shifted(
+                        $0.range,
+                        after: location,
+                        by: delta
+                    )
+                )
+            }
+        }
+
+        /// A load started before a toggle carries the range it was scheduled
+        /// with, so resolve the current range by id instead of that stale one.
+        private func currentRange(
+            for figure: MarkdownImageFigureRegion
+        ) -> NSRange {
+            imageFigures.first { $0.id == figure.id }?.range ?? figure.range
+        }
+
+        private func currentRange(
+            for figure: MarkdownMermaidFigureRegion
+        ) -> NSRange {
+            mermaidFigures.first { $0.id == figure.id }?.range ?? figure.range
         }
 
         private func scheduleHighlights(
