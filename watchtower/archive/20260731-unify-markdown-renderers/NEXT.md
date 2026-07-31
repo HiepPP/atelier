@@ -4,9 +4,9 @@
 
 - Title: Unify Markdown rendering on the native attributed builder
 - Slug: 20260731-unify-markdown-renderers
-- Status: ACTIVE
+- Status: ARCHIVED
 - Updated: 2026-07-31
-- Progress: 5/6 DONE. Group A shipped through a fan-out builder, reviewer, and fixer pass.
+- Progress: 5/6 DONE at archive time. Group A shipped through a fan-out builder, reviewer, and fixer pass. TASK-006 was archived while still BLOCKED.
 
 ## Tracker
 
@@ -42,4 +42,4 @@ Plan-level Status header: ACTIVE while any row is open, DONE when all rows DONE,
 
 ## Archive
 
-- None.
+- Archived: 2026-07-31 -> watchtower/archive/20260731-unify-markdown-renderers/
