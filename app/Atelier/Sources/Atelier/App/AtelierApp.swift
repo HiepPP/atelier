@@ -113,6 +113,7 @@ final class AtelierZoomModel {
     private(set) var scale: CGFloat = 1
     private(set) var isFocusMode = false
     private(set) var currentTier: DisplaySizeTier = DisplaySizing.fallbackTier
+    private(set) var agentResponseTextScale = AgentResponseTextSizePolicy.defaultScale
 
     var sizingMode: DisplaySizingMode {
         didSet {
@@ -127,6 +128,7 @@ final class AtelierZoomModel {
     private static let sidebarMaximumScale: CGFloat = 1.5
     private static let step: CGFloat = 0.1
     private static let settleDelay: UInt64 = 200_000_000
+    private static let agentResponseTextScaleKey = "agentResponseTextScale"
 
     private var requestedScale: CGFloat = 1
     private var settleTask: Task<Void, Never>?
@@ -140,6 +142,12 @@ final class AtelierZoomModel {
         self.windowController = windowController
         let stored = UserDefaults.standard.string(forKey: DisplaySizing.settingsKey)
         sizingMode = stored.flatMap(DisplaySizingMode.init(rawValue:)) ?? .automatic
+
+        if let storedTextScale = UserDefaults.standard.object(
+            forKey: Self.agentResponseTextScaleKey
+        ) as? Double {
+            agentResponseTextScale = AgentResponseTextSizePolicy.clamped(CGFloat(storedTextScale))
+        }
 
         let handler: @Sendable (Notification) -> Void = { [weak self] _ in
             MainActor.assumeIsolated { self?.updateForCurrentDisplay() }
@@ -197,6 +205,13 @@ final class AtelierZoomModel {
         }
         let tier = DisplaySizing.detectedTier(for: screen)
         if tier != currentTier { currentTier = tier }
+    }
+
+    func setAgentResponseTextScale(_ scale: CGFloat) {
+        let clamped = AgentResponseTextSizePolicy.clamped(scale)
+        guard clamped != agentResponseTextScale else { return }
+        agentResponseTextScale = clamped
+        UserDefaults.standard.set(Double(clamped), forKey: Self.agentResponseTextScaleKey)
     }
 
     func zoomIn() {

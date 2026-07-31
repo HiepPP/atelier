@@ -100,7 +100,7 @@ Rules:
 | Center | 420 | 660 | Flexible |
 | Inspector | 260 | 360 | 640 |
 | Watchtower overlay | 340 | 340 | 340 |
-| Agent response overlay | 50% of center | 100% of center | 100% of center |
+| Agent response overlay | 50% of center | 100% of center | 100% of center (default) |
 | Explorer legacy range | 220 | 280 | 400 |
 | Source Control legacy range | 320 | 380 | 540 |
 
@@ -1114,9 +1114,16 @@ The five background features, all read-only and cancellable:
 - Use cards for tool activity and structured results.
 - Present agent responses above the complete center work surface at every window width. The
   overlay never becomes a split peer or consumes terminal, editor, diff, or Gemma layout space.
-- Open the response overlay at a trailing half-width below the tab strip.
+- Open the response overlay at full center width below the tab strip.
 - Provide one header control that toggles between full width and a trailing half-width mode.
-- Opening the overlay from the Response action or `Cmd-R` always restores half-width mode.
+- Keep the last width the user picked for the rest of the session. The Response action and `Cmd-R`
+  reopen the overlay at that width, not at a fixed one. A new launch starts at full width again.
+- Provide two header controls that step transcript text one size smaller and one size larger.
+  Scale transcript text only: panel chrome, controls, and header height keep their own metrics.
+  Fold the pair into one text-size menu when the header is too narrow for both steppers.
+- Bound the text scale to 0.8 through 1.6 in steps of 0.1, disable the control that has no room
+  left, and persist the chosen scale across launches. Start at 1.3, which reads the transcript body
+  at 17.5 points before zoom.
 - Restore at most 100 newest final responses for the current workspace at startup, and only from the
   last three days. A transcript older than that window is never opened, and a response older than
   that window never reaches the panel. Older history stays on disk for other tools to read.

@@ -278,15 +278,16 @@ struct AtelierActionRegistryTests {
 
         AtelierActionRegistry.perform(.toggleAgentResponses, model: model)
         #expect(workspace.isAgentSidecarPresented)
-        #expect(workspace.chrome.agentResponseOverlayMode == .half)
+        #expect(workspace.chrome.agentResponseOverlayMode == .full)
 
         workspace.chrome.toggleAgentResponseOverlayMode()
-        #expect(workspace.chrome.agentResponseOverlayMode == .full)
+        #expect(workspace.chrome.agentResponseOverlayMode == .half)
 
         AtelierActionRegistry.perform(.toggleAgentResponses, model: model)
         #expect(!workspace.isAgentSidecarPresented)
         AtelierActionRegistry.perform(.toggleAgentResponses, model: model)
         #expect(workspace.isAgentSidecarPresented)
+        // Reopening keeps the width the user last picked for this session.
         #expect(workspace.chrome.agentResponseOverlayMode == .half)
 
         #expect(!workspace.isWatchtowerPresented)

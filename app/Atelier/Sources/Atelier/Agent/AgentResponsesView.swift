@@ -5,6 +5,42 @@ nonisolated enum AgentResponseSelectionPolicy {
     static let defaultEnabled = false
 }
 
+/// Reading-comfort scale for the response transcript. It multiplies the zoom
+/// scale for transcript text only, so panel chrome keeps its own metrics.
+nonisolated enum AgentResponseTextSizePolicy {
+    static let defaultScale: CGFloat = 1.3
+    static let minimumScale: CGFloat = 0.8
+    static let maximumScale: CGFloat = 1.6
+    static let step: CGFloat = 0.1
+
+    static func clamped(_ scale: CGFloat) -> CGFloat {
+        guard scale.isFinite else { return defaultScale }
+        return min(max(snapped(scale), minimumScale), maximumScale)
+    }
+
+    static func increased(_ scale: CGFloat) -> CGFloat {
+        clamped(clamped(scale) + step)
+    }
+
+    static func decreased(_ scale: CGFloat) -> CGFloat {
+        clamped(clamped(scale) - step)
+    }
+
+    static func canIncrease(_ scale: CGFloat) -> Bool {
+        clamped(scale) < maximumScale
+    }
+
+    static func canDecrease(_ scale: CGFloat) -> Bool {
+        clamped(scale) > minimumScale
+    }
+
+    /// Repeated step addition drifts in binary floating point, so every value
+    /// lands back on a two-decimal grid before it is compared or stored.
+    private static func snapped(_ scale: CGFloat) -> CGFloat {
+        (scale * 100).rounded() / 100
+    }
+}
+
 nonisolated enum AgentResponseNavigationPolicy {
     static func previousIndex(currentIndex: Int?, count: Int) -> Int? {
         guard count > 0 else { return nil }
@@ -26,7 +62,10 @@ struct AgentResponsesView: View {
     let onToggleWidth: () -> Void
     let textSelectionEnabled: Bool
     let profileScrollCycles: Int
+    let textScale: CGFloat
+    let onChangeTextScale: (CGFloat) -> Void
 
+    @Environment(\.atelierZoomScale) private var zoomScale
     @State private var selectedResponseID: AgentResponseReadIdentity?
     @State private var transcriptScrolled = false
 
@@ -36,7 +75,9 @@ struct AgentResponsesView: View {
         isFullWidth: Bool = true,
         onToggleWidth: @escaping () -> Void = {},
         textSelectionEnabled: Bool = AgentResponseSelectionPolicy.defaultEnabled,
-        profileScrollCycles: Int = 0
+        profileScrollCycles: Int = 0,
+        textScale: CGFloat = AgentResponseTextSizePolicy.defaultScale,
+        onChangeTextScale: @escaping (CGFloat) -> Void = { _ in }
     ) {
         self.model = model
         self.onClose = onClose
@@ -44,12 +85,15 @@ struct AgentResponsesView: View {
         self.onToggleWidth = onToggleWidth
         self.textSelectionEnabled = textSelectionEnabled
         self.profileScrollCycles = max(0, profileScrollCycles)
+        self.textScale = AgentResponseTextSizePolicy.clamped(textScale)
+        self.onChangeTextScale = onChangeTextScale
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             transcript
+                .environment(\.atelierZoomScale, zoomScale * textScale)
             footer
         }
         .background(AtelierTheme.editor)
@@ -112,6 +156,8 @@ struct AgentResponsesView: View {
             .accessibilityValue(model.isRefreshing ? "Loading" : "Ready")
             .help("Refresh agent responses")
 
+            textSizeControls
+
             Button(action: onToggleWidth) {
                 Image(
                     systemName: isFullWidth
@@ -152,6 +198,63 @@ struct AgentResponsesView: View {
                 .opacity(transcriptScrolled ? 1 : 0)
                 .animation(.easeInOut(duration: 0.15), value: transcriptScrolled)
         }
+    }
+
+    /// Half width leaves the header little room, so the pair of steppers folds
+    /// into one menu before it can squeeze the session picker.
+    private var textSizeControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: AtelierMetrics.spaceS) {
+                textSizeButton(
+                    systemImage: "textformat.size.smaller",
+                    label: "Decrease agent response text size",
+                    help: "Smaller Text",
+                    isEnabled: AgentResponseTextSizePolicy.canDecrease(textScale),
+                    action: decreaseTextSize
+                )
+                textSizeButton(
+                    systemImage: "textformat.size.larger",
+                    label: "Increase agent response text size",
+                    help: "Larger Text",
+                    isEnabled: AgentResponseTextSizePolicy.canIncrease(textScale),
+                    action: increaseTextSize
+                )
+            }
+
+            Menu {
+                Button("Larger Text", action: increaseTextSize)
+                    .disabled(!AgentResponseTextSizePolicy.canIncrease(textScale))
+                Button("Smaller Text", action: decreaseTextSize)
+                    .disabled(!AgentResponseTextSizePolicy.canDecrease(textScale))
+            } label: {
+                Image(systemName: "textformat.size")
+                    .frame(width: 24, height: 24)
+                    .atelierGlassControl()
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .atelierPointerCursor()
+            .accessibilityLabel("Agent response text size")
+            .help("Text Size")
+        }
+    }
+
+    private func textSizeButton(
+        systemImage: String,
+        label: String,
+        help: String,
+        isEnabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.glass)
+        .atelierPointerCursor()
+        .disabled(!isEnabled)
+        .accessibilityLabel(label)
+        .help(help)
     }
 
     private var refreshButtonLabel: some View {
@@ -439,6 +542,14 @@ struct AgentResponsesView: View {
 
     private func refreshResponses() {
         Task { await model.refresh() }
+    }
+
+    private func increaseTextSize() {
+        onChangeTextScale(AgentResponseTextSizePolicy.increased(textScale))
+    }
+
+    private func decreaseTextSize() {
+        onChangeTextScale(AgentResponseTextSizePolicy.decreased(textScale))
     }
 
     private func selectLatestResponse() {

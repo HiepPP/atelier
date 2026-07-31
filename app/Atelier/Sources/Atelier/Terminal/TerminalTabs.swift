@@ -1727,7 +1727,9 @@ private struct AgentResponseOverlay: View {
                     model: model,
                     onClose: onClose,
                     isFullWidth: mode == .full,
-                    onToggleWidth: onToggleMode
+                    onToggleWidth: onToggleMode,
+                    textScale: zoom.agentResponseTextScale,
+                    onChangeTextScale: zoom.setAgentResponseTextScale
                 )
                 .frame(
                     width: AgentSidecarLayoutPolicy.width(

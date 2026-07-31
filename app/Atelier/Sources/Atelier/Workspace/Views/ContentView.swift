@@ -177,7 +177,7 @@ final class WorkspaceChromeModel {
     var currentLayoutMode = WorkspaceLayoutMode.standard
     var selectedSidebarTab = WorkspaceSidebarTab.explorer
     var explorerRevealRequest: FileTreeRevealRequest?
-    var agentResponseOverlayMode = AgentResponseOverlayMode.half
+    var agentResponseOverlayMode = AgentResponseOverlayMode.full
     var isProjectMenuPresented = false
     var sidebarAnimationRequestID = 0
     var inspectorAnimationRequestID = 0
@@ -281,7 +281,6 @@ final class WorkspaceChromeModel {
     ) {
         guard !session.isAgentSidecarPresented else { return }
         responderBeforeAgentResponses = windowController.currentFirstResponder()
-        agentResponseOverlayMode = .half
         session.openAgentSidecar()
     }
 
