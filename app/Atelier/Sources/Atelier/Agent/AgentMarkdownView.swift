@@ -458,10 +458,32 @@ nonisolated enum MarkdownTableAlignmentPolicy {
     }
 }
 
-/// Shared front-matter card geometry.
+/// Shared front-matter card geometry. The key column is sized from the widest key
+/// the document actually holds, so a deep dotted path such as
+/// `colors.text.sidebar-primary-foreground` stays on one line instead of wrapping
+/// mid-word. Bounded at both ends so a short-key document does not waste the
+/// measure and a pathological key cannot starve the value column.
 nonisolated enum MarkdownFrontMatterLayout {
-    static let keyColumnWidth: CGFloat = 132
-    static let keyColumnPercentage: CGFloat = 26
+    static let minimumKeyPercentage: CGFloat = 22
+    static let maximumKeyPercentage: CGFloat = 48
+
+    /// The table resolves its percentages against the real text container, which is
+    /// narrower than the nominal measure whenever the window cannot grant the full
+    /// measure. The document is built before layout, so the container width is not
+    /// known here. Reserve headroom for that gap, or the widest key computes a share
+    /// that fits the nominal measure and still wraps on screen.
+    static let containerHeadroom: CGFloat = 0.88
+
+    static func keyColumnPercentage(
+        longestKeyWidth: CGFloat,
+        horizontalPadding: CGFloat,
+        measure: CGFloat
+    ) -> CGFloat {
+        guard measure > 0, longestKeyWidth > 0 else { return minimumKeyPercentage }
+        let assumedContainer = measure * containerHeadroom
+        let needed = (longestKeyWidth + horizontalPadding) / assumedContainer * 100
+        return min(maximumKeyPercentage, max(minimumKeyPercentage, needed))
+    }
 }
 
 /// Layout and type treatment for Markdown surfaces.
@@ -1526,7 +1548,12 @@ nonisolated struct MarkdownFrontMatterEntry: Equatable, Sendable {
 /// anything that is not `key: value`, a `- item` continuation, or a blank line falls
 /// back to normal block parsing so a plain `---` divider keeps its meaning.
 nonisolated enum MarkdownFrontMatterPolicy {
-    static let maximumLineCount = 64
+    /// Bounds the scan for the closing marker so a stray `---` cannot make the
+    /// parser read a whole document. Real front matter is routinely long: a design
+    /// system catalog reaches 186 lines, and the old 64-line bound made it fall back
+    /// to block parsing, where the opening `---` became a divider and every
+    /// `key: value` line was joined into one run-on paragraph.
+    static let maximumLineCount = 512
     static let maximumKeyLength = 48
 
     static func parse(
@@ -1602,7 +1629,9 @@ nonisolated enum MarkdownFrontMatterPolicy {
 
     private static func field(_ line: String) -> (key: String, value: String)? {
         guard let separator = line.firstIndex(of: ":") else { return nil }
-        let key = String(line[..<separator])
+        // YAML allows a quoted key, and a numeric one has to be quoted: `"2": "border-2"`.
+        // Strip the quotes before the charset check, exactly as values are unquoted.
+        let key = unquoted(String(line[..<separator]))
         guard !key.isEmpty,
               key.count <= maximumKeyLength,
               key.allSatisfy({ $0.isLetter || $0.isNumber || "_-.".contains($0) }) else {

@@ -1380,6 +1380,16 @@ enum MarkdownAttributedDocumentBuilder {
         let keyFont = AtelierTypography.codeFont(size: max(9, bodySize * 0.68))
         let valueFont = NSFont.systemFont(ofSize: max(10, bodySize * 0.84))
         let background = AppKitThemeAdapter.raised.withAlphaComponent(0.26)
+        // Size the key column from the widest key this document actually holds.
+        // A fixed share fits the median key and wraps the deep dotted paths.
+        let longestKey = entries.map(\.key).max { $0.count < $1.count } ?? ""
+        let keyPercentage = MarkdownFrontMatterLayout.keyColumnPercentage(
+            longestKeyWidth: (longestKey as NSString)
+                .size(withAttributes: [.font: keyFont])
+                .width,
+            horizontalPadding: AtelierMetrics.spaceM + AtelierMetrics.spaceS,
+            measure: measure
+        )
 
         for (rowIndex, entry) in entries.enumerated() {
             for columnIndex in 0..<2 {
@@ -1409,9 +1419,7 @@ enum MarkdownAttributedDocumentBuilder {
                     )
                 }
                 block.setContentWidth(
-                    columnIndex == 0
-                        ? MarkdownFrontMatterLayout.keyColumnPercentage
-                        : 100 - MarkdownFrontMatterLayout.keyColumnPercentage,
+                    columnIndex == 0 ? keyPercentage : 100 - keyPercentage,
                     type: .percentageValueType
                 )
                 block.setWidth(
