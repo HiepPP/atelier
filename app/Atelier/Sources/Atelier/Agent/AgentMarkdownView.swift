@@ -59,21 +59,6 @@ enum AgentMarkdownInlinePolicy {
     private static var cache: [CacheKey: AttributedString] = [:]
     private static var cacheOrder: [CacheKey] = []
 
-    /// Whole-cell / whole-span inline code only. Used to draw one continuous accent
-    /// chip so soft-wrapped paths do not zebra per line fragment.
-    static func pureCodeContent(_ markdown: String) -> String? {
-        let trimmed = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 2,
-              trimmed.first == "`",
-              trimmed.last == "`" else {
-            return nil
-        }
-        let inner = String(trimmed.dropFirst().dropLast())
-        // Reject multi-span or empty payloads; nested fences belong to block parsing.
-        guard !inner.isEmpty, !inner.contains("`") else { return nil }
-        return inner
-    }
-
     static func attributedString(
         _ content: String,
         showsColorSwatches: Bool = false,
@@ -156,10 +141,9 @@ enum AgentMarkdownInlinePolicy {
                 run.inlinePresentationIntent?.contains(.code) == true ? run.range : nil
             }
             for range in codeRanges {
-                attributed[range].foregroundColor = AtelierTheme.accent
-                // Short mixed-prose chips stay filled. Pure soft-wrapped code in tables
-                // uses `pureCodeContent` + a View-level chip so fills do not zebra.
-                attributed[range].backgroundColor = AtelierTheme.accent.opacity(0.12)
+                // Mono face only, matching the native builder. Any fill turns a
+                // code-heavy paragraph into a mosaic of blocks.
+                attributed[range].foregroundColor = Color.primary
             }
         case .plain:
             attributed = AttributedString(content)
@@ -458,10 +442,74 @@ nonisolated enum MarkdownTableAlignmentPolicy {
     }
 }
 
-/// Shared front-matter card geometry.
+/// Document mode carries a reading measure and a data measure. Prose past roughly
+/// 90 characters per line costs the reader the return sweep; a wide table or a long
+/// code line gains nothing from wrapping. Wide blocks fill the container, prose is
+/// inset inside it.
+nonisolated enum MarkdownBleedPolicy {
+    /// Rebuild only when the measure crosses a bucket, so a live resize cannot
+    /// rebuild the attributed document per frame.
+    static let measureBucket: CGFloat = 40
+
+    static func bucketed(_ measure: CGFloat) -> CGFloat {
+        guard measure > 0 else { return 0 }
+        return (measure / measureBucket).rounded(.down) * measureBucket
+    }
+
+    @MainActor
+    static func containerMeasure(
+        requested: CGFloat?,
+        presentation: AgentMarkdownPresentation
+    ) -> CGFloat {
+        guard presentation == .document else {
+            return AtelierMetrics.transcriptMaxWidth
+        }
+        // No requested width means no live container to bleed into, so stay on the
+        // prose measure. Bleed is opt-in from the surface that knows its width.
+        guard let requested, requested > 0 else {
+            return AtelierMetrics.documentMaxWidth
+        }
+        return min(requested, AtelierMetrics.documentBleedMaxWidth)
+    }
+
+    @MainActor
+    static func proseMeasure(
+        containerMeasure: CGFloat,
+        presentation: AgentMarkdownPresentation
+    ) -> CGFloat {
+        guard presentation == .document else { return containerMeasure }
+        return min(AtelierMetrics.documentMaxWidth, containerMeasure)
+    }
+
+    static func proseInset(
+        containerMeasure: CGFloat,
+        proseMeasure: CGFloat
+    ) -> CGFloat {
+        max(0, (containerMeasure - proseMeasure) / 2)
+    }
+}
+
+/// Shared front-matter card geometry. The key column is sized from the widest key
+/// the document actually holds, so a deep dotted path such as
+/// `colors.text.sidebar-primary-foreground` stays on one line instead of wrapping
+/// mid-word. Bounded at both ends so a short-key document does not waste the
+/// measure and a pathological key cannot starve the value column.
 nonisolated enum MarkdownFrontMatterLayout {
-    static let keyColumnWidth: CGFloat = 132
-    static let keyColumnPercentage: CGFloat = 26
+    static let minimumKeyPercentage: CGFloat = 22
+    static let maximumKeyPercentage: CGFloat = 48
+
+    /// `measure` is the real container the table resolves its percentages against,
+    /// so no headroom is reserved. An earlier version divided by the nominal measure
+    /// and had to guess the gap; the surface now reports its own width instead.
+    static func keyColumnPercentage(
+        longestKeyWidth: CGFloat,
+        horizontalPadding: CGFloat,
+        measure: CGFloat
+    ) -> CGFloat {
+        guard measure > 0, longestKeyWidth > 0 else { return minimumKeyPercentage }
+        let needed = (longestKeyWidth + horizontalPadding) / measure * 100
+        return min(maximumKeyPercentage, max(minimumKeyPercentage, needed))
+    }
 }
 
 /// Layout and type treatment for Markdown surfaces.
@@ -728,12 +776,20 @@ struct ParsedMarkdownDocument: Equatable {
     }
 }
 
+/// One rendered heading and its vertical offset inside the transcript surface.
+/// The response panel maps a scroll position to a section title with these.
+nonisolated struct MarkdownTranscriptHeading: Equatable, Sendable {
+    let title: String
+    let y: CGFloat
+}
+
 struct AgentMarkdownView: View, Equatable {
     let source: String
     let bodyFontSize: CGFloat
     let presentation: AgentMarkdownPresentation
     let blocks: [AgentMarkdownBlock]?
     let inlineRuns: [AttributedString?]?
+    let onHeadingLayout: ([MarkdownTranscriptHeading]) -> Void
 
     /// Bumped when an async figure changes the rendered height, so SwiftUI
     /// measures the native surface again.
@@ -744,13 +800,15 @@ struct AgentMarkdownView: View, Equatable {
         bodyFontSize: CGFloat = AtelierTypography.body,
         presentation: AgentMarkdownPresentation = .transcript,
         blocks: [AgentMarkdownBlock]? = nil,
-        inlineRuns: [AttributedString?]? = nil
+        inlineRuns: [AttributedString?]? = nil,
+        onHeadingLayout: @escaping ([MarkdownTranscriptHeading]) -> Void = { _ in }
     ) {
         self.source = source
         self.bodyFontSize = bodyFontSize
         self.presentation = presentation
         self.blocks = blocks
         self.inlineRuns = inlineRuns
+        self.onHeadingLayout = onHeadingLayout
     }
 
     static func == (lhs: AgentMarkdownView, rhs: AgentMarkdownView) -> Bool {
@@ -782,7 +840,8 @@ struct AgentMarkdownView: View, Equatable {
             presentation: presentation,
             fontScale: fontScale,
             contentRevision: contentRevision,
-            onContentHeightChange: { contentRevision &+= 1 }
+            onContentHeightChange: { contentRevision &+= 1 },
+            onHeadingLayout: onHeadingLayout
         )
         .frame(maxWidth: proseMaxWidth, alignment: .leading)
     }
@@ -804,6 +863,7 @@ private struct MarkdownTranscriptTextView: NSViewRepresentable {
     /// Read only to re-run layout after an async figure changed the height.
     let contentRevision: Int
     let onContentHeightChange: () -> Void
+    let onHeadingLayout: ([MarkdownTranscriptHeading]) -> Void
 
     func makeCoordinator() -> MarkdownTranscriptCoordinator {
         MarkdownTranscriptCoordinator()
@@ -825,7 +885,8 @@ private struct MarkdownTranscriptTextView: NSViewRepresentable {
             displayScale: displayScale,
             usesDarkAppearance: colorScheme == .dark,
             openURL: openURL,
-            onContentHeightChange: onContentHeightChange
+            onContentHeightChange: onContentHeightChange,
+            onHeadingLayout: onHeadingLayout
         )
     }
 
@@ -878,6 +939,9 @@ final class MarkdownTranscriptCoordinator: NSObject, NSTextViewDelegate {
     private var renderedDarkAppearance: Bool?
     private var openURL: OpenURLAction?
     private var onContentHeightChange: () -> Void = {}
+    private var onHeadingLayout: ([MarkdownTranscriptHeading]) -> Void = { _ in }
+    private var headings: [MarkdownAttributedHeading] = []
+    private var reportedHeadings: [MarkdownTranscriptHeading] = []
     private var contentGeneration = 0
     private var measuredGeneration = -1
     private var measuredWidth: CGFloat = 0
@@ -946,10 +1010,12 @@ final class MarkdownTranscriptCoordinator: NSObject, NSTextViewDelegate {
         displayScale: CGFloat,
         usesDarkAppearance: Bool,
         openURL: OpenURLAction?,
-        onContentHeightChange: @escaping () -> Void
+        onContentHeightChange: @escaping () -> Void,
+        onHeadingLayout: @escaping ([MarkdownTranscriptHeading]) -> Void
     ) {
         self.openURL = openURL
         self.onContentHeightChange = onContentHeightChange
+        self.onHeadingLayout = onHeadingLayout
         let needsRender = renderedSource != source
             || renderedPresentation != presentation
             || renderedScale != scale
@@ -999,9 +1065,12 @@ final class MarkdownTranscriptCoordinator: NSObject, NSTextViewDelegate {
         imageFigures = []
         mermaidFigures = []
         mermaidExpansion.reset()
+        headings = []
+        reportedHeadings = []
         textView = nil
         openURL = nil
         onContentHeightChange = {}
+        onHeadingLayout = { _ in }
     }
 
     /// Content height for a proposed width, measured from the used rect.
@@ -1032,7 +1101,41 @@ final class MarkdownTranscriptCoordinator: NSObject, NSTextViewDelegate {
         // Overlay frames need finished layout, and this runs inside one. Place
         // them on the next runloop instead of during the measurement pass.
         scheduleOverlaySync()
+        publishHeadingLayout(layoutManager: layoutManager, textContainer: textContainer)
         return height
+    }
+
+    /// Heading offsets are only valid after layout, so they are read here and
+    /// published on the next runloop. Writing view state inside this measurement
+    /// pass would mutate during AppKit layout.
+    private func publishHeadingLayout(
+        layoutManager: NSLayoutManager,
+        textContainer: NSTextContainer
+    ) {
+        guard let textStorage = textView?.textStorage else { return }
+        let rows = headings.compactMap { heading -> MarkdownTranscriptHeading? in
+            guard NSMaxRange(heading.range) <= textStorage.length,
+                  heading.range.length > 0 else { return nil }
+            let title = textStorage.attributedSubstring(from: heading.range)
+                .string
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { return nil }
+            let glyphRange = layoutManager.glyphRange(
+                forCharacterRange: heading.range,
+                actualCharacterRange: nil
+            )
+            let rect = layoutManager.boundingRect(
+                forGlyphRange: glyphRange,
+                in: textContainer
+            )
+            return MarkdownTranscriptHeading(title: title, y: rect.minY)
+        }
+        guard rows != reportedHeadings else { return }
+        reportedHeadings = rows
+        let publish = onHeadingLayout
+        Task { @MainActor in
+            publish(rows)
+        }
     }
 
     func textView(
@@ -1070,6 +1173,8 @@ final class MarkdownTranscriptCoordinator: NSObject, NSTextViewDelegate {
         codeBlocks = document.codeBlocks
         imageFigures = document.imageFigures
         mermaidFigures = document.mermaidFigures
+        headings = document.headings
+        reportedHeadings = []
         mermaidExpansion.reset()
         let validIDs = Set(codeBlocks.map(\.id)).union(mermaidFigures.map(\.id))
         for id in codeCopyControls.keys.filter({ !validIDs.contains($0) }) {
@@ -1526,7 +1631,12 @@ nonisolated struct MarkdownFrontMatterEntry: Equatable, Sendable {
 /// anything that is not `key: value`, a `- item` continuation, or a blank line falls
 /// back to normal block parsing so a plain `---` divider keeps its meaning.
 nonisolated enum MarkdownFrontMatterPolicy {
-    static let maximumLineCount = 64
+    /// Bounds the scan for the closing marker so a stray `---` cannot make the
+    /// parser read a whole document. Real front matter is routinely long: a design
+    /// system catalog reaches 186 lines, and the old 64-line bound made it fall back
+    /// to block parsing, where the opening `---` became a divider and every
+    /// `key: value` line was joined into one run-on paragraph.
+    static let maximumLineCount = 512
     static let maximumKeyLength = 48
 
     static func parse(
@@ -1602,7 +1712,9 @@ nonisolated enum MarkdownFrontMatterPolicy {
 
     private static func field(_ line: String) -> (key: String, value: String)? {
         guard let separator = line.firstIndex(of: ":") else { return nil }
-        let key = String(line[..<separator])
+        // YAML allows a quoted key, and a numeric one has to be quoted: `"2": "border-2"`.
+        // Strip the quotes before the charset check, exactly as values are unquoted.
+        let key = unquoted(String(line[..<separator]))
         guard !key.isEmpty,
               key.count <= maximumKeyLength,
               key.allSatisfy({ $0.isLetter || $0.isNumber || "_-.".contains($0) }) else {

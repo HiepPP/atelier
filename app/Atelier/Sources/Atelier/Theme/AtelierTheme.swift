@@ -128,7 +128,12 @@ enum AtelierMetrics {
     static let fieldHeight: CGFloat = 32
     static let rowHeight: CGFloat = 28
     static let transcriptMaxWidth: CGFloat = 680
-    static let documentMaxWidth: CGFloat = 720
+    static let documentMaxWidth: CGFloat = 640
+    /// Wide blocks in file Preview fill this instead of the prose measure. A
+    /// reading measure and a data measure are not the same thing: prose past
+    /// roughly 90 characters costs the return sweep, while a table gains nothing
+    /// from wrapping.
+    static let documentBleedMaxWidth: CGFloat = 1180
     static let markdownOutlineWidth: CGFloat = 200
     static let emptyStateMaxWidth: CGFloat = 460
     static let workspaceRailWidth: CGFloat = 176
@@ -177,33 +182,48 @@ enum AtelierTypography {
     static let terminalSize: CGFloat = 20
 
     // Resolving the descriptor + ligature features is expensive; callers hit
-    // this per layout/zoom, so cache per size.
+    // this per layout/zoom, so cache per size. Ligature-off runs keep their own
+    // cache, because the two resolve to different fonts at the same size.
     private static var codeFontCache: [CGFloat: NSFont] = [:]
+    private static var plainCodeFontCache: [CGFloat: NSFont] = [:]
 
-    static func codeFont(size: CGFloat) -> NSFont {
-        if let cached = codeFontCache[size] { return cached }
-        let font = makeCodeFont(size: size)
-        codeFontCache[size] = font
+    /// - Parameter ligatures: pass `false` for an inline code run inside prose. A
+    ///   contextual alternate helps in a block of code and misleads in a sentence:
+    ///   `<!--` draws as a left arrow, so quoted source stops reading as itself.
+    static func codeFont(size: CGFloat, ligatures: Bool = true) -> NSFont {
+        if ligatures {
+            if let cached = codeFontCache[size] { return cached }
+            let font = makeCodeFont(size: size, ligatures: true)
+            codeFontCache[size] = font
+            return font
+        }
+        if let cached = plainCodeFontCache[size] { return cached }
+        let font = makeCodeFont(size: size, ligatures: false)
+        plainCodeFontCache[size] = font
         return font
     }
 
-    private static func makeCodeFont(size: CGFloat) -> NSFont {
+    private static func makeCodeFont(size: CGFloat, ligatures: Bool) -> NSFont {
         let descriptor = NSFontDescriptor(fontAttributes: [
             .family: codeFontFamily,
             .traits: [NSFontDescriptor.TraitKey.weight: codeFontWeight]
         ])
         let baseFont = NSFont(descriptor: descriptor, size: size)
             ?? .monospacedSystemFont(ofSize: size, weight: codeFontWeight)
-        guard codeFontLigaturesEnabled else { return baseFont }
-
+        // JetBrains Mono ships contextual alternates on, so the base font already
+        // draws them and only the off selector changes anything. Asking for them
+        // explicitly is a no-op kept for a fallback face that may default them off.
+        let selector = (codeFontLigaturesEnabled && ligatures)
+            ? kContextualAlternatesOnSelector
+            : kContextualAlternatesOffSelector
         let featureSettings: [[NSFontDescriptor.FeatureKey: Any]] = [[
             .typeIdentifier: kContextualAlternatesType,
-            .selectorIdentifier: kContextualAlternatesOnSelector
+            .selectorIdentifier: selector
         ]]
-        let ligatureDescriptor = baseFont.fontDescriptor.addingAttributes([
+        let featureDescriptor = baseFont.fontDescriptor.addingAttributes([
             .featureSettings: featureSettings
         ])
-        return NSFont(descriptor: ligatureDescriptor, size: size) ?? baseFont
+        return NSFont(descriptor: featureDescriptor, size: size) ?? baseFont
     }
 }
 
