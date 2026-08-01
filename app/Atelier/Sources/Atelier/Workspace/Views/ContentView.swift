@@ -173,42 +173,45 @@ nonisolated struct WorkspacePanelPresentation: Equatable, Sendable {
 @MainActor
 @Observable
 final class WorkspaceChromeModel {
-    var panels = WorkspacePanelPresentation.initial(for: .standard)
-    var currentLayoutMode = WorkspaceLayoutMode.standard
-    var selectedSidebarTab = WorkspaceSidebarTab.explorer
+    /// Sidebar, inspector, and sidebar-tab state live in one window-wide owner
+    /// so switching workspaces never moves the chrome.
+    let shared: WorkspaceChromeSharedState
     var explorerRevealRequest: FileTreeRevealRequest?
     var agentResponseOverlayMode = AgentResponseOverlayMode.full
     var isProjectMenuPresented = false
     var sidebarAnimationRequestID = 0
     var inspectorAnimationRequestID = 0
     var projectCommandToolbarOffset: CGFloat = 0
-    private var hasAppliedInitialLayout = false
-    private var initialLayoutProfilePanels: LayoutProfilePanelState?
     private var projectMenuTransitionID = 0
     private var responderBeforeProjectMenu: NSResponder?
     private var responderBeforeInspector: NSResponder?
     private var responderBeforeAgentResponses: NSResponder?
 
+    init(shared: WorkspaceChromeSharedState = WorkspaceChromeSharedState()) {
+        self.shared = shared
+    }
+
+    var panels: WorkspacePanelPresentation {
+        get { shared.panels }
+        set { shared.panels = newValue }
+    }
+
+    var currentLayoutMode: WorkspaceLayoutMode {
+        get { shared.currentLayoutMode }
+        set { shared.currentLayoutMode = newValue }
+    }
+
+    var selectedSidebarTab: WorkspaceSidebarTab {
+        get { shared.selectedSidebarTab }
+        set { shared.selectedSidebarTab = newValue }
+    }
+
     var layoutProfilePanelState: LayoutProfilePanelState {
-        LayoutProfilePanelState(
-            showsSidebar: panels.showsSidebar,
-            showsInspector: panels.showsInspector,
-            restoresSidebarAfterInspector: panels.restoresSidebarAfterInspector,
-            selectedSidebarTab: selectedSidebarTab
-        )
+        shared.layoutProfilePanelState
     }
 
     func applyInitialLayout(_ layout: WorkspaceLayoutMode) {
-        guard !hasAppliedInitialLayout else { return }
-        hasAppliedInitialLayout = true
-        currentLayoutMode = layout
-        if let initialLayoutProfilePanels {
-            selectedSidebarTab = initialLayoutProfilePanels.selectedSidebarTab
-            panels = initialLayoutProfilePanels.presentation(for: layout)
-            self.initialLayoutProfilePanels = nil
-        } else {
-            panels = .initial(for: layout)
-        }
+        shared.applyInitialLayout(layout)
     }
 
     func adaptPanels(
@@ -216,6 +219,10 @@ final class WorkspaceChromeModel {
         to newLayout: WorkspaceLayoutMode,
         isFocusMode: Bool
     ) {
+        // Every mounted session watches the same window width, so they all report
+        // the same breakpoint crossing. Only the first caller may adapt; a second
+        // pass would re-adapt panels the first one already moved.
+        guard currentLayoutMode != newLayout else { return }
         currentLayoutMode = newLayout
         guard !isFocusMode else { return }
         panels = panels.adapting(from: oldLayout, to: newLayout)
@@ -232,21 +239,6 @@ final class WorkspaceChromeModel {
             inspectorAnimationRequestID += 1
         }
         panels = nextPanels
-    }
-
-    func applyLayoutProfilePanels(
-        _ nextPanels: LayoutProfilePanelState,
-        requestsAnimation: Bool
-    ) {
-        selectedSidebarTab = nextPanels.selectedSidebarTab
-        guard hasAppliedInitialLayout else {
-            initialLayoutProfilePanels = nextPanels
-            return
-        }
-        applyPanelPresentation(
-            nextPanels.presentation(for: currentLayoutMode),
-            requestsAnimation: requestsAnimation
-        )
     }
 
     func toggleSidebar() {

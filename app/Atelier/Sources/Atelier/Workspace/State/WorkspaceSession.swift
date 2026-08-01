@@ -32,7 +32,7 @@ final class WorkspaceSession {
     let gemmaAgent: GemmaAgentModel
     let gemmaSidecar: GemmaSidecarModel
     let agentResponses: AgentResponsesModel
-    let chrome = WorkspaceChromeModel()
+    let chrome: WorkspaceChromeModel
     let watchtower = WatchtowerModel()
     private(set) var fileTreeRevision = 0
     private(set) var isAgentSidecarPresented = false
@@ -55,6 +55,7 @@ final class WorkspaceSession {
         state: WorkspaceState,
         rootURL: URL,
         workspaceAccess: WorkspaceAccessController? = nil,
+        chromeShared: WorkspaceChromeSharedState = WorkspaceChromeSharedState(),
         gemmaAgent: GemmaAgentModel? = nil,
         agentResponses: AgentResponsesModel? = nil,
         onSessionChange: @escaping () -> Void = {}
@@ -62,6 +63,7 @@ final class WorkspaceSession {
         self.state = state
         self.rootURL = rootURL
         self.workspaceAccess = workspaceAccess
+        chrome = WorkspaceChromeModel(shared: chromeShared)
         let searchRuntimeContext = WorkspaceGemmaSearchRuntimeContext()
         workspaceSearchRuntimeContext = searchRuntimeContext
         let tabs = TerminalTabsModel(

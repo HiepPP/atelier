@@ -284,8 +284,8 @@ Rules:
   files, terminals, scroll positions, and transient overlays.
 - Clamp a saved window size to the current display's visible frame without changing the stored
   profile.
-- Apply a profile to the current window and every mounted workspace. New workspace sessions use
-  the selected profile's panel preference.
+- Apply a profile once to the window-wide chrome state that every mounted workspace reads. The
+  selected profile seeds that state at launch; a workspace opened later adopts the live chrome.
 - Resize the window first. Defer zoom, pane widths, and panel state until responsive layout has
   settled off the current AppKit layout pass.
 - Reconcile saved panel state through Compact, Standard, and Wide layout rules. Never force an
@@ -387,6 +387,12 @@ Interaction geometry rules:
 ## Surface Rules
 
 ### Workspace Chrome
+
+- Treat sidebar visibility, inspector visibility, and the selected sidebar tab as window state, not
+  workspace state. One owner holds them and every workspace reads it.
+- Switching workspaces never moves a panel or changes the selected sidebar tab.
+- Keep workspace-scoped chrome per session: the reveal request, the project menu, and its
+  responder restore.
 
 - Use the unified compact macOS toolbar.
 - Put sidebar toggle in navigation placement.

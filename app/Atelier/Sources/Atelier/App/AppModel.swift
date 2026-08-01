@@ -10,6 +10,9 @@ final class AppModel {
     let layoutProfiles: LayoutProfileStore
     let threadsPanel = ThreadsPanelModel()
     let visibility = WorkspaceVisibilityModel()
+    /// Panels and the sidebar tab belong to the window, not to one workspace, so
+    /// every session shares this state and a workspace switch leaves it alone.
+    let chromeShared = WorkspaceChromeSharedState()
 
     private(set) var workspaceStates: [WorkspaceState] = []
     private(set) var selectedWorkspaceID: String? {
@@ -81,6 +84,7 @@ final class AppModel {
         zoom = AtelierZoomModel(windowController: environment.windowController)
         layoutProfiles = LayoutProfileStore(defaults: environment.layoutProfileDefaults)
         let initialProfile = layoutProfiles.selectedProfile.snapshot
+        chromeShared.applyLayoutProfilePanels(initialProfile.panels)
         workspaceSidebarWidth = WorkspaceSidebarWidthPolicy.clamped(initialProfile.sidebarWidth)
         workspaceInspectorWidth = WorkspaceInspectorWidthPolicy.clamped(
             initialProfile.inspectorWidth
@@ -105,9 +109,7 @@ final class AppModel {
     func saveCurrentLayoutProfile() {
         let snapshot = currentLayoutProfileSnapshot()
         layoutProfiles.save(snapshot, to: layoutProfiles.selectedID)
-        for session in liveSessions {
-            session.chrome.applyLayoutProfilePanels(snapshot.panels, requestsAnimation: false)
-        }
+        chromeShared.applyLayoutProfilePanels(snapshot.panels)
     }
 
     func applyLayoutProfile(_ id: LayoutProfileID) {
@@ -142,12 +144,7 @@ final class AppModel {
 
             await Task.yield()
             guard !Task.isCancelled, revision == layoutProfileApplicationRevision else { return }
-            for session in liveSessions {
-                session.chrome.applyLayoutProfilePanels(
-                    profile.snapshot.panels,
-                    requestsAnimation: false
-                )
-            }
+            chromeShared.applyLayoutProfilePanels(profile.snapshot.panels)
 
             await Task.yield()
             guard !Task.isCancelled, revision == layoutProfileApplicationRevision else { return }
@@ -393,11 +390,8 @@ final class AppModel {
             state: state,
             rootURL: rootURL,
             workspaceAccess: workspaceAccess,
+            chromeShared: chromeShared,
             onSessionChange: { [weak self] in self?.scheduleSessionPersist() }
-        )
-        session.chrome.applyLayoutProfilePanels(
-            layoutProfiles.selectedProfile.snapshot.panels,
-            requestsAnimation: false
         )
         // The poll sees the agent exit up to one interval late, and later still
         // while the window is off screen. The shell's own mark dates the row.
