@@ -86,7 +86,7 @@ private final class MarkdownCodeLineNumberDecoration: NSObject {
         let text = NSAttributedString(
             string: String(number),
             attributes: [
-                .font: AtelierTypography.codeFont(size: codeFont.pointSize * 0.85),
+                .font: AtelierTypography.codeFont(size: codeFont.pointSize * MarkdownTypeTokens.FontScale.codeLineNumber),
                 .foregroundColor: AppKitThemeAdapter.secondary.withAlphaComponent(0.55)
             ]
         )
@@ -106,12 +106,49 @@ private enum MarkdownHeadingRuleLayout {
 /// Inline code is set slightly smaller than the prose around it: a monospaced
 /// face at the same point size reads larger than the sans it sits in.
 nonisolated enum MarkdownInlineCodePolicy {
-    static let fontScale: CGFloat = 0.92
+    static let fontScale = MarkdownTypeTokens.FontScale.inlineCode
 }
 
 nonisolated enum MarkdownCodeCardLayout {
     static let bodyTintAlpha: CGFloat = 0.30
     static let copyControlReservation: CGFloat = 44
+}
+
+/// One place to tune the Markdown reading type scale. These are the body-relative
+/// font-size multipliers and the heading size ratios that the block builders read.
+/// Line-height ratios live in `MarkdownTypeScale` and block spacing in
+/// `MarkdownRhythm`: those stay their own cohesive types, but every raw size ratio
+/// the document renders with resolves back to a name here.
+nonisolated enum MarkdownTypeTokens {
+    /// Body-relative font-size multipliers, one per block treatment that sets text
+    /// smaller or larger than the surrounding prose.
+    enum FontScale {
+        static let lede: CGFloat = 1.08
+        static let inlineCode: CGFloat = 0.92
+        static let tableCell: CGFloat = 0.9
+        static let frontMatterKey: CGFloat = 0.68
+        static let frontMatterValue: CGFloat = 0.84
+        static let calloutLabel: CGFloat = 0.68
+        static let mermaidSourceLabel: CGFloat = 0.8
+        static let caption: CGFloat = 0.82
+        static let footnotesTitle: CGFloat = 0.82
+        static let footnoteNumber: CGFloat = 0.72
+        static let footnoteText: CGFloat = 0.86
+        static let divider: CGFloat = 0.55
+        static let codeLineNumber: CGFloat = 0.85
+    }
+
+    /// Heading size as a pure ratio of body size, never a minimum clamp: a floor
+    /// changes the hierarchy's shape as the reader resizes text or zooms.
+    static func headingRatio(level: Int, isDocument: Bool) -> CGFloat {
+        switch level {
+        case 1: isDocument ? 1.85 : 1.45
+        case 2: isDocument ? 1.45 : 1.28
+        case 3: isDocument ? 1.18 : 1.12
+        case 4: 1.00
+        default: 0.92
+        }
+    }
 }
 
 /// Line spacing as a target line-height ratio instead of an absolute value.
@@ -357,7 +394,7 @@ nonisolated enum MarkdownLinkStylePolicy {
 
 /// Editorial type decisions taken once during document construction.
 nonisolated enum MarkdownDocumentTypePolicy {
-    static let ledeScale: CGFloat = 1.08
+    static let ledeScale = MarkdownTypeTokens.FontScale.lede
 
     /// A document that opens with an H1 gives its first paragraph the lede treatment.
     static func hasLedeParagraph(blocks: [AgentMarkdownBlock]) -> Bool {
@@ -372,7 +409,7 @@ nonisolated enum MarkdownDocumentTypePolicy {
 }
 
 nonisolated enum MarkdownTableCellPolicy {
-    static let fontScale: CGFloat = 0.9
+    static let fontScale = MarkdownTypeTokens.FontScale.tableCell
     static let unbrokenTokenLimit = 24
 
     static func wrapsByCharacter(_ value: String) -> Bool {
@@ -653,7 +690,7 @@ enum MarkdownAttributedDocumentBuilder {
                 * scale,
             displayScale: displayScale
         )
-        let bodyFont = NSFont.systemFont(ofSize: bodySize)
+        let bodyFont = documentBodyFont(size: bodySize, presentation: presentation)
         let codeFont = codeFont(
             scale: scale,
             displayScale: displayScale,
@@ -789,11 +826,12 @@ enum MarkdownAttributedDocumentBuilder {
                 let isLede = hasLede
                     && (index == 1 || index == mastheadPlan?.ledeIndex)
                 let ledeFont = isLede
-                    ? NSFont.systemFont(
-                        ofSize: AtelierFontScaling.snapped(
+                    ? serifFont(
+                        size: AtelierFontScaling.snapped(
                             bodySize * MarkdownDocumentTypePolicy.ledeScale,
                             displayScale: displayScale
-                        )
+                        ),
+                        weight: .regular
                     )
                     : bodyFont
                 appendInlineParagraph(
@@ -989,7 +1027,7 @@ enum MarkdownAttributedDocumentBuilder {
                     string: "\u{2022}\u{2003}\u{2022}\u{2003}\u{2022}\n",
                     attributes: [
                         .font: NSFont.systemFont(
-                            ofSize: max(6, bodySize * 0.55),
+                            ofSize: max(6, bodySize * MarkdownTypeTokens.FontScale.divider),
                             weight: .semibold
                         ),
                         .foregroundColor: AppKitThemeAdapter.border,
@@ -1061,7 +1099,7 @@ enum MarkdownAttributedDocumentBuilder {
             string: "MERMAID SOURCE\n",
             attributes: [
                 .font: AtelierTypography.codeFont(
-                    size: max(9, code.pointSize * 0.8)
+                    size: max(9, code.pointSize * MarkdownTypeTokens.FontScale.mermaidSourceLabel)
                 ),
                 .foregroundColor: AppKitThemeAdapter.secondary,
                 .backgroundColor: AppKitThemeAdapter.raised,
@@ -1408,8 +1446,8 @@ enum MarkdownAttributedDocumentBuilder {
         table.collapsesBorders = true
         table.hidesEmptyCells = false
         table.setContentWidth(100, type: .percentageValueType)
-        let keyFont = AtelierTypography.codeFont(size: max(9, bodySize * 0.68))
-        let valueFont = NSFont.systemFont(ofSize: max(10, bodySize * 0.84))
+        let keyFont = AtelierTypography.codeFont(size: max(9, bodySize * MarkdownTypeTokens.FontScale.frontMatterKey))
+        let valueFont = NSFont.systemFont(ofSize: max(10, bodySize * MarkdownTypeTokens.FontScale.frontMatterValue))
         let background = AppKitThemeAdapter.raised.withAlphaComponent(0.26)
         // Size the key column from the widest key this document actually holds.
         // A fixed share fits the median key and wraps the deep dotted paths.
@@ -1523,7 +1561,7 @@ enum MarkdownAttributedDocumentBuilder {
         table.collapsesBorders = true
         table.hidesEmptyCells = false
         table.setContentWidth(100, type: .percentageValueType)
-        let font = AtelierTypography.codeFont(size: max(9, bodySize * 0.68))
+        let font = AtelierTypography.codeFont(size: max(9, bodySize * MarkdownTypeTokens.FontScale.calloutLabel))
 
         for (column, entry) in entries.enumerated() {
             let block = NSTextTableBlock(
@@ -1639,7 +1677,7 @@ enum MarkdownAttributedDocumentBuilder {
             string: "\(kind.glyph) \(kind.rawValue)\n",
             attributes: [
                 .font: AtelierTypography.codeFont(
-                    size: max(9, bodyFont.pointSize * 0.68)
+                    size: max(9, bodyFont.pointSize * MarkdownTypeTokens.FontScale.calloutLabel)
                 ),
                 .foregroundColor: kind.color,
                 .kern: 0.7,
@@ -1711,7 +1749,7 @@ enum MarkdownAttributedDocumentBuilder {
 
         if !altText.isEmpty {
             let captionFont = serifItalicFont(
-                size: max(10, bodyFont.pointSize * 0.82)
+                size: max(10, bodyFont.pointSize * MarkdownTypeTokens.FontScale.caption)
             )
             let caption = paragraphStyle(
                 lineSpacing: rhythm.type.lineSpacing(
@@ -1850,7 +1888,7 @@ enum MarkdownAttributedDocumentBuilder {
                     string: "NOTES\n",
                     attributes: [
                         .font: serifFont(
-                            size: max(10, bodyFont.pointSize * 0.82),
+                            size: max(10, bodyFont.pointSize * MarkdownTypeTokens.FontScale.footnotesTitle),
                             weight: .semibold
                         ),
                         .foregroundColor: AppKitThemeAdapter.secondary,
@@ -1864,7 +1902,7 @@ enum MarkdownAttributedDocumentBuilder {
                     string: "\(note.number).\t",
                     attributes: [
                         .font: AtelierTypography.codeFont(
-                            size: max(9, bodyFont.pointSize * 0.72)
+                            size: max(9, bodyFont.pointSize * MarkdownTypeTokens.FontScale.footnoteNumber)
                         ),
                         .foregroundColor: AppKitThemeAdapter.accent,
                         .paragraphStyle: paragraph
@@ -1874,7 +1912,7 @@ enum MarkdownAttributedDocumentBuilder {
                     inlineText(
                         note.text,
                         font: serifFont(
-                            size: max(10, bodyFont.pointSize * 0.86),
+                            size: max(10, bodyFont.pointSize * MarkdownTypeTokens.FontScale.footnoteText),
                             weight: .regular
                         ),
                         foregroundColor: AppKitThemeAdapter.secondary,
@@ -2383,14 +2421,10 @@ enum MarkdownAttributedDocumentBuilder {
         level: Int,
         presentation: AgentMarkdownPresentation
     ) -> CGFloat {
-        let isDocument = presentation == .document
-        return switch level {
-        case 1: isDocument ? 1.85 : 1.45
-        case 2: isDocument ? 1.45 : 1.28
-        case 3: isDocument ? 1.18 : 1.12
-        case 4: 1.00
-        default: 0.92
-        }
+        MarkdownTypeTokens.headingRatio(
+            level: level,
+            isDocument: presentation == .document
+        )
     }
 
     private static func headingFont(
@@ -2408,6 +2442,18 @@ enum MarkdownAttributedDocumentBuilder {
         let base = NSFont.systemFont(ofSize: size, weight: weight)
         guard let descriptor = base.fontDescriptor.withDesign(.serif) else { return base }
         return NSFont(descriptor: descriptor, size: size) ?? base
+    }
+
+    /// The face body prose renders with. Document mode reads as an editorial page,
+    /// so its prose shares the serif face of H1/H2; transcript prose stays system.
+    /// The rhythm unit derives from this font, so tests build it from here too.
+    static func documentBodyFont(
+        size: CGFloat,
+        presentation: AgentMarkdownPresentation
+    ) -> NSFont {
+        presentation == .document
+            ? serifFont(size: size, weight: .regular)
+            : NSFont.systemFont(ofSize: size)
     }
 
     private static func serifItalicFont(size: CGFloat) -> NSFont {

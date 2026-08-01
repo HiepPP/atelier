@@ -1927,11 +1927,12 @@ struct AgentResponsesTests {
             }
         }
         let unit = MarkdownRhythm(
-            bodyFont: NSFont.systemFont(
-                ofSize: AtelierFontScaling.snapped(
+            bodyFont: MarkdownAttributedDocumentBuilder.documentBodyFont(
+                size: AtelierFontScaling.snapped(
                     AtelierTypography.editorSize,
                     displayScale: 2
-                )
+                ),
+                presentation: .document
             ),
             displayScale: 2
         ).unit
@@ -2358,7 +2359,10 @@ struct AgentResponsesTests {
         #expect(style(for: "AtelierApp")?.paragraphSpacing == 0)
         #expect(style(for: "`-- ContentView")?.paragraphSpacing == 0)
         let rhythm = MarkdownRhythm(
-            bodyFont: NSFont.systemFont(ofSize: AtelierTypography.editorSize),
+            bodyFont: MarkdownAttributedDocumentBuilder.documentBodyFont(
+                size: AtelierTypography.editorSize,
+                presentation: .document
+            ),
             displayScale: 2
         )
         #expect(
@@ -2937,7 +2941,10 @@ struct AgentResponsesTests {
 
     @Test("Native Markdown uses one snapped font-derived rhythm")
     func nativeMarkdownRhythm() {
-        let bodyFont = NSFont.systemFont(ofSize: AtelierTypography.editorSize)
+        let bodyFont = MarkdownAttributedDocumentBuilder.documentBodyFont(
+            size: AtelierTypography.editorSize,
+            presentation: .document
+        )
         let rhythm = MarkdownRhythm(bodyFont: bodyFont, displayScale: 2)
         let source = """
         # Title

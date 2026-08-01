@@ -128,7 +128,7 @@ enum AtelierMetrics {
     static let fieldHeight: CGFloat = 32
     static let rowHeight: CGFloat = 28
     static let transcriptMaxWidth: CGFloat = 680
-    static let documentMaxWidth: CGFloat = 720
+    static let documentMaxWidth: CGFloat = 640
     /// Wide blocks in file Preview fill this instead of the prose measure. A
     /// reading measure and a data measure are not the same thing: prose past
     /// roughly 90 characters costs the return sweep, while a table gains nothing

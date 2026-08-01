@@ -121,7 +121,7 @@ Rules:
 | `workspaceRailItemGap` | 4 | Vertical space between workspace rows |
 | `projectMenuWidth` | 420 | Principal project menu command-center width |
 | `transcriptMaxWidth` | 680 | Agent Markdown prose measure |
-| `documentMaxWidth` | 720 | Markdown file-preview prose measure |
+| `documentMaxWidth` | 640 | Markdown file-preview prose measure |
 | `documentBleedMaxWidth` | 1180 | Markdown file-preview wide-block measure |
 | `markdownOutlineWidth` | 200 | Trailing "On This Page" outline rail |
 
@@ -881,13 +881,15 @@ Persistence boundaries:
 - Ship one Markdown renderer for the whole application. It builds one native attributed document
   from the parsed blocks and offers two presentation modes. Document mode serves file Preview.
   Transcript mode serves agent responses. Every block treatment below is shared by both modes.
-- Document mode renders body text at `editorSize` and centers a `documentMaxWidth` measure. It also
-  adds the three document-only treatments: the lede paragraph scale, the front-matter masthead, and
-  the H3 accent eyebrow color.
-- Transcript mode renders body text at `body` size and keeps prose on the `transcriptMaxWidth`
-  measure. It skips the three document-only treatments and keeps every other block treatment.
+- Document mode renders body prose in the editorial serif face at `editorSize` and centers a
+  `documentMaxWidth` measure. It also adds the document-only treatments: the editorial serif body
+  face, the lede paragraph scale, the front-matter masthead, and the H3 accent eyebrow color.
+- Transcript mode renders body text at `body` size in the system face and keeps prose on the
+  `transcriptMaxWidth` measure. It skips the document-only treatments and keeps every other block
+  treatment.
 - Render Markdown file-preview body text at `editorSize` so Source and Preview share the same
-  base text size. Render H1/H2 with the editorial serif face.
+  base text size. Set document-mode body prose and the lede in the editorial serif face; keep
+  transcript-mode prose in the system face. Render H1/H2 with the editorial serif face in both modes.
 - Give document mode two measures. Center a text container up to `documentBleedMaxWidth`, then hold
   prose on the narrower `documentMaxWidth` by insetting it inside that container. A reading measure
   and a data measure are not the same thing: prose past about 90 characters per line costs the
