@@ -76,6 +76,42 @@ struct ResourceWatchdogTests {
         }
     }
 
+    @Test("Default thresholds keep the CPU gate above measured launch load")
+    func defaultThresholdsClearLaunchLoad() {
+        #expect(WatchdogThresholds.default.cpuCoreFraction == 1.5)
+        #expect(WatchdogThresholds.default.cpuSustainSeconds == 30)
+
+        // Measured launch shape with nine workspaces: a 1.63-core second, a few
+        // seconds near one core, then idle.
+        let perSecondCores: [Double] = [1.63, 1.21, 1.06, 0.98, 0.74, 0.31, 0.05, 0.02, 0.01, 0.01]
+        var evaluator = WatchdogEvaluator(thresholds: .default)
+        var cpuTime = 0.0
+        for (index, cores) in perSecondCores.enumerated() {
+            let breach = evaluator.evaluate(
+                ProcessSample(cpuTimeSeconds: cpuTime, memoryBytes: 0),
+                at: TimeInterval(index)
+            )
+            #expect(breach == nil, "launch load must not force-exit (second=\(index))")
+            cpuTime += cores
+        }
+    }
+
+    @Test("A runaway loop still trips the default gate")
+    func runawayLoopBreachesDefaults() {
+        var evaluator = WatchdogEvaluator(thresholds: .default)
+        var breach: WatchdogBreach?
+        for second in 0...30 {
+            breach = evaluator.evaluate(
+                ProcessSample(cpuTimeSeconds: Double(second) * 2, memoryBytes: 0),
+                at: TimeInterval(second)
+            )
+            if second < 30 {
+                #expect(breach == nil, "must wait out the sustain window (second=\(second))")
+            }
+        }
+        #expect(breach == .cpu(fraction: 2, sustainedSeconds: 30))
+    }
+
     @Test("Exit marker round-trips through disk")
     func markerRoundTrip() throws {
         let url = FileManager.default.temporaryDirectory

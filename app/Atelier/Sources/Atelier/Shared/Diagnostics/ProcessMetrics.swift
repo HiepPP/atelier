@@ -32,6 +32,25 @@ nonisolated struct ProcessMetrics: ProcessMetricsSampling {
         return result == KERN_SUCCESS ? UInt64(info.phys_footprint) : 0
     }
 
+    /// `ri_user_time` and `ri_system_time` count mach absolute time units, not
+    /// nanoseconds. On Apple Silicon one tick is 41.667 ns (`hw.tbfrequency` is
+    /// 24 MHz), so reading them as nanoseconds under-reports CPU by about 42x.
+    /// The timebase is 1/1 on Intel, where the same conversion is a no-op.
+    static func seconds(machTicks: UInt64) -> Double {
+        Double(machTicks) * timebaseNumerator / timebaseDenominator / 1_000_000_000
+    }
+
+    private static let timebase: mach_timebase_info_data_t = {
+        var info = mach_timebase_info_data_t()
+        guard mach_timebase_info(&info) == KERN_SUCCESS, info.denom != 0 else {
+            return mach_timebase_info_data_t(numer: 1, denom: 1)
+        }
+        return info
+    }()
+
+    private static let timebaseNumerator = Double(timebase.numer)
+    private static let timebaseDenominator = Double(timebase.denom)
+
     private static func cpuTimeSeconds() -> Double {
         var usage = rusage_info_current()
         let result = withUnsafeMutablePointer(to: &usage) { pointer in
@@ -40,6 +59,6 @@ nonisolated struct ProcessMetrics: ProcessMetricsSampling {
             }
         }
         guard result == 0 else { return 0 }
-        return Double(usage.ri_user_time + usage.ri_system_time) / 1_000_000_000
+        return seconds(machTicks: usage.ri_user_time + usage.ri_system_time)
     }
 }

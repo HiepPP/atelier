@@ -8,10 +8,16 @@ nonisolated struct WatchdogThresholds: Sendable, Equatable {
     /// How long CPU must stay at or above the fraction before firing, in seconds.
     var cpuSustainSeconds: Double
 
+    /// The CPU gate never fired before `ProcessMetrics` started converting mach
+    /// ticks correctly, so it was calibrated against a reading about 42x too
+    /// low. Measured on a normal launch with nine workspaces: 1.63 cores for one
+    /// second, 1.06 cores averaged over the worst five. A runaway loop instead
+    /// pins a core indefinitely, so the gate trades a tighter burst window for a
+    /// longer sustain window.
     static let `default` = WatchdogThresholds(
         memoryLimitBytes: 3 * 1024 * 1024 * 1024,
-        cpuCoreFraction: 1.0,
-        cpuSustainSeconds: 5
+        cpuCoreFraction: 1.5,
+        cpuSustainSeconds: 30
     )
 }
 
