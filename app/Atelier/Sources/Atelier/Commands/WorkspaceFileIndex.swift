@@ -45,11 +45,11 @@ actor WorkspaceFileIndex: WorkspaceFileIndexing {
                 continue
             }
             if values?.isDirectory == true {
-                if IgnoreRules.shouldIgnore(url) { enumerator.skipDescendants() }
+                if IgnoreRules.shouldSkipIndexing(url) { enumerator.skipDescendants() }
                 continue
             }
             guard values?.isRegularFile == true,
-                  !IgnoreRules.shouldIgnore(url),
+                  !IgnoreRules.shouldSkipIndexing(url),
                   let relativePath = relativePath(for: url) else {
                 continue
             }
