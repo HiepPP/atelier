@@ -892,10 +892,13 @@ Persistence boundaries:
   prose on the narrower `documentMaxWidth` by insetting it inside that container. A reading measure
   and a data measure are not the same thing: prose past about 90 characters per line costs the
   reader the return sweep, while a wide table or a code line gains nothing from being wrapped.
-- Card blocks bleed to the full container: tables, fenced code cards, front-matter cards, callouts,
-  and the footnotes section. They already draw as a bounded surface, so a wider one reads as a wider
+- Card blocks bleed to the full container: tables, fenced code cards, front-matter cards, the
+  masthead row, callouts, and the footnotes section. They already draw as a bounded surface, so a wider one reads as a wider
   card rather than as looser prose. Everything else holds the prose measure, including image and
   Mermaid figures: an oversized figure reads worse, not better.
+- Mark a card block inside its own append function, never at the call site. `appendFrontMatter`
+  alone has three call sites, and a missed one leaves the card taking the prose inset, which
+  collapses its key column to one character per line.
 - Resolve the prose inset during document build from the container measure, and rebuild the document
   when that measure changes bucket. Quantize the bucket so a live resize cannot rebuild per frame.
 - Transcript mode keeps one measure. An agent answer is prose-first, so it holds

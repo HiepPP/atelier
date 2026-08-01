@@ -696,7 +696,6 @@ enum MarkdownAttributedDocumentBuilder {
                 if mastheadPlan != nil, index == 0 {
                     continue
                 }
-                let bleedStart = output.length
                 appendFrontMatter(
                     entries,
                     to: output,
@@ -705,7 +704,6 @@ enum MarkdownAttributedDocumentBuilder {
                     rhythm: rhythm,
                     measure: measure
                 )
-                markBleed(from: bleedStart, in: output)
 
             case .heading(let level, let content):
                 let start = output.length
@@ -901,7 +899,6 @@ enum MarkdownAttributedDocumentBuilder {
                 )
 
             case .callout(let kind, let content):
-                let bleedStart = output.length
                 appendCallout(
                     kind: kind,
                     content: content,
@@ -911,10 +908,8 @@ enum MarkdownAttributedDocumentBuilder {
                     rhythm: rhythm,
                     footnoteNumbers: footnoteNumbers
                 )
-                markBleed(from: bleedStart, in: output)
 
             case .code(let language, let content):
-                let bleedStart = output.length
                 appendCode(
                     id: AgentMarkdownBlock.blockAnchorID(index),
                     language: language,
@@ -926,7 +921,6 @@ enum MarkdownAttributedDocumentBuilder {
                     codeHighlights: &codeHighlights,
                     codeBlocks: &codeBlocks
                 )
-                markBleed(from: bleedStart, in: output)
 
             case .mermaid(let source):
                 appendMermaidFigure(
@@ -950,7 +944,6 @@ enum MarkdownAttributedDocumentBuilder {
                 )
 
             case .table(let headers, let alignments, let rows):
-                let bleedStart = output.length
                 appendTable(
                     headers: headers,
                     alignments: alignments,
@@ -962,7 +955,6 @@ enum MarkdownAttributedDocumentBuilder {
                     rhythm: rhythm,
                     footnoteNumbers: footnoteNumbers
                 )
-                markBleed(from: bleedStart, in: output)
 
             case .image(let altText, let urlText):
                 appendImageFigure(
@@ -978,7 +970,6 @@ enum MarkdownAttributedDocumentBuilder {
                 )
 
             case .footnotes(let notes):
-                let bleedStart = output.length
                 appendFootnotes(
                     notes,
                     to: output,
@@ -986,7 +977,6 @@ enum MarkdownAttributedDocumentBuilder {
                     codeFont: codeFont,
                     rhythm: rhythm
                 )
-                markBleed(from: bleedStart, in: output)
 
             case .divider:
                 let paragraph = paragraphStyle(
@@ -1200,6 +1190,11 @@ enum MarkdownAttributedDocumentBuilder {
         let displayed = presentation == .document
             ? content
             : AgentCodeBlockPolicy.displayedContent(content)
+        // Marked here, not at the call site: appendFrontMatter alone has three
+        // call sites, and a missed one takes the prose inset and collapses the
+        // cell. A defer covers every return path.
+        let bleedStart = output.length
+        defer { markBleed(from: bleedStart, in: output) }
         let table = NSTextTable()
         table.numberOfColumns = 1
         table.collapsesBorders = true
@@ -1403,6 +1398,11 @@ enum MarkdownAttributedDocumentBuilder {
         measure: CGFloat
     ) {
         guard !entries.isEmpty else { return }
+        // Marked here, not at the call site: appendFrontMatter alone has three
+        // call sites, and a missed one takes the prose inset and collapses the
+        // cell. A defer covers every return path.
+        let bleedStart = output.length
+        defer { markBleed(from: bleedStart, in: output) }
         let table = NSTextTable()
         table.numberOfColumns = 2
         table.collapsesBorders = true
@@ -1513,6 +1513,11 @@ enum MarkdownAttributedDocumentBuilder {
         rhythm: MarkdownRhythm
     ) {
         guard !entries.isEmpty else { return }
+        // Marked here, not at the call site: appendFrontMatter alone has three
+        // call sites, and a missed one takes the prose inset and collapses the
+        // cell. A defer covers every return path.
+        let bleedStart = output.length
+        defer { markBleed(from: bleedStart, in: output) }
         let table = NSTextTable()
         table.numberOfColumns = entries.count
         table.collapsesBorders = true
@@ -1577,6 +1582,11 @@ enum MarkdownAttributedDocumentBuilder {
         rhythm: MarkdownRhythm,
         footnoteNumbers: [String: Int]
     ) {
+        // Marked here, not at the call site: appendFrontMatter alone has three
+        // call sites, and a missed one takes the prose inset and collapses the
+        // cell. A defer covers every return path.
+        let bleedStart = output.length
+        defer { markBleed(from: bleedStart, in: output) }
         let table = NSTextTable()
         table.numberOfColumns = 1
         table.collapsesBorders = true
@@ -1796,6 +1806,11 @@ enum MarkdownAttributedDocumentBuilder {
         rhythm: MarkdownRhythm
     ) {
         guard !notes.isEmpty else { return }
+        // Marked here, not at the call site: appendFrontMatter alone has three
+        // call sites, and a missed one takes the prose inset and collapses the
+        // cell. A defer covers every return path.
+        let bleedStart = output.length
+        defer { markBleed(from: bleedStart, in: output) }
         let table = NSTextTable()
         table.numberOfColumns = 1
         table.collapsesBorders = true
@@ -1939,6 +1954,11 @@ enum MarkdownAttributedDocumentBuilder {
         footnoteNumbers: [String: Int]
     ) {
         guard !headers.isEmpty else { return }
+        // Marked here, not at the call site: appendFrontMatter alone has three
+        // call sites, and a missed one takes the prose inset and collapses the
+        // cell. A defer covers every return path.
+        let bleedStart = output.length
+        defer { markBleed(from: bleedStart, in: output) }
         let table = NSTextTable()
         table.numberOfColumns = headers.count
         table.collapsesBorders = true

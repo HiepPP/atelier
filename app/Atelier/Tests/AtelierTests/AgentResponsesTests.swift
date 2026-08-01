@@ -1406,6 +1406,58 @@ struct AgentResponsesTests {
         )
     }
 
+    @Test("Front matter bleeds from every call site, including the masthead branch")
+    func frontMatterBleedsFromEveryCallSite() {
+        // appendFrontMatter has three call sites: the plain block, the branch after
+        // an H1 masthead, and the branch after the lede. Marking bleed at the call
+        // site missed two of them, and the cells then took the prose inset and
+        // collapsed the key column to one character per line. Drive all three.
+        let container = AtelierMetrics.documentBleedMaxWidth
+        let inset = MarkdownBleedPolicy.proseInset(
+            containerMeasure: container,
+            proseMeasure: MarkdownBleedPolicy.proseMeasure(
+                containerMeasure: container,
+                presentation: .document
+            )
+        )
+        #expect(inset > 0)
+
+        let sources = [
+            "plain": "---\nname: \"Kit\"\nrole: \"design\"\n---\n\nBody text.\n",
+            "masthead": "---\nname: \"Kit\"\nrole: \"design\"\nteam: \"core\"\n---\n\n# Title\n\nLede paragraph.\n\nBody text.\n",
+            "lede": "---\ntitle: \"Kit\"\nrole: \"design\"\n---\n\n# Title\n\nLede paragraph.\n"
+        ]
+        for (label, source) in sources {
+            let rendered = MarkdownAttributedDocumentBuilder.build(
+                document: ParsedMarkdownDocument(source: source),
+                scale: 1,
+                displayScale: 2,
+                usesDarkAppearance: false,
+                presentation: .document,
+                containerMeasure: container
+            )
+            let text = rendered.attributedString
+            let full = NSRange(location: 0, length: text.length)
+
+            var sawBleed = false
+            text.enumerateAttribute(.atelierBleedBlock, in: full) { value, _, _ in
+                if value != nil { sawBleed = true }
+            }
+            #expect(sawBleed, "\(label): expected a bleeding card block")
+
+            // No cell inside a bleeding card may carry the prose inset. That is what
+            // squeezed the key column down to a single character per line.
+            text.enumerateAttribute(.atelierBleedBlock, in: full) { value, range, _ in
+                guard value != nil else { return }
+                text.enumerateAttribute(.paragraphStyle, in: range) { style, _, _ in
+                    guard let style = style as? NSParagraphStyle else { return }
+                    #expect(style.headIndent < inset, "\(label): cell took the inset")
+                    #expect(style.tailIndent > -inset, "\(label): cell took the inset")
+                }
+            }
+        }
+    }
+
     @Test("Wide blocks bleed to the container while prose holds its measure")
     func markdownProseBleedMeasures() {
         let container = AtelierMetrics.documentBleedMaxWidth
