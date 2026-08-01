@@ -442,6 +442,53 @@ nonisolated enum MarkdownTableAlignmentPolicy {
     }
 }
 
+/// Document mode carries a reading measure and a data measure. Prose past roughly
+/// 90 characters per line costs the reader the return sweep; a wide table or a long
+/// code line gains nothing from wrapping. Wide blocks fill the container, prose is
+/// inset inside it.
+nonisolated enum MarkdownBleedPolicy {
+    /// Rebuild only when the measure crosses a bucket, so a live resize cannot
+    /// rebuild the attributed document per frame.
+    static let measureBucket: CGFloat = 40
+
+    static func bucketed(_ measure: CGFloat) -> CGFloat {
+        guard measure > 0 else { return 0 }
+        return (measure / measureBucket).rounded(.down) * measureBucket
+    }
+
+    @MainActor
+    static func containerMeasure(
+        requested: CGFloat?,
+        presentation: AgentMarkdownPresentation
+    ) -> CGFloat {
+        guard presentation == .document else {
+            return AtelierMetrics.transcriptMaxWidth
+        }
+        // No requested width means no live container to bleed into, so stay on the
+        // prose measure. Bleed is opt-in from the surface that knows its width.
+        guard let requested, requested > 0 else {
+            return AtelierMetrics.documentMaxWidth
+        }
+        return min(requested, AtelierMetrics.documentBleedMaxWidth)
+    }
+
+    @MainActor
+    static func proseMeasure(
+        containerMeasure: CGFloat,
+        presentation: AgentMarkdownPresentation
+    ) -> CGFloat {
+        guard presentation == .document else { return containerMeasure }
+        return min(AtelierMetrics.documentMaxWidth, containerMeasure)
+    }
+
+    static func proseInset(
+        containerMeasure: CGFloat,
+        proseMeasure: CGFloat
+    ) -> CGFloat {
+        max(0, (containerMeasure - proseMeasure) / 2)
+    }
+}
+
 /// Shared front-matter card geometry. The key column is sized from the widest key
 /// the document actually holds, so a deep dotted path such as
 /// `colors.text.sidebar-primary-foreground` stays on one line instead of wrapping
@@ -451,21 +498,16 @@ nonisolated enum MarkdownFrontMatterLayout {
     static let minimumKeyPercentage: CGFloat = 22
     static let maximumKeyPercentage: CGFloat = 48
 
-    /// The table resolves its percentages against the real text container, which is
-    /// narrower than the nominal measure whenever the window cannot grant the full
-    /// measure. The document is built before layout, so the container width is not
-    /// known here. Reserve headroom for that gap, or the widest key computes a share
-    /// that fits the nominal measure and still wraps on screen.
-    static let containerHeadroom: CGFloat = 0.88
-
+    /// `measure` is the real container the table resolves its percentages against,
+    /// so no headroom is reserved. An earlier version divided by the nominal measure
+    /// and had to guess the gap; the surface now reports its own width instead.
     static func keyColumnPercentage(
         longestKeyWidth: CGFloat,
         horizontalPadding: CGFloat,
         measure: CGFloat
     ) -> CGFloat {
         guard measure > 0, longestKeyWidth > 0 else { return minimumKeyPercentage }
-        let assumedContainer = measure * containerHeadroom
-        let needed = (longestKeyWidth + horizontalPadding) / assumedContainer * 100
+        let needed = (longestKeyWidth + horizontalPadding) / measure * 100
         return min(maximumKeyPercentage, max(minimumKeyPercentage, needed))
     }
 }
