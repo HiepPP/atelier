@@ -110,7 +110,7 @@ nonisolated enum MarkdownInlineCodePolicy {
 }
 
 nonisolated enum MarkdownCodeCardLayout {
-    static let bodyTintAlpha: CGFloat = 0.30
+    static let bodyTintAlpha: CGFloat = 0.40
     static let copyControlReservation: CGFloat = 44
 }
 
@@ -123,7 +123,7 @@ nonisolated enum MarkdownTypeTokens {
     /// Body-relative font-size multipliers, one per block treatment that sets text
     /// smaller or larger than the surrounding prose.
     enum FontScale {
-        static let lede: CGFloat = 1.08
+        static let lede: CGFloat = 1.14
         static let inlineCode: CGFloat = 0.92
         static let tableCell: CGFloat = 0.9
         static let frontMatterKey: CGFloat = 0.68
