@@ -520,6 +520,19 @@ final class GitWorkspaceModel {
         }
     }
 
+    /// Cooling a background workspace: drop the filesystem-driven refresh work
+    /// only. Push, sync, staging, and commit-message generation are user
+    /// actions and keep running to completion.
+    func suspendRefreshes() {
+        refreshTask?.cancel()
+        statusTask?.cancel()
+        invalidateTask?.cancel()
+        invalidateTask = nil
+        pendingRepositoryMetadataRefresh = false
+        firstPendingFilesystemEvent = nil
+        isLoading = false
+    }
+
     func stop() {
         refreshTask?.cancel()
         statusTask?.cancel()

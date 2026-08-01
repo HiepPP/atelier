@@ -162,6 +162,10 @@ final class GemmaSidecarModel {
     private let background: SidecarBackgroundRunner
     private let reachability: SidecarReachability
     private var timerTask: Task<Void, Never>?
+    private(set) var isStarted = false
+
+    /// True while the periodic journal, intent-guard, and whisper ticks run.
+    var isTicking: Bool { timerTask != nil }
 
     init(
         terminalTabs: TerminalTabsModel,
@@ -292,9 +296,28 @@ final class GemmaSidecarModel {
 
     func start() {
         guard timerTask == nil else { return }
+        isStarted = true
         terminalTabs.setTerminalCommandFinishedHandler { [weak self] exitCode in
             self?.handleCommandFinished(exitCode: exitCode)
         }
+        startTicks()
+        AppLogger.agent.info("Started Gemma sidecar")
+    }
+
+    /// Cooling a background workspace: drop the 45-second tick only. The chat
+    /// session, background runners, and the terminal handler stay in place, so
+    /// resuming costs nothing but a new timer.
+    func suspendTicks() {
+        timerTask?.cancel()
+        timerTask = nil
+    }
+
+    func resumeTicks() {
+        guard isStarted, timerTask == nil else { return }
+        startTicks()
+    }
+
+    private func startTicks() {
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(GemmaSidecarModel.tickInterval))
@@ -304,10 +327,10 @@ final class GemmaSidecarModel {
                 self.whisper.tick()
             }
         }
-        AppLogger.agent.info("Started Gemma sidecar")
     }
 
     func stop() {
+        isStarted = false
         timerTask?.cancel()
         timerTask = nil
         terminalTabs.setTerminalCommandFinishedHandler(nil)

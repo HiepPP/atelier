@@ -18,6 +18,7 @@ final class AppModel {
             if let selectedWorkspaceID {
                 sessionsByID[selectedWorkspaceID]?.activateAgentResponses()
             }
+            updateWorkspaceCooling()
             windowController.setActiveWorkspace(id: selectedWorkspaceID)
         }
     }
@@ -29,6 +30,7 @@ final class AppModel {
     var presentedError: AppError?
 
     private var sessionsByID: [String: WorkspaceSession] = [:]
+    @ObservationIgnored private var coolingTasks: [String: Task<Void, Never>] = [:]
 
     var workspace: WorkspaceSession? {
         guard let selectedWorkspaceID else { return nil }
@@ -239,6 +241,7 @@ final class AppModel {
         guard let index = workspaceStates.firstIndex(where: { $0.id == workspaceID }) else { return }
         let wasSelected = workspaceID == selectedWorkspaceID
         catalogMutationRevision &+= 1
+        coolingTasks.removeValue(forKey: workspaceID)?.cancel()
         sessionsByID.removeValue(forKey: workspaceID)?.stop()
         workspaceFailures.removeValue(forKey: workspaceID)
         loadingWorkspaceIDs.remove(workspaceID)
@@ -373,6 +376,8 @@ final class AppModel {
         sessionPersistTask = nil
         persistCatalog()
         finishStartupRestore()
+        coolingTasks.values.forEach { $0.cancel() }
+        coolingTasks.removeAll()
         sessionsByID.values.forEach { $0.stop() }
         sessionsByID.removeAll()
         loadingWorkspaceIDs.removeAll()
@@ -404,6 +409,32 @@ final class AppModel {
         }
         sessionsByID[state.id] = session
         session.start(agentResponsesActive: state.id == selectedWorkspaceID)
+        updateWorkspaceCooling()
+    }
+
+    /// One cooling timer per unselected session. The selected workspace warms
+    /// immediately; every other live session releases its watcher, pending Git
+    /// refreshes, and search cache once it has gone unselected for the policy
+    /// timeout.
+    private func updateWorkspaceCooling() {
+        for (id, session) in sessionsByID {
+            guard id != selectedWorkspaceID else {
+                coolingTasks.removeValue(forKey: id)?.cancel()
+                session.warm()
+                continue
+            }
+            guard coolingTasks[id] == nil, !session.isCold else { continue }
+            coolingTasks[id] = Task { [weak self] in
+                try? await Task.sleep(for: WorkspaceColdPolicy.idleTimeout)
+                guard !Task.isCancelled, let self else { return }
+                coolingTasks.removeValue(forKey: id)
+                guard id != selectedWorkspaceID else { return }
+                sessionsByID[id]?.cool()
+            }
+        }
+        for id in Array(coolingTasks.keys) where sessionsByID[id] == nil {
+            coolingTasks.removeValue(forKey: id)?.cancel()
+        }
     }
 
     private func restore(

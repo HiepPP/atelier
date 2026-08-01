@@ -455,7 +455,8 @@ Interaction geometry rules:
 - Show each live workspace's changed-file count as a trailing high-contrast
   `workspaceRailForeground` badge when the count is above zero. Count each Git status path once
   across staged, unstaged, untracked, and conflicted states. Keep the badge current through the
-  workspace's existing debounced Git status model. Preserve the badge's intrinsic width and
+  workspace's existing debounced Git status model. A cooled workspace keeps its last known count
+  until it is selected again, which refreshes Git state. Preserve the badge's intrinsic width and
   truncate the project name before compressing the count text.
 - Keep the full path in help and accessibility text without rendering it in the row.
 - Use rail-specific hover, pressed, focused, selected, and disabled fills so contrast stays stable.
@@ -504,7 +505,12 @@ Catalog states:
 - Empty: keep the rail and add action visible. Show the existing open-folder empty state in the content area.
 - Partial restore: restore every saved item independently. One missing folder never blocks valid sessions.
 - No active item: show the empty content state while preserving unavailable catalog items.
-- Switching: change active selection only. Keep inactive sessions, terminals, watchers, Git models, agents, palettes, tabs, and navigation alive.
+- Switching: change active selection only. Keep inactive sessions, terminals, Git models, agents, palettes, tabs, and navigation alive.
+- Cooling: a deselected session keeps every tab, terminal, and model instance, but stops its file
+  watcher, cancels pending Git refreshes, and releases its cached search documents after 60 seconds
+  of not being selected. Selecting the workspace again restarts the watcher, refreshes Git state,
+  and bumps the file-tree revision so stale caches rebuild. Cooling never touches a terminal
+  process, a Git action the user started, or persisted state.
 - Duplicate selection: activate the existing item for the standardized path. Never create a second live session.
 - Close: release only the closed session, then select the next item, previous item, or empty state in that order.
 - Quit: stop every session and release every security-scoped resource.

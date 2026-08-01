@@ -193,6 +193,14 @@ actor WorkspaceSearchService: WorkspaceContentSearching {
         )
     }
 
+    /// Drop the decoded-line cache of a cooled workspace. The next search
+    /// re-reads from disk against the current revision.
+    func releaseCache() {
+        cachedRevision = nil
+        cachedDocuments.removeAll(keepingCapacity: false)
+        cachedStorageBytes = 0
+    }
+
     private func prepareCache(for revision: Int) {
         guard cachedRevision != revision else { return }
         cachedRevision = revision

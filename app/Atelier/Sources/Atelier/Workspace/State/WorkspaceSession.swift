@@ -1,6 +1,25 @@
 import Foundation
 import Observation
 
+/// Spacing before a workspace the user left behind releases its repeating work.
+/// A background session keeps every tab, terminal, and model instance; cooling
+/// only stops the file watcher, pending Git refreshes, and the search cache.
+nonisolated enum WorkspaceColdPolicy {
+    static let idleTimeout: Duration = .seconds(60)
+
+    /// `.zero` means cool now.
+    static func delay(sinceDeselected elapsed: Duration?) -> Duration {
+        guard let elapsed, elapsed >= .zero else { return idleTimeout }
+        guard elapsed < idleTimeout else { return .zero }
+        return idleTimeout - elapsed
+    }
+
+    static func shouldCool(isSelected: Bool, sinceDeselected elapsed: Duration?) -> Bool {
+        guard !isSelected else { return false }
+        return delay(sinceDeselected: elapsed) == .zero
+    }
+}
+
 @MainActor
 @Observable
 final class WorkspaceSession {
@@ -19,9 +38,12 @@ final class WorkspaceSession {
     private(set) var isAgentSidecarPresented = false
     private(set) var isWatchtowerPresented = false
 
+    private(set) var isCold = false
+
     private let fileTreeService = FileTreeService()
     private let workspaceSearchRuntimeContext: WorkspaceGemmaSearchRuntimeContext
     private let gitNexusSearchClient: any GitNexusCodeIntelligence
+    private let searchService: WorkspaceSearchService
     private var fileWatcher: FileWatcher?
     @ObservationIgnored private var fileTreeInvalidationTask: Task<Void, Never>?
     @ObservationIgnored private var lastFileTreeInvalidationSpawn: ContinuousClock.Instant?
@@ -60,6 +82,7 @@ final class WorkspaceSession {
         )
         gitModel = git
         let searchService = WorkspaceSearchService(fileIndex: fileIndex)
+        self.searchService = searchService
         let workspaceTools = WorkspaceToolExecutor(workspaceRoot: rootURL)
         let gitNexusSearchClient = GitNexusMCPClient(workspaceRoot: rootURL)
         self.gitNexusSearchClient = gitNexusSearchClient
@@ -119,7 +142,43 @@ final class WorkspaceSession {
             agentResponses.start()
         }
         gemmaSidecar.start()
+        startFileWatcher()
+        AppLogger.workspace.info("Started workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
+    }
 
+    func activateAgentResponses() {
+        guard isStarted else { return }
+        agentResponses.start()
+    }
+
+    /// Release the repeating work of a workspace the user is not looking at.
+    /// Tabs, terminals, models, and persisted state stay untouched, so the only
+    /// visible effect is a Git badge that holds its last count until reselect.
+    func cool() {
+        guard isStarted, !isCold else { return }
+        isCold = true
+        stopFileWatcher()
+        gitModel.suspendRefreshes()
+        gemmaSidecar.suspendTicks()
+        Task { [searchService] in await searchService.releaseCache() }
+        AppLogger.workspace.info("Cooled workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
+    }
+
+    /// Reselecting a cooled workspace rehydrates it: the watcher restarts, Git
+    /// state refreshes, and the revision bump rebuilds the file tree, palette
+    /// index, and search caches that went stale while it was cold.
+    func warm() {
+        guard isStarted, isCold else { return }
+        isCold = false
+        startFileWatcher()
+        gemmaSidecar.resumeTicks()
+        gitModel.refresh()
+        invalidateFileTree()
+        AppLogger.workspace.info("Warmed workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
+    }
+
+    private func startFileWatcher() {
+        guard fileWatcher == nil else { return }
         let watcher = FileWatcher(path: rootURL.path) { [weak self] invalidation in
             guard let self else { return }
             if invalidation.contains(.workspaceContent) {
@@ -134,22 +193,21 @@ final class WorkspaceSession {
         }
         fileWatcher = watcher
         watcher.start()
-        AppLogger.workspace.info("Started workspace: \(self.rootURL.lastPathComponent, privacy: .public)")
     }
 
-    func activateAgentResponses() {
-        guard isStarted else { return }
-        agentResponses.start()
+    private func stopFileWatcher() {
+        fileWatcher?.stop()
+        fileWatcher = nil
+        fileTreeInvalidationTask?.cancel()
+        fileTreeInvalidationTask = nil
+        firstPendingFileTreeEvent = nil
     }
 
     func stop() {
         if isStarted {
             isStarted = false
-            fileWatcher?.stop()
-            fileWatcher = nil
-            fileTreeInvalidationTask?.cancel()
-            fileTreeInvalidationTask = nil
-            firstPendingFileTreeEvent = nil
+            isCold = false
+            stopFileWatcher()
             watchtower.clear()
             gitModel.stop()
             gemmaAgent.close()
