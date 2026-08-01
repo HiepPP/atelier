@@ -94,7 +94,13 @@ final class WorkspaceVisibilityModel {
     }
 
     private func update(closingWindow: NSWindow? = nil) {
-        let windows = NSApp.windows
+        // `NSApp` is an implicitly unwrapped optional that only exists once an
+        // application instance is created. The shipped app always has one; a
+        // test process driving `AppModel` directly does not, and reading the
+        // nil value traps. Without an application there is nothing on screen to
+        // report, so leave `isOnScreen` on its unblocked default.
+        guard let application = NSApp else { return }
+        let windows = application.windows
             .filter { $0 !== closingWindow }
             .map { window in
                 WorkspaceWindowVisibility(
@@ -104,7 +110,7 @@ final class WorkspaceVisibilityModel {
                 )
             }
         let next = WorkspaceOnScreenPolicy.isOnScreen(
-            isApplicationHidden: NSApp.isHidden,
+            isApplicationHidden: application.isHidden,
             windows: windows
         )
         guard next != isOnScreen else { return }
