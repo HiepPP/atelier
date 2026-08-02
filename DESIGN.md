@@ -1440,6 +1440,7 @@ Atelier exposes a terminal-first Runtime Probe for causal runtime evidence. Diag
 - Keep active probes local to the generated cache mailbox. Use one request at a time, atomic files, current-user permissions, bounded timeouts, and reversible editor scroll restoration.
 - Active editor probes must not change focus, selection, content, undo state, or word-wrap state. They must not force full-document layout.
 - Report center-tab state through a read-only probe: selected tab kind, git diff tab count, and the selected diff's load state, rendered line count, hidden line count, and change counts. Diff UI state must be verifiable from the terminal without driving the accessibility tree. Report the diff path workspace-relative and never its contents.
+- Report window chrome in the snapshot and through a read-only probe: selected sidebar tab, sidebar and inspector visibility, sidebar restoration intent, layout mode, and the mounted session count. Include whether every mounted session resolves to the same chrome, so a workspace switch is verifiable from the terminal without driving the accessibility tree.
 - Diagnostics failures must degrade independently. They must never crash, freeze, force-exit, or alter existing watchdog breach behavior.
 - Disable production diagnostics for `--selftest` and when `ATELIER_DISABLE_RUNTIME_DIAGNOSTICS=1`.
 - `atelier-doctor capture` is read-only. Each collector reports its own status so one failure never discards other evidence.

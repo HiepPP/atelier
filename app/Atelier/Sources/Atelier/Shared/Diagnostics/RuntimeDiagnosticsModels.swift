@@ -162,6 +162,20 @@ nonisolated struct RuntimeWorkspaceSnapshot: Codable, Sendable, Equatable {
     var fileTabs: [RuntimeFileTabMetric] = []
 }
 
+/// Window chrome the user drives directly: which side panels are open and which
+/// sidebar tab is selected. Every workspace reads one shared owner, so
+/// `sessionsInSync` proves a workspace switch cannot move any of it.
+nonisolated struct RuntimeChromeSnapshot: Codable, Sendable, Equatable {
+    var selectedSidebarTab = "Explorer"
+    var showsSidebar = false
+    var showsInspector = false
+    var restoresSidebarAfterInspector = false
+    var layoutMode = "standard"
+    var hasAppliedInitialLayout = false
+    var sessionCount = 0
+    var sessionsInSync = true
+}
+
 nonisolated struct RuntimeEditorSnapshot: Codable, Sendable, Equatable {
     var selectedControllerID: String?
     var liveControllerCount = 0
@@ -258,6 +272,7 @@ nonisolated struct RuntimeSnapshot: Codable, Sendable, Equatable {
     let process: RuntimeProcessSnapshot
     let mainThread: RuntimeMainThreadSnapshot
     let workspace: RuntimeWorkspaceSnapshot
+    let chrome: RuntimeChromeSnapshot?
     let editor: RuntimeEditorSnapshot
     let git: GitCommandQueueSnapshot?
     let fileTree: RuntimeFileTreeSnapshot?
@@ -272,6 +287,7 @@ nonisolated struct RuntimeSnapshot: Codable, Sendable, Equatable {
         process: RuntimeProcessSnapshot,
         mainThread: RuntimeMainThreadSnapshot,
         workspace: RuntimeWorkspaceSnapshot,
+        chrome: RuntimeChromeSnapshot? = nil,
         editor: RuntimeEditorSnapshot,
         git: GitCommandQueueSnapshot? = nil,
         fileTree: RuntimeFileTreeSnapshot? = nil,
@@ -285,6 +301,7 @@ nonisolated struct RuntimeSnapshot: Codable, Sendable, Equatable {
         self.process = process
         self.mainThread = mainThread
         self.workspace = workspace
+        self.chrome = chrome
         self.editor = editor
         self.git = git
         self.fileTree = fileTree
@@ -300,6 +317,7 @@ nonisolated struct RuntimeSnapshot: Codable, Sendable, Equatable {
         case process
         case mainThread
         case workspace
+        case chrome
         case editor
         case git
         case fileTree
@@ -316,6 +334,7 @@ nonisolated struct RuntimeSnapshot: Codable, Sendable, Equatable {
         process = try container.decode(RuntimeProcessSnapshot.self, forKey: .process)
         mainThread = try container.decode(RuntimeMainThreadSnapshot.self, forKey: .mainThread)
         workspace = try container.decode(RuntimeWorkspaceSnapshot.self, forKey: .workspace)
+        chrome = try container.decodeIfPresent(RuntimeChromeSnapshot.self, forKey: .chrome)
         editor = try container.decode(RuntimeEditorSnapshot.self, forKey: .editor)
         git = try container.decodeIfPresent(GitCommandQueueSnapshot.self, forKey: .git)
         fileTree = try container.decodeIfPresent(RuntimeFileTreeSnapshot.self, forKey: .fileTree)
@@ -334,6 +353,7 @@ nonisolated struct RuntimeFlightRecorderSnapshot: Codable, Sendable, Equatable {
 
 nonisolated struct RuntimeMainSnapshot: Sendable, Equatable {
     var workspace = RuntimeWorkspaceSnapshot()
+    var chrome = RuntimeChromeSnapshot()
     var editor = RuntimeEditorSnapshot()
     var fileTree = RuntimeFileTreeSnapshot()
     var terminal = RuntimeTerminalSnapshot()
@@ -621,6 +641,7 @@ nonisolated enum RuntimeProbeCommand: String, Codable, Sendable {
     case editor
     case editorScroll = "editor-scroll"
     case diff
+    case chrome
 }
 
 nonisolated struct RuntimeProbeRequest: Codable, Sendable, Equatable {

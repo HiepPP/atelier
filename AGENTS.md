@@ -178,6 +178,7 @@ app/Atelier/scripts/atelier-doctor status --json
 app/Atelier/scripts/atelier-doctor watch --interval 1
 app/Atelier/scripts/atelier-doctor probe main
 app/Atelier/scripts/atelier-doctor probe editor
+app/Atelier/scripts/atelier-doctor probe chrome
 app/Atelier/scripts/atelier-doctor probe editor-scroll --delta 400 --restore
 app/Atelier/scripts/atelier-doctor capture --seconds 3
 ```
@@ -278,6 +279,9 @@ If `selectedTabKind` is `terminal`, an unattached editor and zero editor geometr
 | `editor` | Fresh selected-editor snapshot was read without forcing layout | No selected text editor or no mounted editor | Main actor could not return editor state |
 | `editor-scroll` | Origin moved toward the clamped target and cleanup ran | No editor, no scroll range, or request already at an edge | Probe could not finish before timeout |
 | `diff` | Center-tab state was read: `selectedTabKind`, `gitDiffTabCount`, and the selected diff's `diffState` | No active workspace | Main actor could not return tab state |
+| `chrome` | Window chrome was read: `selectedSidebarTab`, `showsSidebar`, `showsInspector`, `layoutMode`, `sessionCount`, `sessionsInSync` | Not normally expected | Main actor could not return chrome state |
+
+For `chrome`, read `hasAppliedInitialLayout` before the panel flags: `false` means no workspace has resolved a responsive layout yet, so the flags are still the seeded profile preference. `sessionsInSync` is false only when a mounted session disagrees with the shared owner, which means panel or sidebar-tab state leaked back to a single workspace.
 
 For `diff`, read `diffState` before the counts. Only `loaded` carries `lineCount`, `hiddenLineCount`, `additions`, `deletions`, and `showsTruncationFooter`; `showsFullDiff` reports whether the reader expanded a capped diff. A `hiddenLineCount` above zero with `showsTruncationFooter` true means the truncation footer is on screen, so diff UI state needs no accessibility-tree walk.
 
@@ -434,7 +438,7 @@ Pull requests should include a short problem statement, implementation summary, 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **atelier** (11916 symbols, 69363 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **atelier** (12096 symbols, 71991 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

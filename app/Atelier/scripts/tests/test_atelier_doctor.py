@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 from types import SimpleNamespace
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "atelier-doctor"
@@ -115,6 +115,40 @@ class AtelierDoctorTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 code = doctor.command_probe(args)
         self.assertEqual(code, 0)
+
+    def test_chrome_probe_writes_a_request_and_reports_panels(self):
+        request_id = uuid.UUID("2f1c9d0e-7b64-4d21-9a5f-0c8e2b3a4d55")
+        response = {
+            "schemaVersion": 1,
+            "id": str(request_id),
+            "command": "chrome",
+            "status": "ok",
+            "result": {
+                "selectedSidebarTab": "Git",
+                "showsSidebar": True,
+                "showsInspector": False,
+                "sessionCount": 2,
+                "sessionsInSync": True,
+            },
+        }
+        (self.runtime / "response.json").write_text(json.dumps(response), encoding="utf-8")
+        args = SimpleNamespace(probe_command="chrome", delta=400, restore=False)
+        with mock.patch.object(doctor, "load_status", return_value=({"pid": 42}, 0)), mock.patch.object(
+            doctor, "runtime_directory", return_value=self.runtime
+        ), mock.patch.object(doctor.uuid, "uuid4", return_value=request_id):
+            stream = io.StringIO()
+            with redirect_stdout(stream):
+                code = doctor.command_probe(args)
+        request = json.loads((self.runtime / "request.json").read_text(encoding="utf-8"))
+        self.assertEqual(code, 0)
+        self.assertEqual(request["command"], "chrome")
+        self.assertEqual(request["arguments"], {})
+        self.assertEqual(json.loads(stream.getvalue())["result"]["selectedSidebarTab"], "Git")
+
+    def test_probe_rejects_an_unknown_command(self):
+        parser = doctor.build_parser()
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
+            parser.parse_args(["probe", "sidebar"])
 
 
 if __name__ == "__main__":

@@ -83,6 +83,64 @@ struct WorkspaceChromeSharedStateTests {
         #expect(second.chrome.explorerRevealRequest == nil)
     }
 
+    @Test("Chrome probe reports the panels every mounted workspace reads")
+    func chromeProbeReportsSharedPanels() async throws {
+        #expect(RuntimeProbeCommand(rawValue: "chrome") == .chrome)
+        let first = temporaryChromeDirectory("chrome-probe-a")
+        let second = temporaryChromeDirectory("chrome-probe-b")
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        let model = AppModel(environment: AppEnvironment(
+            persistence: WorkspacePersistenceService(
+                fileURL: temporaryChromeDirectory("chrome-probe-state")
+                    .appendingPathComponent("state.json")
+            ),
+            makeWorkspaceAccess: { WorkspaceAccessController() },
+            openFolderPanel: OpenFolderPanel(),
+            windowController: WindowController()
+        ))
+        defer { model.stop() }
+
+        try model.openWorkspace(
+            WorkspaceState(path: first.path, bookmark: nil, lastOpenedAt: .now)
+        )
+        try model.openWorkspace(
+            WorkspaceState(path: second.path, bookmark: nil, lastOpenedAt: .now)
+        )
+        model.chromeShared.applyInitialLayout(.wide)
+        model.chromeShared.selectedSidebarTab = .sourceControl
+
+        let response = await model.handleRuntimeProbe(
+            RuntimeProbeRequest(
+                schemaVersion: 1,
+                id: UUID(),
+                command: .chrome,
+                arguments: [:],
+                requestedAt: "2026-08-02T00:00:00Z"
+            )
+        )
+
+        #expect(response.status == "ok")
+        #expect(response.result["selectedSidebarTab"] == .string("Git"))
+        #expect(response.result["layoutMode"] == .string("wide"))
+        #expect(response.result["hasAppliedInitialLayout"] == .boolean(true))
+        #expect(response.result["sessionCount"] == .integer(2))
+        #expect(response.result["sessionsInSync"] == .boolean(true))
+        #expect(
+            response.result["showsSidebar"]
+                == .boolean(model.chromeShared.panels.showsSidebar)
+        )
+        #expect(
+            response.result["showsInspector"]
+                == .boolean(model.chromeShared.panels.showsInspector)
+        )
+    }
+
+    private func temporaryChromeDirectory(_ name: String) -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("atelier-\(name)-\(UUID().uuidString)", isDirectory: true)
+    }
+
     private func makeSession(_ path: String, shared: WorkspaceChromeSharedState) -> WorkspaceSession {
         WorkspaceSession(
             state: WorkspaceState(

@@ -4,10 +4,16 @@ import Foundation
 @MainActor
 extension AppModel {
     func runtimeDiagnosticsSnapshot() -> RuntimeMainSnapshot {
-        guard let workspace else { return RuntimeMainSnapshot() }
+        let chrome = runtimeChromeSnapshot()
+        guard let workspace else {
+            var empty = RuntimeMainSnapshot()
+            empty.chrome = chrome
+            return empty
+        }
         var snapshot = workspace.terminalTabs.runtimeDiagnosticsSnapshot(
             workspaceRoot: workspace.rootURL
         )
+        snapshot.chrome = chrome
         snapshot.fileTree = RuntimeFileTreeMetricsStore.shared.snapshot(
             rootPath: workspace.rootURL.standardizedFileURL.path
         )
@@ -76,6 +82,24 @@ extension AppModel {
                 break
             }
             response = ("ok", [:], enrichedRuntimeEditorSnapshot(editorSession), nil)
+        case .chrome:
+            let chrome = runtimeChromeSnapshot()
+            response = (
+                "ok",
+                [
+                    "selectedSidebarTab": .string(chrome.selectedSidebarTab),
+                    "showsSidebar": .boolean(chrome.showsSidebar),
+                    "showsInspector": .boolean(chrome.showsInspector),
+                    "restoresSidebarAfterInspector":
+                        .boolean(chrome.restoresSidebarAfterInspector),
+                    "layoutMode": .string(chrome.layoutMode),
+                    "hasAppliedInitialLayout": .boolean(chrome.hasAppliedInitialLayout),
+                    "sessionCount": .integer(chrome.sessionCount),
+                    "sessionsInSync": .boolean(chrome.sessionsInSync)
+                ],
+                nil,
+                nil
+            )
         case .diff:
             guard let tabs = workspace?.terminalTabs else {
                 response = (
@@ -154,6 +178,33 @@ extension AppModel {
             result["diffState"] = .string("failed")
         }
         return result
+    }
+
+    /// Read-only view of the window chrome. Reads the shared owner directly and
+    /// compares every mounted session against it, so a workspace switch that
+    /// moved a panel or the sidebar tab would show as `sessionsInSync: false`
+    /// without driving the accessibility tree.
+    private func runtimeChromeSnapshot() -> RuntimeChromeSnapshot {
+        let sessions = liveSessions
+        let expected = chromeShared.layoutProfilePanelState
+        return RuntimeChromeSnapshot(
+            selectedSidebarTab: chromeShared.selectedSidebarTab.rawValue,
+            showsSidebar: chromeShared.panels.showsSidebar,
+            showsInspector: chromeShared.panels.showsInspector,
+            restoresSidebarAfterInspector: chromeShared.panels.restoresSidebarAfterInspector,
+            layoutMode: Self.layoutModeName(chromeShared.currentLayoutMode),
+            hasAppliedInitialLayout: chromeShared.hasAppliedInitialLayout,
+            sessionCount: sessions.count,
+            sessionsInSync: sessions.allSatisfy { $0.chrome.layoutProfilePanelState == expected }
+        )
+    }
+
+    private static func layoutModeName(_ mode: WorkspaceLayoutMode) -> String {
+        switch mode {
+        case .compact: "compact"
+        case .standard: "standard"
+        case .wide: "wide"
+        }
     }
 
     private func enrichedRuntimeEditorSnapshot(

@@ -40,6 +40,13 @@ struct RuntimeDiagnosticsTests {
                 relativeRootName: "atelier",
                 selectedFileRelativePath: "Sources/File.swift"
             ),
+            chrome: RuntimeChromeSnapshot(
+                selectedSidebarTab: "Git",
+                showsSidebar: true,
+                layoutMode: "wide",
+                hasAppliedInitialLayout: true,
+                sessionCount: 2
+            ),
             editor: RuntimeEditorSnapshot(contentBytes: 42, lineCount: 2),
             git: GitCommandQueueSnapshot(
                 activeCount: 2,

@@ -360,7 +360,10 @@ def build_parser() -> argparse.ArgumentParser:
     capture.set_defaults(handler=command_capture)
 
     probe = subcommands.add_parser("probe")
-    probe.add_argument("probe_command", choices=("main", "editor", "editor-scroll", "diff"))
+    probe.add_argument(
+        "probe_command",
+        choices=("main", "editor", "editor-scroll", "diff", "chrome"),
+    )
     probe.add_argument("--delta", type=float, default=400.0)
     probe.add_argument("--restore", action="store_true")
     probe.set_defaults(handler=command_probe)

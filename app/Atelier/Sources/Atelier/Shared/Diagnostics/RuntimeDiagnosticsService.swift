@@ -352,6 +352,7 @@ nonisolated final class RuntimeDiagnosticsService: @unchecked Sendable {
             process: processSnapshot,
             mainThread: mainThread,
             workspace: mainSnapshot.workspace,
+            chrome: mainSnapshot.chrome,
             editor: editor,
             git: GitCommandExecutor.shared.snapshot(),
             fileTree: mainSnapshot.fileTree,
