@@ -169,7 +169,7 @@ enum AtelierTypography {
     // Typographic scale: micro < caption < label < body < uiSize < headline < display.
     static let codeFontFamily = "JetBrains Mono"
     static let codeFontWeight = NSFont.Weight.regular
-    static let codeFontLigaturesEnabled = true
+    static private(set) var codeFontLigaturesEnabled = true
     static let micro: CGFloat = 11
     static let caption: CGFloat = 12
     static let label: CGFloat = 12.5
@@ -186,6 +186,17 @@ enum AtelierTypography {
     // cache, because the two resolve to different fonts at the same size.
     private static var codeFontCache: [CGFloat: NSFont] = [:]
     private static var plainCodeFontCache: [CGFloat: NSFont] = [:]
+
+    /// The only place that flips the ligature flag, and the only place that
+    /// clears the font caches. A cached face is keyed by size alone, so the
+    /// stale entries have to go when the flag moves. `codeFont` runs on draw
+    /// and layout paths and must never clear a cache itself.
+    static func setCodeFontLigatures(_ enabled: Bool) {
+        guard codeFontLigaturesEnabled != enabled else { return }
+        codeFontLigaturesEnabled = enabled
+        codeFontCache.removeAll()
+        plainCodeFontCache.removeAll()
+    }
 
     /// - Parameter ligatures: pass `false` for an inline code run inside prose. A
     ///   contextual alternate helps in a block of code and misleads in a sentence:

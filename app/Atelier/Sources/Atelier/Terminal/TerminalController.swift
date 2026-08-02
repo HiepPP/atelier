@@ -162,6 +162,9 @@ final class TerminalController {
     private let terminal = AtelierTerminalNativeView(frame: .zero)
     private var isActive = false
     private var isClosed = false
+    /// Matches the appearance model's starting revision, because `init` already
+    /// built the terminal font from the flag that was in force at that moment.
+    private var appliedCodeFontRevision = 0
     let diagnosticID = UUID().uuidString
     let diagnosticWorkspaceRootName: String
 
@@ -273,7 +276,10 @@ final class TerminalController {
         )
     }
 
-    func updateScale(_ scale: CGFloat, displayScale: CGFloat) {
+    /// - Parameter codeFontRevision: bumped by `AtelierAppearanceModel` when the
+    ///   ligature flag flips. The face changes while the point size stays the
+    ///   same, so the revision is the only signal that the font must be re-read.
+    func updateScale(_ scale: CGFloat, displayScale: CGFloat, codeFontRevision: Int) {
         let targetSize = AtelierFontScaling.snapped(
             AtelierTypography.terminalSize * scale,
             displayScale: displayScale
@@ -281,13 +287,24 @@ final class TerminalController {
         let usesFontSmoothing = TerminalRenderingPolicy.usesFontSmoothing(
             displayScale: displayScale
         )
-        let fontChanged = abs(terminal.font.pointSize - targetSize) > 0.01
+        let sizeChanged = abs(terminal.font.pointSize - targetSize) > 0.01
         let smoothingChanged = terminal.fontSmoothing != usesFontSmoothing
-        guard fontChanged || smoothingChanged else { return }
+        let revisionChanged = appliedCodeFontRevision != codeFontRevision
+        guard sizeChanged || smoothingChanged || revisionChanged else { return }
+        appliedCodeFontRevision = codeFontRevision
+        var didChange = sizeChanged || smoothingChanged
         terminal.fontSmoothing = usesFontSmoothing
-        if fontChanged {
-            terminal.font = AtelierTypography.codeFont(size: targetSize)
+        if sizeChanged || revisionChanged {
+            let font = AtelierTypography.codeFont(size: targetSize)
+            if terminal.font != font {
+                terminal.font = font
+                didChange = true
+            }
         }
+        // A controller built after the flag already moved sees a new revision but
+        // an identical font, so nothing was applied. Redrawing then would be an
+        // invalidation with no change behind it.
+        guard didChange else { return }
         terminal.setNeedsDisplay(terminal.bounds)
         terminal.layoutSubtreeIfNeeded()
     }

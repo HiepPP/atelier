@@ -62,7 +62,26 @@ struct AtelierApp: App {
         Settings {
             AtelierSettingsView()
                 .environment(model.zoom)
+                .environment(model.appearance)
         }
+
+        MenuBarExtra(
+            "Atelier",
+            systemImage: "slider.horizontal.3",
+            isInserted: menuBarExtraVisibility
+        ) {
+            AtelierMenuBarView()
+                .environment(model.zoom)
+                .environment(model.appearance)
+        }
+        .menuBarExtraStyle(.window)
+    }
+
+    private var menuBarExtraVisibility: Binding<Bool> {
+        Binding(
+            get: { model.appearance.showsMenuBarExtra },
+            set: { model.appearance.showsMenuBarExtra = $0 }
+        )
     }
 
     @ViewBuilder
@@ -88,6 +107,7 @@ struct AtelierApp: App {
                 .background(WorkspaceWindowBridge(controller: model.windowController))
         }
         .environment(model.zoom)
+        .environment(model.appearance)
     }
 
     private func startModelIfNeeded() {
@@ -114,11 +134,14 @@ final class AtelierZoomModel {
     private(set) var isFocusMode = false
     private(set) var currentTier: DisplaySizeTier = DisplaySizing.fallbackTier
     private(set) var agentResponseTextScale = AgentResponseTextSizePolicy.defaultScale
+    private(set) var appTextScale = AtelierAppearancePolicy.defaultTextScale
+    private(set) var terminalTextScale = AtelierAppearancePolicy.defaultTextScale
+    private(set) var editorTextScale = AtelierAppearancePolicy.defaultTextScale
 
     var sizingMode: DisplaySizingMode {
         didSet {
             guard sizingMode != oldValue else { return }
-            UserDefaults.standard.set(sizingMode.rawValue, forKey: DisplaySizing.settingsKey)
+            defaults.set(sizingMode.rawValue, forKey: DisplaySizing.settingsKey)
         }
     }
 
@@ -135,18 +158,42 @@ final class AtelierZoomModel {
     private var focusModeIsAutomatic = false
     private weak var responderBeforeZoom: NSResponder?
     private let windowController: WindowController
+    @ObservationIgnored private let defaults: UserDefaults
     private var manualScaleByDisplay: [String: CGFloat] = [:]
     private var currentDisplayKey = DisplaySizing.fallbackTier.rawValue
+    private var hasResolvedDisplayKey = false
 
-    init(windowController: WindowController) {
+    init(windowController: WindowController, defaults: UserDefaults = .standard) {
         self.windowController = windowController
-        let stored = UserDefaults.standard.string(forKey: DisplaySizing.settingsKey)
+        self.defaults = defaults
+        let stored = defaults.string(forKey: DisplaySizing.settingsKey)
         sizingMode = stored.flatMap(DisplaySizingMode.init(rawValue:)) ?? .automatic
 
-        if let storedTextScale = UserDefaults.standard.object(
+        if let storedTextScale = defaults.object(
             forKey: Self.agentResponseTextScaleKey
         ) as? Double {
             agentResponseTextScale = AgentResponseTextSizePolicy.clamped(CGFloat(storedTextScale))
+        }
+
+        appTextScale = Self.storedTextScale(
+            forKey: AtelierAppearancePolicy.appTextScaleKey,
+            in: defaults
+        )
+        terminalTextScale = Self.storedTextScale(
+            forKey: AtelierAppearancePolicy.terminalTextScaleKey,
+            in: defaults
+        )
+        editorTextScale = Self.storedTextScale(
+            forKey: AtelierAppearancePolicy.editorTextScaleKey,
+            in: defaults
+        )
+
+        if let storedZoom = defaults.dictionary(
+            forKey: AtelierAppearancePolicy.manualZoomByDisplayKey
+        ) as? [String: Double] {
+            manualScaleByDisplay = storedZoom.mapValues { value in
+                Self.clampedZoomScale(CGFloat(value))
+            }
         }
 
         let handler: @Sendable (Notification) -> Void = { [weak self] _ in
@@ -160,9 +207,11 @@ final class AtelierZoomModel {
 
     var canZoomIn: Bool { requestedScale < Self.maximumScale }
     var canZoomOut: Bool { requestedScale > Self.minimumScale }
-    var chromeScale: CGFloat { min(renderScale, Self.chromeMaximumScale) }
-    var sidebarScale: CGFloat { min(renderScale, Self.sidebarMaximumScale) }
-    var contentScale: CGFloat { renderScale }
+    var chromeScale: CGFloat { min(renderScale * appTextScale, Self.chromeMaximumScale) }
+    var sidebarScale: CGFloat { min(renderScale * appTextScale, Self.sidebarMaximumScale) }
+    var contentScale: CGFloat { renderScale * appTextScale }
+    var terminalScale: CGFloat { renderScale * terminalTextScale }
+    var editorScale: CGFloat { renderScale * editorTextScale }
     var manualScale: CGFloat { requestedScale }
     var layoutProfileState: LayoutProfileZoomState {
         let focusMode: LayoutProfileFocusMode
@@ -196,22 +245,65 @@ final class AtelierZoomModel {
     func updateForCurrentDisplay() {
         let screen = windowController.currentScreen()
         let key = DisplaySizing.displayKey(for: screen)
-        if key != currentDisplayKey {
+        if !hasResolvedDisplayKey {
+            // The seed key is a placeholder, not a display the user ever zoomed.
+            // Adopt the first resolved key without saving the seed and without a
+            // write, so no phantom entry reaches disk and a key that happens to
+            // equal the seed still restores its stored zoom.
+            hasResolvedDisplayKey = true
+            currentDisplayKey = key
+            restoreManualScale(forDisplayKey: key)
+        } else if key != currentDisplayKey {
             manualScaleByDisplay[currentDisplayKey] = requestedScale
             currentDisplayKey = key
-            let restored = manualScaleByDisplay[key] ?? 1
-            requestedScale = restored
-            if scale != restored { scale = restored }
+            restoreManualScale(forDisplayKey: key)
+            persistManualZoom()
         }
         let tier = DisplaySizing.detectedTier(for: screen)
         if tier != currentTier { currentTier = tier }
+    }
+
+    private func restoreManualScale(forDisplayKey key: String) {
+        let restored = manualScaleByDisplay[key] ?? 1
+        requestedScale = restored
+        if scale != restored { scale = restored }
     }
 
     func setAgentResponseTextScale(_ scale: CGFloat) {
         let clamped = AgentResponseTextSizePolicy.clamped(scale)
         guard clamped != agentResponseTextScale else { return }
         agentResponseTextScale = clamped
-        UserDefaults.standard.set(Double(clamped), forKey: Self.agentResponseTextScaleKey)
+        defaults.set(Double(clamped), forKey: Self.agentResponseTextScaleKey)
+    }
+
+    func setAppTextScale(_ scale: CGFloat) {
+        let clamped = AtelierAppearancePolicy.clampedTextScale(scale)
+        guard clamped != appTextScale else { return }
+        appTextScale = clamped
+        defaults.set(Double(clamped), forKey: AtelierAppearancePolicy.appTextScaleKey)
+    }
+
+    func setTerminalTextScale(_ scale: CGFloat) {
+        let clamped = AtelierAppearancePolicy.clampedTextScale(scale)
+        guard clamped != terminalTextScale else { return }
+        terminalTextScale = clamped
+        defaults.set(Double(clamped), forKey: AtelierAppearancePolicy.terminalTextScaleKey)
+    }
+
+    func setEditorTextScale(_ scale: CGFloat) {
+        let clamped = AtelierAppearancePolicy.clampedTextScale(scale)
+        guard clamped != editorTextScale else { return }
+        editorTextScale = clamped
+        defaults.set(Double(clamped), forKey: AtelierAppearancePolicy.editorTextScaleKey)
+    }
+
+    /// Return every appearance multiplier to its default, then hand zoom back to
+    /// the existing reset so the focus mode rules stay in one place.
+    func resetAppearance() {
+        setAppTextScale(AtelierAppearancePolicy.defaultTextScale)
+        setEditorTextScale(AtelierAppearancePolicy.defaultTextScale)
+        setTerminalTextScale(AtelierAppearancePolicy.defaultTextScale)
+        reset()
     }
 
     func zoomIn() {
@@ -254,10 +346,10 @@ final class AtelierZoomModel {
         if sizingMode != state.sizingMode {
             sizingMode = state.sizingMode
         }
-        let clamped = min(Self.maximumScale, max(Self.minimumScale, state.manualScale))
-        let nextScale = (clamped * 100).rounded() / 100
+        let nextScale = Self.clampedZoomScale(state.manualScale)
         requestedScale = nextScale
         manualScaleByDisplay[currentDisplayKey] = nextScale
+        persistManualZoom()
         if scale != nextScale {
             scale = nextScale
         }
@@ -270,8 +362,7 @@ final class AtelierZoomModel {
     }
 
     private func requestScale(_ value: CGFloat) {
-        let clamped = min(Self.maximumScale, max(Self.minimumScale, value))
-        requestedScale = (clamped * 100).rounded() / 100
+        requestedScale = Self.clampedZoomScale(value)
 
         if settleTask == nil {
             responderBeforeZoom = windowController.currentFirstResponder()
@@ -289,10 +380,32 @@ final class AtelierZoomModel {
             if scale != requestedScale {
                 scale = requestedScale
             }
+            manualScaleByDisplay[currentDisplayKey] = requestedScale
+            persistManualZoom()
             settleTask = nil
             windowController.restoreFirstResponder(responderBeforeZoom)
             responderBeforeZoom = nil
         }
+    }
+
+    /// One write per settled zoom, not one per step, so a zoom burst still costs
+    /// a single defaults round trip.
+    private func persistManualZoom() {
+        let stored = manualScaleByDisplay.mapValues { Double($0) }
+        defaults.set(stored, forKey: AtelierAppearancePolicy.manualZoomByDisplayKey)
+    }
+
+    private static func clampedZoomScale(_ value: CGFloat) -> CGFloat {
+        guard value.isFinite else { return 1 }
+        let clamped = min(maximumScale, max(minimumScale, value))
+        return (clamped * 100).rounded() / 100
+    }
+
+    private static func storedTextScale(forKey key: String, in defaults: UserDefaults) -> CGFloat {
+        guard let stored = defaults.object(forKey: key) as? Double else {
+            return AtelierAppearancePolicy.defaultTextScale
+        }
+        return AtelierAppearancePolicy.clampedTextScale(CGFloat(stored))
     }
 
     private func updateFocusMode(for scale: CGFloat) {

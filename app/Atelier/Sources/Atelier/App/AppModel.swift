@@ -6,6 +6,7 @@ import Observation
 @Observable
 final class AppModel {
     let zoom: AtelierZoomModel
+    let appearance: AtelierAppearanceModel
     let windowController: WindowController
     let layoutProfiles: LayoutProfileStore
     let threadsPanel = ThreadsPanelModel()
@@ -81,7 +82,12 @@ final class AppModel {
     init(environment: AppEnvironment = .live()) {
         self.environment = environment
         windowController = environment.windowController
-        zoom = AtelierZoomModel(windowController: environment.windowController)
+        let settingsDefaults = environment.layoutProfileDefaults ?? .standard
+        zoom = AtelierZoomModel(
+            windowController: environment.windowController,
+            defaults: settingsDefaults
+        )
+        appearance = AtelierAppearanceModel(defaults: settingsDefaults)
         layoutProfiles = LayoutProfileStore(defaults: environment.layoutProfileDefaults)
         let initialProfile = layoutProfiles.selectedProfile.snapshot
         chromeShared.applyLayoutProfilePanels(initialProfile.panels)

@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             )
             observeApplicationVisibility()
+            MenuBarPanelObserver.shared.startClickMonitor()
         }
         guard watchdogEnabled else { return }
         DefaultWatchdogResponder.requestNotificationAuthorization()

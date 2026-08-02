@@ -1224,6 +1224,7 @@ struct TerminalTabs: View {
     let onCloseAgentSidecar: () -> Void
     let onToggleAgentResponseOverlayMode: () -> Void
     @Environment(AtelierZoomModel.self) private var zoom
+    @Environment(AtelierAppearanceModel.self) private var appearance
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var renameTargetID: UUID?
     @State private var tabFrames: [UUID: CGRect] = [:]
@@ -1462,7 +1463,8 @@ struct TerminalTabs: View {
                         )
                         TerminalView(
                             controller: session.controller,
-                            scale: zoom.contentScale,
+                            scale: zoom.terminalScale,
+                            codeFontRevision: appearance.codeFontRevision,
                             isActive: isActive
                         )
                         .id(tab.id)
@@ -1489,7 +1491,7 @@ struct TerminalTabs: View {
                         }
                         .id(tab.id)
                         .background(AtelierTheme.editor)
-                        .environment(\.atelierZoomScale, zoom.contentScale)
+                        .environment(\.atelierZoomScale, zoom.editorScale)
                         .opacity(isActive ? 1 : 0)
                         .allowsHitTesting(isActive)
                         .disabled(!isActive)

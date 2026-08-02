@@ -95,7 +95,16 @@ extension AppModel {
                     "layoutMode": .string(chrome.layoutMode),
                     "hasAppliedInitialLayout": .boolean(chrome.hasAppliedInitialLayout),
                     "sessionCount": .integer(chrome.sessionCount),
-                    "sessionsInSync": .boolean(chrome.sessionsInSync)
+                    "sessionsInSync": .boolean(chrome.sessionsInSync),
+                    "menuBarInsertionRequested":
+                        .boolean(chrome.menuBar?.insertionRequested ?? false),
+                    "menuBarStatusItemWindowCount":
+                        .integer(chrome.menuBar?.statusItemWindowCount ?? 0),
+                    "menuBarStatusItemVisible":
+                        .boolean(chrome.menuBar?.statusItemVisible ?? false),
+                    "menuBarStatusItemMinX": .double(chrome.menuBar?.statusItemMinX ?? 0),
+                    "menuBarHidesBehindNotch":
+                        .boolean(chrome.menuBar?.hidesBehindNotch ?? false)
                 ],
                 nil,
                 nil
@@ -195,8 +204,71 @@ extension AppModel {
             layoutMode: Self.layoutModeName(chromeShared.currentLayoutMode),
             hasAppliedInitialLayout: chromeShared.hasAppliedInitialLayout,
             sessionCount: sessions.count,
-            sessionsInSync: sessions.allSatisfy { $0.chrome.layoutProfilePanelState == expected }
+            sessionsInSync: sessions.allSatisfy { $0.chrome.layoutProfilePanelState == expected },
+            menuBar: runtimeMenuBarSnapshot()
         )
+    }
+
+    /// Read-only view of the menu bar item. SwiftUI hands back no reference to
+    /// the `MenuBarExtra` status item, so this reads the status bar window the
+    /// system created for it. Property reads only: no layout, no window ordering.
+    private func runtimeMenuBarSnapshot() -> RuntimeMenuBarSnapshot {
+        var snapshot = RuntimeMenuBarSnapshot()
+        snapshot.insertionRequested = appearance.showsMenuBarExtra
+
+        let allWindows = NSApplication.shared.windows
+        let statusWindows = allWindows.filter { window in
+            window.className.contains("StatusBarWindow")
+        }
+        snapshot.statusItemWindowCount = statusWindows.count
+        if let panel = allWindows.first(where: { $0.className.contains("MenuBarExtra") }) {
+            MenuBarPanelObserver.shared.observe(panel)
+        }
+        let panelObserver = MenuBarPanelObserver.shared
+        snapshot.statusItemClickCount = panelObserver.statusItemClickCount
+        snapshot.panelShownCount = panelObserver.shownCount
+        snapshot.panelHiddenCount = panelObserver.hiddenCount
+        snapshot.panelLastShownOnActiveSpace = panelObserver.lastShownOnActiveSpace
+        snapshot.panelLastShownWasKey = panelObserver.lastShownWasKey
+
+        snapshot.windows = allWindows
+            .filter { !$0.className.contains("StatusBarWindow") }
+            .prefix(RuntimeWindowMetric.capacity)
+            .map { window in
+                RuntimeWindowMetric(
+                    className: window.className,
+                    visible: window.isVisible,
+                    onActiveSpace: window.isOnActiveSpace,
+                    level: window.level.rawValue,
+                    minX: window.frame.minX,
+                    minY: window.frame.minY,
+                    width: window.frame.width,
+                    height: window.frame.height
+                )
+            }
+
+        if let screen = NSScreen.main {
+            snapshot.menuBarScreenWidth = screen.frame.width
+            // Both auxiliary areas exist only on a display with a notch. The
+            // notch spans the gap between them.
+            if let leading = screen.auxiliaryTopLeftArea,
+               let trailing = screen.auxiliaryTopRightArea {
+                snapshot.notchLeadingMaxX = leading.maxX
+                snapshot.notchTrailingMinX = trailing.minX
+            }
+        }
+
+        guard let window = statusWindows.first else { return snapshot }
+        let frame = window.frame
+        snapshot.statusItemVisible = window.isVisible
+        snapshot.statusItemOnActiveSpace = window.isOnActiveSpace
+        snapshot.statusItemMinX = frame.minX
+        snapshot.statusItemWidth = frame.width
+        if snapshot.notchTrailingMinX > snapshot.notchLeadingMaxX {
+            snapshot.hidesBehindNotch = frame.minX < snapshot.notchTrailingMinX
+                && frame.maxX > snapshot.notchLeadingMaxX
+        }
+        return snapshot
     }
 
     private static func layoutModeName(_ mode: WorkspaceLayoutMode) -> String {

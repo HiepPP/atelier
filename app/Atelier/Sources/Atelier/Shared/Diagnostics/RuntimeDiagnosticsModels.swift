@@ -174,6 +174,52 @@ nonisolated struct RuntimeChromeSnapshot: Codable, Sendable, Equatable {
     var hasAppliedInitialLayout = false
     var sessionCount = 0
     var sessionsInSync = true
+    /// Optional so an older snapshot file still decodes.
+    var menuBar: RuntimeMenuBarSnapshot?
+}
+
+/// Menu bar item state. SwiftUI owns the `MenuBarExtra` status item and exposes
+/// no handle to it, so the only honest read is the status bar window it creates.
+/// Three cases need to stay apart: the app asked for no item (`insertionRequested`
+/// is false), the app asked for one and got none (`statusItemWindowCount` is 0),
+/// and the item exists but the system hid it behind the notch
+/// (`hidesBehindNotch`). A screenshot cannot tell those apart; these fields can.
+nonisolated struct RuntimeMenuBarSnapshot: Codable, Sendable, Equatable {
+    var insertionRequested = false
+    var statusItemWindowCount = 0
+    var statusItemVisible = false
+    var statusItemMinX = 0.0
+    var statusItemWidth = 0.0
+    var menuBarScreenWidth = 0.0
+    var notchLeadingMaxX = 0.0
+    var notchTrailingMinX = 0.0
+    var hidesBehindNotch = false
+    var statusItemOnActiveSpace = false
+    /// Counted by KVO, so a panel that opens and closes between two snapshots
+    /// still shows up here.
+    var statusItemClickCount = 0
+    var panelShownCount = 0
+    var panelHiddenCount = 0
+    var panelLastShownOnActiveSpace: Bool?
+    var panelLastShownWasKey: Bool?
+    /// Every app window that is not the status bar window, capped. A panel that
+    /// is visible with `onActiveSpace` false is open on another Space, which
+    /// reads to the user as a click that did nothing.
+    var windows: [RuntimeWindowMetric] = []
+}
+
+/// Class name and placement of one app window. Carries no title and no content.
+nonisolated struct RuntimeWindowMetric: Codable, Sendable, Equatable {
+    static let capacity = 8
+
+    var className = ""
+    var visible = false
+    var onActiveSpace = false
+    var level = 0
+    var minX = 0.0
+    var minY = 0.0
+    var width = 0.0
+    var height = 0.0
 }
 
 nonisolated struct RuntimeEditorSnapshot: Codable, Sendable, Equatable {

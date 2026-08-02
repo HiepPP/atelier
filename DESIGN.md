@@ -244,6 +244,12 @@ Type rules:
 - Use semibold for hierarchy. Avoid broad use of bold text.
 - Snap scaled sizes to device pixels to keep text crisp.
 
+Three independent text scales multiply the tokens: app text, editor text, and terminal text. Each
+scale stays between 0.8 and 1.6 and moves in 0.05 steps. The default is 1.0. App text scales
+interface tokens. Editor text scales `editorSize`. Terminal text scales `terminalSize`. Code
+ligatures are a user setting. The terminal applies a change at once. The editor and the Markdown
+preview apply it the next time the file opens.
+
 ## Display Sizing and Zoom
 
 Display sizing sets a base scale. User zoom is applied on top.
@@ -261,8 +267,23 @@ Rules:
 - Keep manual zoom between `0.8` and `2.0`, in `0.1` steps.
 - Cap chrome scaling at `1.2` and sidebar scaling at `1.5`.
 - Allow content to use the full render scale.
-- Store manual zoom per display during the app session.
+- Store manual zoom per display and restore it on the next launch, under
+  `atelier.manualZoomByDisplay.v1`.
+- Persist the app, editor, and terminal text scales under `atelier.appTextScale`,
+  `atelier.editorTextScale`, and `atelier.terminalTextScale`.
+- Persist code ligatures under `atelier.codeLigaturesEnabled` and menu bar visibility under
+  `atelier.showsMenuBarExtra`.
 - Enter focus mode automatically when zoom exceeds the side-panel threshold.
+
+Derived scales:
+
+| Derived value | Formula |
+|---|---|
+| Chrome scale | `min(renderScale * appTextScale, 1.2)` |
+| Sidebar scale | `min(renderScale * appTextScale, 1.5)` |
+| Content scale | `renderScale * appTextScale` |
+| Terminal scale | `renderScale * terminalTextScale` |
+| Editor scale | `renderScale * editorTextScale` |
 
 ## Layout Profiles
 
@@ -1340,6 +1361,18 @@ The five background features, all read-only and cancellable:
 - Use serif section titles with accent color.
 - Keep explanations short and secondary.
 - Use native Picker, Toggle, and shortcut recorder controls.
+- Add an Appearance section that carries the same controls as the menu bar panel.
+- Add a "Reset appearance" action that returns zoom and all three text scales to their defaults.
+
+### Menu Bar
+
+- Atelier shows one menu bar item with the `slider.horizontal.3` symbol.
+- The item opens a panel, not a plain menu list. Use a fixed 300-point width.
+- The panel groups rows into Text Size, Zoom, Display, Code, Agent, System, and a footer action row.
+- The panel must open on the Space the user is on, even when no Atelier window lives there.
+- Every row uses a native control with the pointer cursor.
+- The panel repeats controls that also exist in the Settings window. Both read one model.
+- The user can hide the item from the Settings window. Hiding it never changes stored values.
 
 ## Keyboard Rules
 
